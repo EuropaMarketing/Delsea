@@ -90,7 +90,7 @@ export default function MyBookings() {
       setLoading(false)
     }
     load()
-  }, [user, navigate])
+  }, [user])
 
   async function handleCancel(bookingId: string) {
     setCancelling(bookingId)
