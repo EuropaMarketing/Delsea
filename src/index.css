@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+:root {
+  --color-primary: #7C3AED;
+  --color-secondary: #F59E0B;
+  --color-background: #FAFAFA;
+  --color-text: #111827;
+  --font-family: 'Inter', system-ui, sans-serif;
+  --border-radius: 12px;
+  --border-radius-sm: 6px;
+  --border-radius-lg: 18px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--color-background);
+  color: var(--color-text);
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Brand utility classes */
+.btn-primary {
+  background-color: var(--color-primary);
+  color: #fff;
+  border-radius: var(--border-radius);
+  transition: filter 0.15s;
+}
+.btn-primary:hover {
+  filter: brightness(0.88);
+}
+.btn-secondary {
+  background-color: var(--color-secondary);
+  color: #fff;
+  border-radius: var(--border-radius);
+}
+.brand-card {
+  border-radius: var(--border-radius);
+}
+.brand-text-primary { color: var(--color-primary); }
+.brand-bg-primary   { background-color: var(--color-primary); }
+.brand-border       { border-color: var(--color-primary); }
+.brand-ring:focus   { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+/* Time-slot grid */
+.slot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }

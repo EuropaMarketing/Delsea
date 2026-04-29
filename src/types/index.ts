@@ -1,0 +1,81 @@
+export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed'
+
+export interface Business {
+  id: string
+  name: string
+  config: Record<string, unknown>
+  created_at: string
+}
+
+export interface Staff {
+  id: string
+  business_id: string
+  name: string
+  role: string
+  avatar_url: string | null
+  bio: string | null
+}
+
+export interface Service {
+  id: string
+  business_id: string
+  name: string
+  description: string | null
+  duration_minutes: number
+  price: number
+  category: string
+  is_active: boolean
+}
+
+export interface Availability {
+  id: string
+  staff_id: string
+  day_of_week: number
+  start_time: string
+  end_time: string
+}
+
+export interface Booking {
+  id: string
+  business_id: string
+  customer_id: string
+  staff_id: string
+  service_id: string
+  starts_at: string
+  ends_at: string
+  status: BookingStatus
+  notes: string | null
+  created_at: string
+  staff?: Staff
+  service?: Service
+  customer?: Customer
+}
+
+export interface Customer {
+  id: string
+  business_id: string
+  user_id: string | null
+  name: string
+  email: string
+  phone: string | null
+  created_at: string
+}
+
+export interface BlockedTime {
+  id: string
+  staff_id: string
+  starts_at: string
+  ends_at: string
+  reason: string | null
+}
+
+export interface BookingDraft {
+  serviceId: string | null
+  staffId: string | null
+  date: Date | null
+  timeSlot: string | null
+  customerName: string
+  customerEmail: string
+  customerPhone: string
+  notes: string
+}
