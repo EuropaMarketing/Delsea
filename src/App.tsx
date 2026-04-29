@@ -9,6 +9,8 @@ import { BookingLayout } from '@/components/layout/BookingLayout'
 import { AdminLayout } from '@/components/layout/AdminLayout'
 import { ProtectedRoute } from '@/components/layout/ProtectedRoute'
 
+import Landing from '@/pages/Landing'
+
 // Booking flow pages
 import ServiceSelection from '@/pages/booking/ServiceSelection'
 import StaffSelection from '@/pages/booking/StaffSelection'
@@ -31,9 +33,12 @@ function AppRoutes() {
 
   return (
     <Routes>
+      {/* Landing */}
+      <Route path="/" element={<Landing />} />
+
       {/* Public booking flow */}
       <Route
-        path="/"
+        path="/book"
         element={
           <BookingLayout>
             <ServiceSelection />

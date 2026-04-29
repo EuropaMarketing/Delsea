@@ -31,7 +31,7 @@ export default function CustomerDetails() {
   const staffMember = staff.find((s) => s.id === draft.staffId)
 
   if (!draft.serviceId || !draft.date || !draft.timeSlot) {
-    navigate('/')
+    navigate('/book')
     return null
   }
 

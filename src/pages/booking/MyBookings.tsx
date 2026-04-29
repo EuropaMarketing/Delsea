@@ -55,7 +55,7 @@ function SignInPrompt() {
           <Button loading={loading} onClick={handleSend}>Send Link</Button>
         </div>
       )}
-      <Link to="/" className="mt-6 text-sm text-gray-400 hover:text-gray-600">
+      <Link to="/book" className="mt-6 text-sm text-gray-400 hover:text-gray-600">
         Book without an account →
       </Link>
     </div>
@@ -163,7 +163,7 @@ export default function MyBookings() {
           <h1 className="text-2xl font-bold text-gray-900">My Bookings</h1>
           <p className="text-sm text-gray-500 mt-1">Manage your upcoming and past appointments.</p>
         </div>
-        <Link to="/">
+        <Link to="/book">
           <Button size="sm">New Booking</Button>
         </Link>
       </div>
@@ -172,7 +172,7 @@ export default function MyBookings() {
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <CalendarClock className="h-10 w-10 text-gray-300 mb-3" />
           <p className="font-medium text-gray-500">No bookings yet.</p>
-          <Link to="/" className="mt-4">
+          <Link to="/book" className="mt-4">
             <Button>Book Now</Button>
           </Link>
         </div>

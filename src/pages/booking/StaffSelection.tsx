@@ -34,7 +34,7 @@ export default function StaffSelection() {
   }, [setStaffList, staff.length])
 
   if (!draft.serviceId) {
-    navigate('/')
+    navigate('/book')
     return null
   }
 
@@ -98,7 +98,7 @@ export default function StaffSelection() {
       </div>
 
       <div className="mt-6 flex justify-between">
-        <Button variant="secondary" onClick={() => navigate('/')}>
+        <Button variant="secondary" onClick={() => navigate('/book')}>
           Back
         </Button>
         <Button size="lg" onClick={handleNext}>

@@ -5,7 +5,7 @@ import brand from '@/config/brand'
 import { cn } from '@/lib/cn'
 
 const steps = [
-  { label: 'Service', path: '/' },
+  { label: 'Service', path: '/book' },
   { label: 'Staff', path: '/staff' },
   { label: 'Date & Time', path: '/datetime' },
   { label: 'Details', path: '/details' },

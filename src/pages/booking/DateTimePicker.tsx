@@ -30,7 +30,7 @@ export default function DateTimePicker() {
   const service = services.find((s) => s.id === draft.serviceId)
   const staffMember = staff.find((s) => s.id === draft.staffId)
 
-  if (!draft.serviceId) { navigate('/'); return null }
+  if (!draft.serviceId) { navigate('/book'); return null }
 
   // Load availability for the selected staff (or all staff)
   useEffect(() => {
