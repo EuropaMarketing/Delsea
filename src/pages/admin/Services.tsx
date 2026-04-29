@@ -164,12 +164,13 @@ export default function AdminServices() {
               error={errors.duration_minutes}
             />
             <Input
-              label="Price (pence/cents)"
+              label="Price (£)"
               type="number"
               min={0}
-              value={form.price}
-              onChange={(e) => setForm((f) => ({ ...f, price: parseInt(e.target.value) || 0 }))}
-              hint={formatCurrency(form.price)}
+              step="0.01"
+              value={form.price ? form.price / 100 : ''}
+              onChange={(e) => setForm((f) => ({ ...f, price: Math.round(parseFloat(e.target.value) * 100) || 0 }))}
+              placeholder="0.00"
               error={errors.price}
             />
           </div>

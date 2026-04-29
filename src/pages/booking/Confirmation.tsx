@@ -26,7 +26,7 @@ export default function Confirmation() {
   const staffMember = staff.find((s) => s.id === draft.staffId)
 
   if (!draft.serviceId || !draft.date || !draft.timeSlot || !draft.customerEmail) {
-    navigate('/')
+    navigate('/book')
     return null
   }
 
@@ -40,21 +40,15 @@ export default function Confirmation() {
     setError(null)
 
     try {
-      // Upsert customer
-      const { data: customer, error: cErr } = await supabase
-        .from('customers')
-        .upsert(
-          {
-            business_id: BUSINESS_ID,
-            user_id: user?.id ?? null,
-            name: draft.customerName,
-            email: draft.customerEmail,
-            phone: draft.customerPhone || null,
-          },
-          { onConflict: 'business_id,email', ignoreDuplicates: false },
-        )
-        .select('id')
-        .single()
+      // Find or create customer via SECURITY DEFINER function (bypasses RLS for returning guests)
+      const { data: customerId, error: cErr } = await supabase
+        .rpc('find_or_create_customer', {
+          p_business_id: BUSINESS_ID,
+          p_user_id: user?.id ?? null,
+          p_name: draft.customerName,
+          p_email: draft.customerEmail,
+          p_phone: draft.customerPhone || null,
+        })
 
       if (cErr) throw cErr
 
@@ -68,7 +62,7 @@ export default function Confirmation() {
         .from('bookings')
         .insert({
           business_id: BUSINESS_ID,
-          customer_id: customer.id,
+          customer_id: customerId,
           staff_id: resolvedStaffId,
           service_id: draft.serviceId,
           starts_at: startsAt.toISOString(),
