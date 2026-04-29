@@ -15,9 +15,16 @@ export function useAuthListener() {
       }
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session)
       if (session?.user) {
+        // Link any guest customer records to this auth user on sign-in
+        if (event === 'SIGNED_IN' && session.user.email) {
+          supabase.rpc('link_customer_to_user', {
+            p_user_id: session.user.id,
+            p_email: session.user.email,
+          })
+        }
         checkAdmin(session.user.id).then(() => setInitialized())
       } else {
         setAdmin(false)

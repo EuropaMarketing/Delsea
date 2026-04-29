@@ -72,6 +72,8 @@ export default function Confirmation() {
       if (bErr) throw bErr
 
       const ref = booking.id.slice(0, 8).toUpperCase()
+      const customerEmail = draft.customerEmail
+      const wasGuest = !user
       reset()
       navigate('/booking-confirmed', {
         replace: true,
@@ -83,7 +85,8 @@ export default function Confirmation() {
           staffName: staffMember?.name ?? null,
           startsAt: startsAt.toISOString(),
           endsAt: endsAt.toISOString(),
-          customerEmail: draft.customerEmail,
+          customerEmail,
+          isNewUser: wasGuest,
         },
       })
     } catch (err: unknown) {

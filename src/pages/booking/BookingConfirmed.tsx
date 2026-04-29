@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { format } from 'date-fns'
-import { CheckCircle2, Calendar, CalendarClock, User, Clock, PoundSterling } from 'lucide-react'
+import { CheckCircle2, Calendar, CalendarClock, User, Clock, PoundSterling, Mail } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { buildICSLink } from '@/lib/slots'
@@ -16,11 +18,13 @@ interface ConfirmedState {
   startsAt: string
   endsAt: string
   customerEmail: string
+  isNewUser: boolean
 }
 
 export default function BookingConfirmed() {
   const { state } = useLocation()
   const navigate = useNavigate()
+  const [activationSent, setActivationSent] = useState(false)
 
   if (!state?.bookingRef) {
     navigate('/book', { replace: true })
@@ -30,6 +34,18 @@ export default function BookingConfirmed() {
   const s = state as ConfirmedState
   const startsAt = new Date(s.startsAt)
   const endsAt = new Date(s.endsAt)
+
+  // Auto-send account activation magic link for new (guest) customers
+  useEffect(() => {
+    if (!s.isNewUser) return
+    supabase.auth.signInWithOtp({
+      email: s.customerEmail,
+      options: {
+        shouldCreateUser: true,
+        emailRedirectTo: `${window.location.origin}/my-bookings`,
+      },
+    }).then(() => setActivationSent(true))
+  }, [])
 
   const icsUrl = buildICSLink(
     `${s.serviceName} at ${brand.brandName}`,
@@ -60,7 +76,20 @@ export default function BookingConfirmed() {
         <p className="font-mono font-bold text-2xl text-gray-900">{s.bookingRef}</p>
       </div>
 
-      {/* Details card */}
+      {/* Account activation notice for new customers */}
+      {s.isNewUser && activationSent && (
+        <div className="mt-5 w-full max-w-sm flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3.5 text-left">
+          <Mail className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-blue-800">Activate your account</p>
+            <p className="text-xs text-blue-600 mt-0.5">
+              We've sent a sign-in link to <strong>{s.customerEmail}</strong>. Click it to access your bookings anytime — no password needed.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Booking details */}
       <Card padding="md" className="mt-6 w-full max-w-sm text-left">
         <ul className="space-y-3">
           <li className="flex items-start gap-3">

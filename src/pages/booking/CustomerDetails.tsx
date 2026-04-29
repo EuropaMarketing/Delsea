@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
-import { LogIn } from 'lucide-react'
+import { CheckCircle2, Mail, UserCircle2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
 import { useAuthStore } from '@/store/authStore'
@@ -16,19 +16,45 @@ export default function CustomerDetails() {
   const { user } = useAuthStore()
 
   const [form, setForm] = useState({
-    name: draft.customerName || user?.user_metadata?.full_name || '',
-    email: draft.customerEmail || user?.email || '',
+    name: draft.customerName || '',
+    email: draft.customerEmail || '',
     phone: draft.customerPhone || '',
     notes: draft.notes || '',
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const [showLogin, setShowLogin] = useState(false)
-  const [loginEmail, setLoginEmail] = useState('')
-  const [loginSent, setLoginSent] = useState(false)
-  const [loginLoading, setLoginLoading] = useState(false)
+
+  // Sign-in flow for returning customers
+  const [signInEmail, setSignInEmail] = useState('')
+  const [signInSent, setSignInSent] = useState(false)
+  const [signInLoading, setSignInLoading] = useState(false)
+  const [signInError, setSignInError] = useState('')
 
   const service = services.find((s) => s.id === draft.serviceId)
   const staffMember = staff.find((s) => s.id === draft.staffId)
+
+  // Pre-fill form when user signs in
+  useEffect(() => {
+    if (user) {
+      setForm((f) => ({
+        ...f,
+        email: user.email ?? f.email,
+        name: user.user_metadata?.full_name ?? f.name,
+      }))
+      // Also try to fetch their customer record for phone
+      supabase
+        .from('customers')
+        .select('name, phone')
+        .eq('user_id', user.id)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data) setForm((f) => ({
+            ...f,
+            name: data.name ?? f.name,
+            phone: data.phone ?? f.phone,
+          }))
+        })
+    }
+  }, [user])
 
   if (!draft.serviceId || !draft.date || !draft.timeSlot) {
     navigate('/book')
@@ -64,66 +90,95 @@ export default function CustomerDetails() {
     navigate('/confirm')
   }
 
-  async function handleMagicLink() {
-    if (!loginEmail) return
-    setLoginLoading(true)
+  async function handleSignIn() {
+    if (!signInEmail.trim()) { setSignInError('Enter your email'); return }
+    setSignInLoading(true)
+    setSignInError('')
     const { error } = await supabase.auth.signInWithOtp({
-      email: loginEmail,
-      options: { shouldCreateUser: true },
+      email: signInEmail,
+      options: {
+        shouldCreateUser: false,
+        emailRedirectTo: `${window.location.origin}/my-bookings`,
+      },
     })
-    if (!error) setLoginSent(true)
-    setLoginLoading(false)
+    if (error) {
+      // No account found — treat as new customer
+      setSignInError("No account found with that email. Fill in your details below.")
+      setSignInEmail('')
+    } else {
+      setSignInSent(true)
+    }
+    setSignInLoading(false)
   }
 
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Your Details</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Almost there — just a few more details.
-        </p>
+        <p className="text-sm text-gray-500 mt-1">Almost there — just a few more details.</p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-        <div className="space-y-4">
-          {!user && (
-            <Card padding="sm" className="bg-gray-50 border-gray-100">
-              {showLogin ? (
-                loginSent ? (
-                  <p className="text-sm text-gray-600">
-                    Check your email for a magic link to sign in. You can also continue as a guest below.
-                  </p>
-                ) : (
+        <div className="space-y-5">
+
+          {/* Auth section */}
+          {user ? (
+            <Card padding="sm" className="flex items-center gap-3 border-green-100 bg-green-50">
+              <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-green-800">Signed in as {user.email}</p>
+                <p className="text-xs text-green-600">Your details have been pre-filled.</p>
+              </div>
+              <button
+                onClick={() => supabase.auth.signOut()}
+                className="text-xs text-green-700 hover:text-green-900 underline shrink-0"
+              >
+                Sign out
+              </button>
+            </Card>
+          ) : (
+            <Card padding="md" className="border-gray-100 bg-gray-50">
+              <div className="flex items-start gap-3 mb-3">
+                <UserCircle2 className="h-5 w-5 text-gray-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">Already booked with us?</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Sign in to pre-fill your details and view your booking history.</p>
+                </div>
+              </div>
+              {signInSent ? (
+                <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2.5">
+                  <Mail className="h-4 w-4 shrink-0" />
+                  <span>Magic link sent to <strong>{signInEmail}</strong> — check your inbox.</span>
+                </div>
+              ) : (
+                <>
                   <div className="flex gap-2">
                     <input
                       type="email"
-                      value={loginEmail}
-                      onChange={(e) => setLoginEmail(e.target.value)}
+                      value={signInEmail}
+                      onChange={(e) => { setSignInEmail(e.target.value); setSignInError('') }}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSignIn()}
                       placeholder="your@email.com"
-                      className="flex-1 h-9 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                      className="flex-1 h-9 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
                     />
-                    <Button size="sm" loading={loginLoading} onClick={handleMagicLink}>
-                      Send Link
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setShowLogin(false)}>
-                      Cancel
+                    <Button size="sm" loading={signInLoading} onClick={handleSignIn}>
+                      Sign in
                     </Button>
                   </div>
-                )
-              ) : (
-                <div className="flex items-center justify-between">
-                  <p className="text-xs text-gray-500">
-                    Sign in to manage bookings easily.
-                  </p>
-                  <Button variant="ghost" size="sm" onClick={() => setShowLogin(true)}>
-                    <LogIn className="h-3.5 w-3.5" />
-                    Sign in
-                  </Button>
-                </div>
+                  {signInError && (
+                    <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
+                      {signInError}
+                    </p>
+                  )}
+                </>
               )}
+              <p className="text-xs text-gray-400 mt-3">
+                New customer? Fill in your details below — we'll create your account automatically after booking.
+              </p>
             </Card>
           )}
 
+          {/* Details form */}
           <Input
             label="Full Name"
             required
@@ -140,6 +195,7 @@ export default function CustomerDetails() {
             onChange={(e) => handleChange('email', e.target.value)}
             placeholder="jane@example.com"
             error={errors.email}
+            readOnly={!!user}
           />
           <Input
             label="Phone Number"
@@ -177,7 +233,7 @@ export default function CustomerDetails() {
               <dd className="font-medium text-gray-900 mt-0.5">
                 {format(startsAt, 'EEE d MMM yyyy')}
                 <br />
-                <span className="text-[var(--color-primary)]">{draft.timeSlot}</span>
+                <span style={{ color: 'var(--color-primary)' }}>{draft.timeSlot}</span>
               </dd>
             </div>
             <div className="pt-3 border-t border-gray-100">
