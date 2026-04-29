@@ -2,7 +2,10 @@ import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { applyBrandTheme } from '@/lib/theme'
 import brand from '@/config/brand'
+import { supabase } from '@/lib/supabase'
 import { useAuthListener } from '@/hooks/useAuth'
+
+const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 // Layouts
 import { BookingLayout } from '@/components/layout/BookingLayout'
@@ -167,7 +170,16 @@ function AppRoutes() {
 
 export default function App() {
   useEffect(() => {
+    // Apply defaults immediately, then override with any saved config from the database
     applyBrandTheme(brand)
+    supabase
+      .from('businesses')
+      .select('config')
+      .eq('id', BUSINESS_ID)
+      .single()
+      .then(({ data }) => {
+        if (data?.config) applyBrandTheme({ ...brand, ...data.config })
+      })
   }, [])
 
   return (

@@ -1,31 +1,60 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import brand, { type BrandConfig, type BorderRadius } from '@/config/brand'
 import { applyBrandTheme } from '@/lib/theme'
+import { supabase } from '@/lib/supabase'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 
+const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 const RADIUS_OPTIONS: BorderRadius[] = ['none', 'sm', 'md', 'lg', 'full']
 
 export default function AdminSettings() {
   const [config, setConfig] = useState<BrandConfig>({ ...brand })
+  const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState('')
+
+  // Load saved config from the database on mount
+  useEffect(() => {
+    supabase
+      .from('businesses')
+      .select('config')
+      .eq('id', BUSINESS_ID)
+      .single()
+      .then(({ data }) => {
+        if (data?.config) setConfig({ ...brand, ...data.config })
+      })
+  }, [])
 
   function handleChange<K extends keyof BrandConfig>(key: K, value: BrandConfig[K]) {
     setConfig((c) => ({ ...c, [key]: value }))
     setSaved(false)
+    setSaveError('')
   }
 
   function handlePreview() {
     applyBrandTheme(config)
   }
 
-  function handleSave() {
+  async function handleSave() {
+    setSaving(true)
+    setSaveError('')
     applyBrandTheme(config)
-    setSaved(true)
-    // In a real app, this would persist to `businesses.config` via Supabase
-    setTimeout(() => setSaved(false), 2500)
+
+    const { error } = await supabase
+      .from('businesses')
+      .update({ config })
+      .eq('id', BUSINESS_ID)
+
+    setSaving(false)
+    if (error) {
+      setSaveError('Failed to save. Please try again.')
+    } else {
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    }
   }
 
   return (
@@ -33,7 +62,7 @@ export default function AdminSettings() {
       <div className="mb-6">
         <h1 className="text-xl font-bold text-gray-900">Settings</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Configure your brand. Changes apply live — save to persist.
+          Configure your brand. Changes apply live — save to persist across all devices and deployments.
         </p>
       </div>
 
@@ -59,48 +88,28 @@ export default function AdminSettings() {
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium text-gray-700">Primary Colour</label>
               <div className="flex gap-2">
-                <input
-                  type="color"
-                  value={config.primaryColour}
-                  onChange={(e) => handleChange('primaryColour', e.target.value)}
-                  className="h-10 w-14 cursor-pointer border border-gray-200 rounded-md p-0.5"
-                />
+                <input type="color" value={config.primaryColour} onChange={(e) => handleChange('primaryColour', e.target.value)} className="h-10 w-14 cursor-pointer border border-gray-200 rounded-md p-0.5" />
                 <Input value={config.primaryColour} onChange={(e) => handleChange('primaryColour', e.target.value)} className="flex-1" />
               </div>
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium text-gray-700">Secondary Colour</label>
               <div className="flex gap-2">
-                <input
-                  type="color"
-                  value={config.secondaryColour}
-                  onChange={(e) => handleChange('secondaryColour', e.target.value)}
-                  className="h-10 w-14 cursor-pointer border border-gray-200 rounded-md p-0.5"
-                />
+                <input type="color" value={config.secondaryColour} onChange={(e) => handleChange('secondaryColour', e.target.value)} className="h-10 w-14 cursor-pointer border border-gray-200 rounded-md p-0.5" />
                 <Input value={config.secondaryColour} onChange={(e) => handleChange('secondaryColour', e.target.value)} className="flex-1" />
               </div>
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium text-gray-700">Background Colour</label>
               <div className="flex gap-2">
-                <input
-                  type="color"
-                  value={config.backgroundColour}
-                  onChange={(e) => handleChange('backgroundColour', e.target.value)}
-                  className="h-10 w-14 cursor-pointer border border-gray-200 rounded-md p-0.5"
-                />
+                <input type="color" value={config.backgroundColour} onChange={(e) => handleChange('backgroundColour', e.target.value)} className="h-10 w-14 cursor-pointer border border-gray-200 rounded-md p-0.5" />
                 <Input value={config.backgroundColour} onChange={(e) => handleChange('backgroundColour', e.target.value)} className="flex-1" />
               </div>
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium text-gray-700">Text Colour</label>
               <div className="flex gap-2">
-                <input
-                  type="color"
-                  value={config.textColour}
-                  onChange={(e) => handleChange('textColour', e.target.value)}
-                  className="h-10 w-14 cursor-pointer border border-gray-200 rounded-md p-0.5"
-                />
+                <input type="color" value={config.textColour} onChange={(e) => handleChange('textColour', e.target.value)} className="h-10 w-14 cursor-pointer border border-gray-200 rounded-md p-0.5" />
                 <Input value={config.textColour} onChange={(e) => handleChange('textColour', e.target.value)} className="flex-1" />
               </div>
             </div>
@@ -155,12 +164,8 @@ export default function AdminSettings() {
         <Card padding="md" className="bg-gray-50">
           <h2 className="font-semibold text-gray-900 mb-4">Live Preview</h2>
           <div className="flex flex-wrap gap-3 items-center">
-            <button className="btn-primary px-5 py-2.5 text-sm font-medium">
-              Primary Button
-            </button>
-            <button className="px-5 py-2.5 text-sm font-medium bg-white border border-gray-200 brand-card text-gray-700">
-              Secondary
-            </button>
+            <button className="btn-primary px-5 py-2.5 text-sm font-medium">Primary Button</button>
+            <button className="px-5 py-2.5 text-sm font-medium bg-white border border-gray-200 brand-card text-gray-700">Secondary</button>
             <Badge variant="brand">Category Tag</Badge>
             <span className="font-bold brand-text-primary">Accent Text</span>
           </div>
@@ -171,12 +176,16 @@ export default function AdminSettings() {
           </div>
         </Card>
 
+        {saveError && (
+          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">{saveError}</p>
+        )}
+
         <div className="flex gap-3">
           <Button variant="secondary" onClick={handlePreview}>
             Preview Changes
           </Button>
-          <Button onClick={handleSave}>
-            {saved ? 'Saved!' : 'Save Settings'}
+          <Button loading={saving} onClick={handleSave}>
+            {saved ? '✓ Saved!' : 'Save Settings'}
           </Button>
         </div>
       </div>
