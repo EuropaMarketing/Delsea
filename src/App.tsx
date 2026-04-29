@@ -4,6 +4,7 @@ import { applyBrandTheme } from '@/lib/theme'
 import brand from '@/config/brand'
 import { supabase } from '@/lib/supabase'
 import { useAuthListener } from '@/hooks/useAuth'
+import { useBrandStore } from '@/store/brandStore'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
@@ -169,6 +170,8 @@ function AppRoutes() {
 }
 
 export default function App() {
+  const { setConfig } = useBrandStore()
+
   useEffect(() => {
     // Apply defaults immediately, then override with any saved config from the database
     applyBrandTheme(brand)
@@ -178,9 +181,13 @@ export default function App() {
       .eq('id', BUSINESS_ID)
       .single()
       .then(({ data }) => {
-        if (data?.config) applyBrandTheme({ ...brand, ...data.config })
+        if (data?.config) {
+          const merged = { ...brand, ...data.config }
+          applyBrandTheme(merged)
+          setConfig(merged)
+        }
       })
-  }, [])
+  }, [setConfig])
 
   return (
     <BrowserRouter>
