@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { Upload, ImageIcon } from 'lucide-react'
 import brand, { type BrandConfig, type BorderRadius } from '@/config/brand'
 import { applyBrandTheme } from '@/lib/theme'
 import { supabase } from '@/lib/supabase'
@@ -15,6 +16,9 @@ export default function AdminSettings() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [logoUploading, setLogoUploading] = useState(false)
+  const [logoError, setLogoError] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Load saved config from the database on mount
   useEffect(() => {
@@ -36,6 +40,30 @@ export default function AdminSettings() {
 
   function handlePreview() {
     applyBrandTheme(config)
+  }
+
+  async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLogoUploading(true)
+    setLogoError('')
+
+    const ext = file.name.split('.').pop()
+    const path = `logos/${BUSINESS_ID}/logo.${ext}`
+
+    const { error: uploadError } = await supabase.storage
+      .from('assets')
+      .upload(path, file, { upsert: true })
+
+    if (uploadError) {
+      setLogoError('Upload failed — check the storage bucket exists and is public.')
+      setLogoUploading(false)
+      return
+    }
+
+    const { data } = supabase.storage.from('assets').getPublicUrl(path)
+    handleChange('logo', data.publicUrl)
+    setLogoUploading(false)
   }
 
   async function handleSave() {
@@ -73,7 +101,40 @@ export default function AdminSettings() {
           <div className="grid gap-4 sm:grid-cols-2">
             <Input label="Business Name" value={config.brandName} onChange={(e) => handleChange('brandName', e.target.value)} />
             <Input label="Business Email" type="email" value={config.businessEmail} onChange={(e) => handleChange('businessEmail', e.target.value)} />
-            <Input label="Logo URL" value={config.logo} onChange={(e) => handleChange('logo', e.target.value)} placeholder="/logo.svg" />
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">Logo</label>
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-20 border border-gray-200 rounded-lg flex items-center justify-center bg-gray-50 shrink-0 overflow-hidden">
+                  {config.logo ? (
+                    <img src={config.logo} alt="Logo" className="h-full w-full object-contain p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                  ) : (
+                    <ImageIcon className="h-5 w-5 text-gray-300" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={logoUploading}
+                    className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:border-gray-400 hover:text-gray-800 transition-colors disabled:opacity-50"
+                  >
+                    <Upload className="h-4 w-4" />
+                    {logoUploading ? 'Uploading…' : 'Choose image'}
+                  </button>
+                  {config.logo && (
+                    <p className="text-xs text-gray-400 mt-1 truncate">{config.logo.split('/').pop()}</p>
+                  )}
+                  {logoError && <p className="text-xs text-red-500 mt-1">{logoError}</p>}
+                </div>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleLogoUpload}
+              />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <Input label="Currency" value={config.currency} onChange={(e) => handleChange('currency', e.target.value)} placeholder="GBP" />
               <Input label="Locale" value={config.locale} onChange={(e) => handleChange('locale', e.target.value)} placeholder="en-GB" />
@@ -123,7 +184,7 @@ export default function AdminSettings() {
                     onClick={() => handleChange('borderRadius', r)}
                     className={`px-3 py-1.5 text-xs font-medium border rounded-full transition-colors ${
                       config.borderRadius === r
-                        ? 'bg-[var(--color-primary)] text-white border-[var(--color-primary)]'
+                        ? 'bg-(--color-primary) text-white border-(--color-primary)'
                         : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
                     }`}
                   >
