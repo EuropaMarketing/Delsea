@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format, addMinutes } from 'date-fns'
 import { supabase } from '@/lib/supabase'
@@ -17,11 +17,12 @@ export default function Confirmation() {
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const confirmed = useRef(false)
 
   const service = services.find((s) => s.id === draft.serviceId)
   const staffMember = staff.find((s) => s.id === draft.staffId)
 
-  if (!draft.serviceId || !draft.date || !draft.timeSlot || !draft.customerEmail) {
+  if (!confirmed.current && (!draft.serviceId || !draft.date || !draft.timeSlot || !draft.customerEmail)) {
     navigate('/book')
     return null
   }
@@ -74,6 +75,7 @@ export default function Confirmation() {
       const ref = booking.id.slice(0, 8).toUpperCase()
       const customerEmail = draft.customerEmail
       const wasGuest = !user
+      confirmed.current = true
       reset()
       navigate('/booking-confirmed', {
         replace: true,

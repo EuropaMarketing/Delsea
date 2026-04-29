@@ -73,17 +73,32 @@ export default function MyBookings() {
   useEffect(() => {
     if (!user) { setLoading(false); return }
     async function load() {
-      const { data: customer } = await supabase
+      // Look up customer by user_id first, then fall back to email
+      // (email fallback handles cases where link_customer_to_user hasn't run yet)
+      let customerId: string | null = null
+
+      const { data: byUserId } = await supabase
         .from('customers')
         .select('id')
         .eq('user_id', user!.id)
-        .single()
+        .maybeSingle()
 
-      if (customer) {
+      if (byUserId) {
+        customerId = byUserId.id
+      } else if (user!.email) {
+        const { data: byEmail } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('email', user!.email)
+          .maybeSingle()
+        customerId = byEmail?.id ?? null
+      }
+
+      if (customerId) {
         const { data: bData } = await supabase
           .from('bookings')
           .select('*, service:services(name,price), staff:staff(name)')
-          .eq('customer_id', customer.id)
+          .eq('customer_id', customerId)
           .order('starts_at', { ascending: false })
         if (bData) setBookings(bData as typeof bookings)
       }
