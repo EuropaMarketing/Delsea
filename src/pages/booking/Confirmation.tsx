@@ -22,8 +22,8 @@ export default function Confirmation() {
   const service = services.find((s) => s.id === draft.serviceId)
   const staffMember = staff.find((s) => s.id === draft.staffId)
 
-  if (!confirmed.current && (!draft.serviceId || !draft.date || !draft.timeSlot || !draft.customerEmail)) {
-    navigate('/book')
+  if (!draft.serviceId || !draft.date || !draft.timeSlot || !draft.customerEmail) {
+    if (!confirmed.current) navigate('/book')
     return null
   }
 
