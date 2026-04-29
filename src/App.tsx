@@ -18,6 +18,7 @@ import DateTimePicker from '@/pages/booking/DateTimePicker'
 import CustomerDetails from '@/pages/booking/CustomerDetails'
 import Confirmation from '@/pages/booking/Confirmation'
 import MyBookings from '@/pages/booking/MyBookings'
+import BookingConfirmed from '@/pages/booking/BookingConfirmed'
 
 // Admin pages
 import AdminLogin from '@/pages/admin/Login'
@@ -82,6 +83,14 @@ function AppRoutes() {
         element={
           <BookingLayout>
             <MyBookings />
+          </BookingLayout>
+        }
+      />
+      <Route
+        path="/booking-confirmed"
+        element={
+          <BookingLayout>
+            <BookingConfirmed />
           </BookingLayout>
         }
       />

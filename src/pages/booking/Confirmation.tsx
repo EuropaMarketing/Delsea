@@ -1,15 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format, addMinutes } from 'date-fns'
-import { CheckCircle2, Calendar } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
 import { useAuthStore } from '@/store/authStore'
 import { formatCurrency, formatDuration } from '@/lib/currency'
-import { buildICSLink } from '@/lib/slots'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import brand from '@/config/brand'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
@@ -19,7 +16,6 @@ export default function Confirmation() {
   const { user } = useAuthStore()
 
   const [loading, setLoading] = useState(false)
-  const [bookingRef, setBookingRef] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const service = services.find((s) => s.id === draft.serviceId)
@@ -75,77 +71,26 @@ export default function Confirmation() {
 
       if (bErr) throw bErr
 
-      setBookingRef(booking.id.slice(0, 8).toUpperCase())
+      const ref = booking.id.slice(0, 8).toUpperCase()
       reset()
+      navigate('/booking-confirmed', {
+        replace: true,
+        state: {
+          bookingRef: ref,
+          serviceName: service?.name ?? '',
+          serviceDuration: service?.duration_minutes ?? 0,
+          servicePrice: service?.price ?? 0,
+          staffName: staffMember?.name ?? null,
+          startsAt: startsAt.toISOString(),
+          endsAt: endsAt.toISOString(),
+          customerEmail: draft.customerEmail,
+        },
+      })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
     } finally {
       setLoading(false)
     }
-  }
-
-  if (bookingRef) {
-    const icsUrl = buildICSLink(
-      `${service?.name} at ${brand.brandName}`,
-      startsAt.toISOString(),
-      endsAt.toISOString(),
-      brand.brandName,
-      `Booking reference: ${bookingRef}`,
-    )
-
-    return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <div
-          className="h-16 w-16 rounded-full flex items-center justify-center mb-4"
-          style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary) 12%, white)' }}
-        >
-          <CheckCircle2 className="h-8 w-8" style={{ color: 'var(--color-primary)' }} />
-        </div>
-        <h1 className="text-2xl font-bold text-gray-900">Booking Confirmed!</h1>
-        <p className="text-gray-500 mt-2 text-sm max-w-sm">
-          We've got you in. A confirmation email will be sent to {draft.customerEmail}.
-        </p>
-        <div className="mt-4 px-4 py-2 bg-gray-50 rounded-lg border border-gray-200">
-          <p className="text-xs text-gray-500">Booking reference</p>
-          <p className="font-mono font-bold text-lg text-gray-900">{bookingRef}</p>
-        </div>
-
-        <Card padding="md" className="mt-6 w-full max-w-sm text-left">
-          <dl className="space-y-2.5 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Service</dt>
-              <dd className="font-medium">{service?.name}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Date</dt>
-              <dd className="font-medium">{format(startsAt, 'EEE d MMM yyyy')}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Time</dt>
-              <dd className="font-medium">{format(startsAt, 'HH:mm')}</dd>
-            </div>
-            {staffMember && (
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Team Member</dt>
-                <dd className="font-medium">{staffMember.name}</dd>
-              </div>
-            )}
-          </dl>
-        </Card>
-
-        <div className="flex gap-3 mt-6 flex-wrap justify-center">
-          <a href={icsUrl} download="booking.ics">
-            <Button variant="secondary">
-              <Calendar className="h-4 w-4" />
-              Add to Calendar
-            </Button>
-          </a>
-          <Button onClick={() => navigate('/my-bookings')}>
-            View My Bookings
-          </Button>
-        </div>
-      </div>
-    )
   }
 
   return (
