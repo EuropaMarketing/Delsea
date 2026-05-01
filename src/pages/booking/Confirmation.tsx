@@ -1,10 +1,11 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format, addMinutes } from 'date-fns'
+import { ShieldCheck } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
 import { useAuthStore } from '@/store/authStore'
-import { formatCurrency, formatDuration } from '@/lib/currency'
+import { formatCurrency, formatDuration, calculateDeposit } from '@/lib/currency'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 
@@ -32,12 +33,15 @@ export default function Confirmation() {
   startsAt.setHours(slotH, slotM, 0, 0)
   const endsAt = addMinutes(startsAt, service?.duration_minutes ?? 60)
 
+  const depositAmount = service ? calculateDeposit(service) : 0
+  const hasDeposit = depositAmount > 0
+  const balanceDue = (service?.price ?? 0) - depositAmount
+
   async function handleConfirm() {
     setLoading(true)
     setError(null)
 
     try {
-      // Find or create customer via SECURITY DEFINER function (bypasses RLS for returning guests)
       const { data: customerId, error: cErr } = await supabase
         .rpc('find_or_create_customer', {
           p_business_id: BUSINESS_ID,
@@ -49,11 +53,8 @@ export default function Confirmation() {
 
       if (cErr) throw cErr
 
-      // Resolve staff: if no preference, pick first available
       let resolvedStaffId = draft.staffId
-      if (!resolvedStaffId && staff.length) {
-        resolvedStaffId = staff[0].id
-      }
+      if (!resolvedStaffId && staff.length) resolvedStaffId = staff[0].id
 
       const { data: booking, error: bErr } = await supabase
         .from('bookings')
@@ -89,6 +90,7 @@ export default function Confirmation() {
           endsAt: endsAt.toISOString(),
           customerEmail,
           isNewUser: wasGuest,
+          depositAmount,
         },
       })
     } catch (err: unknown) {
@@ -101,67 +103,127 @@ export default function Confirmation() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Confirm Booking</h1>
-        <p className="text-sm text-gray-500 mt-1">Please review your details before confirming.</p>
+        <h1 className="text-2xl font-bold text-gray-900">Checkout</h1>
+        <p className="text-sm text-gray-500 mt-1">Review your booking before confirming.</p>
       </div>
 
-      <Card padding="md" className="max-w-lg">
-        <dl className="space-y-4 text-sm">
-          <div>
-            <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Service</dt>
-            <dd className="font-semibold text-gray-900 mt-1 text-base">{service?.name}</dd>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Duration</dt>
-              <dd className="font-medium text-gray-900 mt-1">{service ? formatDuration(service.duration_minutes) : '—'}</dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Price</dt>
-              <dd className="font-bold text-gray-900 mt-1 text-base">{service ? formatCurrency(service.price) : '—'}</dd>
-            </div>
-          </div>
-          <div>
-            <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Team Member</dt>
-            <dd className="font-medium text-gray-900 mt-1">{staffMember?.name ?? 'Any available'}</dd>
-          </div>
-          <div className="pt-4 border-t border-gray-100">
-            <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Date & Time</dt>
-            <dd className="font-semibold text-gray-900 mt-1">
-              {format(startsAt, 'EEEE, d MMMM yyyy')} at{' '}
-              <span style={{ color: 'var(--color-primary)' }}>{format(startsAt, 'HH:mm')}</span>
-              {' '}– {format(endsAt, 'HH:mm')}
-            </dd>
-          </div>
-          <div className="pt-4 border-t border-gray-100">
-            <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Customer</dt>
-            <dd className="mt-1 space-y-0.5">
-              <p className="font-medium text-gray-900">{draft.customerName}</p>
-              <p className="text-gray-500">{draft.customerEmail}</p>
-              {draft.customerPhone && <p className="text-gray-500">{draft.customerPhone}</p>}
-            </dd>
-          </div>
-          {draft.notes && (
-            <div className="pt-4 border-t border-gray-100">
-              <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Notes</dt>
-              <dd className="text-gray-600 mt-1">{draft.notes}</dd>
-            </div>
-          )}
-        </dl>
-      </Card>
+      <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
+        {/* Left — order summary */}
+        <div className="space-y-4">
+          {/* Service & appointment */}
+          <Card padding="md">
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Appointment</h2>
+            <dl className="space-y-2.5 text-sm">
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Service</dt>
+                <dd className="font-semibold text-gray-900">{service?.name}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Duration</dt>
+                <dd className="text-gray-700">{service ? formatDuration(service.duration_minutes) : '—'}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Date</dt>
+                <dd className="font-medium text-gray-900">{format(startsAt, 'EEEE d MMMM yyyy')}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Time</dt>
+                <dd className="font-medium" style={{ color: 'var(--color-primary)' }}>
+                  {format(startsAt, 'HH:mm')} – {format(endsAt, 'HH:mm')}
+                </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Team member</dt>
+                <dd className="text-gray-700">{staffMember?.name ?? 'Any available'}</dd>
+              </div>
+            </dl>
+          </Card>
 
-      {error && (
-        <p className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
-          {error}
-        </p>
-      )}
+          {/* Customer */}
+          <Card padding="md">
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Your Details</h2>
+            <dl className="space-y-2.5 text-sm">
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Name</dt>
+                <dd className="font-medium text-gray-900">{draft.customerName}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Email</dt>
+                <dd className="text-gray-700">{draft.customerEmail}</dd>
+              </div>
+              {draft.customerPhone && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Phone</dt>
+                  <dd className="text-gray-700">{draft.customerPhone}</dd>
+                </div>
+              )}
+              {draft.notes && (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500 shrink-0">Notes</dt>
+                  <dd className="text-gray-700 text-right">{draft.notes}</dd>
+                </div>
+              )}
+            </dl>
+          </Card>
+        </div>
 
-      <div className="mt-6 flex justify-between">
+        {/* Right — payment summary */}
+        <div>
+          <Card padding="md" className="border-2 lg:sticky lg:top-24" style={{ borderColor: 'var(--color-primary)' }}>
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-4">Payment Summary</h2>
+
+            <div className="space-y-2 text-sm mb-4">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Total</span>
+                <span className="font-semibold text-gray-900">{formatCurrency(service?.price ?? 0)}</span>
+              </div>
+
+              {hasDeposit ? (
+                <>
+                  <div className="border-t border-gray-100 pt-2 mt-2 space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Deposit due today</span>
+                      <span className="font-bold text-lg" style={{ color: 'var(--color-primary)' }}>
+                        {formatCurrency(depositAmount)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-400">Balance at appointment</span>
+                      <span className="text-gray-500">{formatCurrency(balanceDue)}</span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="border-t border-gray-100 pt-2 mt-2">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-400">Due at appointment</span>
+                    <span className="text-gray-500">{formatCurrency(service?.price ?? 0)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {error && (
+              <p className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
+
+            <Button fullWidth size="lg" loading={loading} onClick={handleConfirm}>
+              {hasDeposit ? `Confirm & Pay ${formatCurrency(depositAmount)} Deposit` : 'Confirm Booking'}
+            </Button>
+
+            <div className="flex items-center justify-center gap-1.5 mt-3 text-xs text-gray-400">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              <span>Secure booking{hasDeposit ? ' · Payment coming soon' : ''}</span>
+            </div>
+          </Card>
+        </div>
+      </div>
+
+      <div className="mt-6">
         <Button variant="secondary" onClick={() => navigate('/details')}>
           Back
-        </Button>
-        <Button size="lg" loading={loading} onClick={handleConfirm}>
-          Confirm Booking
         </Button>
       </div>
     </div>

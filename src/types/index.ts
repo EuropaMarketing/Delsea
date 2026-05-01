@@ -16,6 +16,8 @@ export interface Staff {
   bio: string | null
 }
 
+export type DepositType = 'none' | 'fixed' | 'percentage'
+
 export interface Service {
   id: string
   business_id: string
@@ -25,6 +27,8 @@ export interface Service {
   price: number
   category: string
   is_active: boolean
+  deposit_type: DepositType
+  deposit_value: number
 }
 
 export interface Availability {

@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react'
 import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { formatCurrency, formatDuration } from '@/lib/currency'
+import { formatCurrency, formatDuration, calculateDeposit } from '@/lib/currency'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { Service } from '@/types'
+import type { Service, DepositType } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 const empty: Omit<Service, 'id' | 'business_id'> = {
   name: '', description: null, duration_minutes: 60, price: 0, category: 'General', is_active: true,
+  deposit_type: 'none', deposit_value: 0,
 }
 
 export default function AdminServices() {
@@ -112,6 +113,11 @@ export default function AdminServices() {
               )}
               <p className="text-xs text-gray-400 mt-1">
                 {formatDuration(service.duration_minutes)} · {formatCurrency(service.price)}
+                {service.deposit_type !== 'none' && (
+                  <span className="ml-1 text-amber-600">
+                    · {formatCurrency(calculateDeposit(service))} deposit
+                  </span>
+                )}
               </p>
             </div>
             <div className="flex items-center gap-1 flex-shrink-0">
@@ -179,6 +185,64 @@ export default function AdminServices() {
             value={form.category}
             onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
           />
+
+          {/* Deposit */}
+          <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
+            <p className="text-sm font-semibold text-gray-700">Deposit</p>
+            <div className="flex gap-2 flex-wrap">
+              {(['none', 'fixed', 'percentage'] as DepositType[]).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, deposit_type: t, deposit_value: t === 'none' ? 0 : f.deposit_value }))}
+                  className={`px-3 py-1.5 text-xs font-medium border rounded-full transition-colors ${
+                    form.deposit_type === t
+                      ? 'bg-(--color-primary) text-white border-(--color-primary)'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  {t === 'none' ? 'No deposit' : t === 'fixed' ? 'Fixed amount' : 'Percentage'}
+                </button>
+              ))}
+            </div>
+            {form.deposit_type !== 'none' && (
+              <div className="flex items-end gap-3">
+                <Input
+                  label={form.deposit_type === 'fixed' ? 'Deposit amount (£)' : 'Deposit (%)'}
+                  type="number"
+                  min={0}
+                  max={form.deposit_type === 'percentage' ? 100 : undefined}
+                  step={form.deposit_type === 'fixed' ? '0.01' : '1'}
+                  value={form.deposit_type === 'fixed' ? (form.deposit_value ? form.deposit_value / 100 : '') : (form.deposit_value || '')}
+                  onChange={(e) => {
+                    const raw = parseFloat(e.target.value)
+                    setForm((f) => ({
+                      ...f,
+                      deposit_value: f.deposit_type === 'fixed'
+                        ? Math.round(raw * 100) || 0
+                        : Math.min(100, Math.round(raw) || 0),
+                    }))
+                  }}
+                  placeholder={form.deposit_type === 'fixed' ? '0.00' : '25'}
+                  className="flex-1"
+                />
+                {form.deposit_type === 'percentage' && form.price > 0 && form.deposit_value > 0 && (
+                  <p className="text-xs text-gray-500 pb-2 shrink-0">
+                    = {formatCurrency(Math.round(form.price * form.deposit_value / 100))}
+                  </p>
+                )}
+              </div>
+            )}
+            {form.deposit_type !== 'none' && form.price > 0 && form.deposit_value > 0 && (
+              <p className="text-xs text-gray-400">
+                Balance due at appointment:{' '}
+                {formatCurrency(form.price - (form.deposit_type === 'fixed'
+                  ? form.deposit_value
+                  : Math.round(form.price * form.deposit_value / 100)))}
+              </p>
+            )}
+          </div>
+
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
             <Button loading={saving} onClick={handleSave}>Save Service</Button>
