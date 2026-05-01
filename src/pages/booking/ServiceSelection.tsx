@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, Clock, Tag } from 'lucide-react'
+import { Search, Clock, Tag, Heart } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
+import { useFavourites } from '@/hooks/useFavourites'
 import { formatCurrency, formatDuration } from '@/lib/currency'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -15,6 +16,7 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 export default function ServiceSelection() {
   const navigate = useNavigate()
   const { draft, setService, setServices, services } = useBookingStore()
+  const { favourites, toggle, isFavourite } = useFavourites()
 
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -44,13 +46,15 @@ export default function ServiceSelection() {
     return matchCat && matchSearch
   })
 
+  const favouriteServices = services.filter((s) => isFavourite(s.id))
+
   function handleSelect(service: Service) {
     setSelected(service.id)
     setService(service.id)
   }
 
-  function handleNext() {
-    if (!selected) return
+  function handleQuickBook(service: Service) {
+    setService(service.id)
     navigate('/staff')
   }
 
@@ -63,6 +67,47 @@ export default function ServiceSelection() {
         <p className="text-sm text-gray-500 mt-1">Select what you'd like to book today.</p>
       </div>
 
+      {/* Favourites quick-access row */}
+      {favouriteServices.length > 0 && (
+        <div className="mb-6">
+          <div className="flex items-center gap-1.5 mb-3">
+            <Heart className="h-3.5 w-3.5 fill-red-500 text-red-500" />
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Favourites</span>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-1 no-scrollbar">
+            {favouriteServices.map((service) => (
+              <button
+                key={service.id}
+                onClick={() => handleQuickBook(service)}
+                className="flex-shrink-0 w-44 text-left bg-white border-2 rounded-xl p-3 transition-all hover:shadow-md"
+                style={{ borderColor: 'var(--color-primary)' }}
+              >
+                <div className="flex items-start justify-between gap-1 mb-2">
+                  <p className="font-semibold text-sm text-gray-900 leading-tight line-clamp-2">{service.name}</p>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggle(service.id) }}
+                    className="shrink-0 p-0.5 -mt-0.5 -mr-0.5"
+                    aria-label="Remove from favourites"
+                  >
+                    <Heart className="h-4 w-4 fill-red-500 text-red-500" />
+                  </button>
+                </div>
+                <div className="flex items-center justify-between mt-auto">
+                  <span className="flex items-center gap-1 text-xs text-gray-400">
+                    <Clock className="h-3 w-3" />
+                    {formatDuration(service.duration_minutes)}
+                  </span>
+                  <span className="text-xs font-bold text-gray-900">{formatCurrency(service.price)}</span>
+                </div>
+                <p className="text-xs mt-2 font-medium" style={{ color: 'var(--color-primary)' }}>
+                  Quick book →
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Search */}
       <div className="relative mb-4">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
@@ -70,7 +115,7 @@ export default function ServiceSelection() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search services…"
-          className="w-full h-10 pl-9 pr-3 text-sm border border-gray-200 bg-white outline-none transition-colors [border-radius:var(--border-radius-sm)] focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)] placeholder:text-gray-400"
+          className="w-full h-10 pl-9 pr-3 text-sm border border-gray-200 bg-white outline-none transition-colors rounded-(--border-radius-sm) focus:ring-2 focus:ring-(--color-primary) focus:border-(--color-primary) placeholder:text-gray-400"
         />
       </div>
 
@@ -82,7 +127,7 @@ export default function ServiceSelection() {
             onClick={() => setActiveCategory(cat)}
             className={`flex-shrink-0 px-4 py-1.5 text-sm font-medium rounded-full border transition-colors ${
               activeCategory === cat
-                ? 'bg-[var(--color-primary)] text-white border-[var(--color-primary)]'
+                ? 'bg-(--color-primary) text-white border-(--color-primary)'
                 : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
             }`}
           >
@@ -111,10 +156,25 @@ export default function ServiceSelection() {
                     <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{service.description}</p>
                   )}
                 </div>
-                <Badge variant="brand">
-                  <Tag className="h-3 w-3 mr-1" />
-                  {service.category}
-                </Badge>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggle(service.id) }}
+                    className="p-1 rounded-full hover:bg-gray-100 transition-colors"
+                    aria-label={isFavourite(service.id) ? 'Remove from favourites' : 'Add to favourites'}
+                  >
+                    <Heart
+                      className={`h-4 w-4 transition-colors ${
+                        isFavourite(service.id)
+                          ? 'fill-red-500 text-red-500'
+                          : 'text-gray-300 hover:text-red-400'
+                      }`}
+                    />
+                  </button>
+                  <Badge variant="brand">
+                    <Tag className="h-3 w-3 mr-1" />
+                    {service.category}
+                  </Badge>
+                </div>
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1 text-sm text-gray-500">
@@ -129,7 +189,7 @@ export default function ServiceSelection() {
       )}
 
       <div className="mt-6 flex justify-end">
-        <Button size="lg" disabled={!selected} onClick={handleNext}>
+        <Button size="lg" disabled={!selected} onClick={() => navigate('/staff')}>
           Continue
         </Button>
       </div>
