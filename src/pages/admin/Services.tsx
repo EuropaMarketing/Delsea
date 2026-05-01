@@ -47,7 +47,7 @@ export default function AdminServices() {
 
   function openEdit(service: Service) {
     setEditTarget(service)
-    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active })
+    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, deposit_type: service.deposit_type, deposit_value: service.deposit_value })
     setErrors({})
     setModalOpen(true)
   }
