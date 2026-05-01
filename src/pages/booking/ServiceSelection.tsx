@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, Clock, Tag, Heart } from 'lucide-react'
+import { Search, Clock, Tag, Heart, RotateCcw, User } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
 import { useFavourites } from '@/hooks/useFavourites'
+import { usePreviousBookings } from '@/hooks/usePreviousBookings'
 import { formatCurrency, formatDuration } from '@/lib/currency'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -15,8 +16,9 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function ServiceSelection() {
   const navigate = useNavigate()
-  const { draft, setService, setServices, services } = useBookingStore()
+  const { draft, setService, setStaff, setServices, services } = useBookingStore()
   const { favourites, toggle, isFavourite } = useFavourites()
+  const previousBookings = usePreviousBookings()
 
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -58,6 +60,12 @@ export default function ServiceSelection() {
     navigate('/staff')
   }
 
+  function handleBookAgain(serviceId: string, staffId: string | null) {
+    setService(serviceId)
+    if (staffId) setStaff(staffId)
+    navigate('/datetime')
+  }
+
   if (loading) return <FullPageSpinner />
 
   return (
@@ -79,7 +87,7 @@ export default function ServiceSelection() {
               <button
                 key={service.id}
                 onClick={() => handleQuickBook(service)}
-                className="flex-shrink-0 w-44 text-left bg-white border-2 rounded-xl p-3 transition-all hover:shadow-md"
+                className="shrink-0 w-44 text-left bg-white border-2 rounded-xl p-3 transition-all hover:shadow-md"
                 style={{ borderColor: 'var(--color-primary)' }}
               >
                 <div className="flex items-start justify-between gap-1 mb-2">
@@ -108,6 +116,41 @@ export default function ServiceSelection() {
         </div>
       )}
 
+      {/* Previously booked quick-access row */}
+      {previousBookings.length > 0 && (
+        <div className="mb-6">
+          <div className="flex items-center gap-1.5 mb-3">
+            <RotateCcw className="h-3.5 w-3.5 text-gray-400" />
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Book Again</span>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-1 no-scrollbar">
+            {previousBookings.map((prev, i) => (
+              <button
+                key={i}
+                onClick={() => handleBookAgain(prev.serviceId, prev.staffId)}
+                className="shrink-0 w-44 text-left bg-white border border-gray-200 rounded-xl p-3 transition-all hover:shadow-md hover:border-gray-300"
+              >
+                <p className="font-semibold text-sm text-gray-900 leading-tight line-clamp-2 mb-1">{prev.serviceName}</p>
+                {prev.staffName && (
+                  <div className="flex items-center gap-1 mb-2">
+                    <User className="h-3 w-3 text-gray-400 shrink-0" />
+                    <span className="text-xs text-gray-400 truncate">{prev.staffName}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between mt-1">
+                  <span className="flex items-center gap-1 text-xs text-gray-400">
+                    <Clock className="h-3 w-3" />
+                    {formatDuration(prev.service.duration_minutes)}
+                  </span>
+                  <span className="text-xs font-bold text-gray-900">{formatCurrency(prev.service.price)}</span>
+                </div>
+                <p className="text-xs mt-2 font-medium text-gray-400">Book again →</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Search */}
       <div className="relative mb-4">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
@@ -125,7 +168,7 @@ export default function ServiceSelection() {
           <button
             key={cat}
             onClick={() => setActiveCategory(cat)}
-            className={`flex-shrink-0 px-4 py-1.5 text-sm font-medium rounded-full border transition-colors ${
+            className={`shrink-0 px-4 py-1.5 text-sm font-medium rounded-full border transition-colors ${
               activeCategory === cat
                 ? 'bg-(--color-primary) text-white border-(--color-primary)'
                 : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
