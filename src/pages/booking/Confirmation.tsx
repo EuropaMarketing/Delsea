@@ -42,38 +42,26 @@ export default function Confirmation() {
     setError(null)
 
     try {
-      const { data: customerId, error: cErr } = await supabase
-        .rpc('find_or_create_customer', {
+      let resolvedStaffId = draft.staffId
+      if (!resolvedStaffId && staff.length) resolvedStaffId = staff[0].id
+
+      const { data: bookingId, error: bErr } = await supabase
+        .rpc('create_booking', {
           p_business_id: BUSINESS_ID,
           p_user_id: user?.id ?? null,
           p_name: draft.customerName,
           p_email: draft.customerEmail,
           p_phone: draft.customerPhone || null,
+          p_staff_id: resolvedStaffId ?? null,
+          p_service_id: draft.serviceId,
+          p_starts_at: startsAt.toISOString(),
+          p_ends_at: endsAt.toISOString(),
+          p_notes: draft.notes || null,
         })
-
-      if (cErr) throw cErr
-
-      let resolvedStaffId = draft.staffId
-      if (!resolvedStaffId && staff.length) resolvedStaffId = staff[0].id
-
-      const { data: booking, error: bErr } = await supabase
-        .from('bookings')
-        .insert({
-          business_id: BUSINESS_ID,
-          customer_id: customerId,
-          staff_id: resolvedStaffId,
-          service_id: draft.serviceId,
-          starts_at: startsAt.toISOString(),
-          ends_at: endsAt.toISOString(),
-          status: 'confirmed',
-          notes: draft.notes || null,
-        })
-        .select('id')
-        .single()
 
       if (bErr) throw bErr
 
-      const ref = booking.id.slice(0, 8).toUpperCase()
+      const ref = (bookingId as string).slice(0, 8).toUpperCase()
       const customerEmail = draft.customerEmail
       const wasGuest = !user
       confirmed.current = true
