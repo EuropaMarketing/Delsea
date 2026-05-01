@@ -25,6 +25,7 @@ import MyBookings from '@/pages/booking/MyBookings'
 import BookingConfirmed from '@/pages/booking/BookingConfirmed'
 
 // Admin pages
+import ResetPassword from '@/pages/ResetPassword'
 import AdminLogin from '@/pages/admin/Login'
 import AdminDashboard from '@/pages/admin/Dashboard'
 import AdminCalendar from '@/pages/admin/Calendar'
@@ -98,6 +99,9 @@ function AppRoutes() {
           </BookingLayout>
         }
       />
+
+      {/* Password reset (linked from email) */}
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       {/* Admin auth */}
       <Route path="/admin/login" element={<AdminLogin />} />

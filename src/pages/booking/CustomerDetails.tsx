@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
-import { CheckCircle2, Mail, UserCircle2 } from 'lucide-react'
+import { CheckCircle2, UserCircle2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
 import { useAuthStore } from '@/store/authStore'
 import { formatCurrency, formatDuration } from '@/lib/currency'
-import { Input, Textarea } from '@/components/ui/Input'
+import { Input, PasswordInput, Textarea } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 
@@ -25,9 +25,11 @@ export default function CustomerDetails() {
 
   // Sign-in flow for returning customers
   const [signInEmail, setSignInEmail] = useState('')
-  const [signInSent, setSignInSent] = useState(false)
+  const [signInPassword, setSignInPassword] = useState('')
+  const [signInMode, setSignInMode] = useState<'signin' | 'forgot'>('signin')
   const [signInLoading, setSignInLoading] = useState(false)
   const [signInError, setSignInError] = useState('')
+  const [resetSent, setResetSent] = useState(false)
 
   const service = services.find((s) => s.id === draft.serviceId)
   const staffMember = staff.find((s) => s.id === draft.staffId)
@@ -91,23 +93,22 @@ export default function CustomerDetails() {
   }
 
   async function handleSignIn() {
-    if (!signInEmail.trim()) { setSignInError('Enter your email'); return }
+    if (!signInEmail.trim() || !signInPassword.trim()) { setSignInError('Enter your email and password'); return }
     setSignInLoading(true)
     setSignInError('')
-    const { error } = await supabase.auth.signInWithOtp({
-      email: signInEmail,
-      options: {
-        shouldCreateUser: false,
-        emailRedirectTo: `${window.location.origin}/my-bookings`,
-      },
+    const { error } = await supabase.auth.signInWithPassword({ email: signInEmail, password: signInPassword })
+    if (error) setSignInError('Incorrect email or password.')
+    setSignInLoading(false)
+  }
+
+  async function handleForgotPassword() {
+    if (!signInEmail.trim()) { setSignInError('Enter your email address first'); return }
+    setSignInLoading(true)
+    setSignInError('')
+    await supabase.auth.resetPasswordForEmail(signInEmail, {
+      redirectTo: `${window.location.origin}/reset-password`,
     })
-    if (error) {
-      // No account found — treat as new customer
-      setSignInError("No account found with that email. Fill in your details below.")
-      setSignInEmail('')
-    } else {
-      setSignInSent(true)
-    }
+    setResetSent(true)
     setSignInLoading(false)
   }
 
@@ -145,31 +146,51 @@ export default function CustomerDetails() {
                   <p className="text-xs text-gray-500 mt-0.5">Sign in to pre-fill your details and view your booking history.</p>
                 </div>
               </div>
-              {signInSent ? (
-                <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2.5">
-                  <Mail className="h-4 w-4 shrink-0" />
-                  <span>Magic link sent to <strong>{signInEmail}</strong> — check your inbox.</span>
-                </div>
-              ) : (
+              {resetSent ? (
+                <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2.5">
+                  Password reset link sent — check your inbox.
+                </p>
+              ) : signInMode === 'signin' ? (
                 <>
-                  <div className="flex gap-2">
+                  <div className="space-y-2">
                     <input
                       type="email"
                       value={signInEmail}
                       onChange={(e) => { setSignInEmail(e.target.value); setSignInError('') }}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSignIn()}
                       placeholder="your@email.com"
-                      className="flex-1 h-9 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                      className="w-full h-9 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
                     />
-                    <Button size="sm" loading={signInLoading} onClick={handleSignIn}>
-                      Sign in
-                    </Button>
+                    <PasswordInput
+                      value={signInPassword}
+                      onChange={(e) => { setSignInPassword(e.target.value); setSignInError('') }}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSignIn()}
+                      placeholder="••••••••"
+                    />
                   </div>
-                  {signInError && (
-                    <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
-                      {signInError}
-                    </p>
-                  )}
+                  {signInError && <p className="text-xs text-red-500 mt-1">{signInError}</p>}
+                  <div className="flex items-center gap-2 mt-2">
+                    <Button size="sm" loading={signInLoading} onClick={handleSignIn}>Sign in</Button>
+                    <button onClick={() => { setSignInMode('forgot'); setSignInError('') }} className="text-xs text-gray-400 hover:text-gray-600">
+                      Forgot password?
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <input
+                    type="email"
+                    value={signInEmail}
+                    onChange={(e) => { setSignInEmail(e.target.value); setSignInError('') }}
+                    placeholder="your@email.com"
+                    className="w-full h-9 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                  />
+                  {signInError && <p className="text-xs text-red-500 mt-1">{signInError}</p>}
+                  <div className="flex items-center gap-2 mt-2">
+                    <Button size="sm" loading={signInLoading} onClick={handleForgotPassword}>Send Reset Link</Button>
+                    <button onClick={() => { setSignInMode('signin'); setSignInError('') }} className="text-xs text-gray-400 hover:text-gray-600">
+                      Back to sign in
+                    </button>
+                  </div>
                 </>
               )}
               <p className="text-xs text-gray-400 mt-3">

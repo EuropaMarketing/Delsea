@@ -1,62 +1,106 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { format, parseISO, isBefore, addHours } from 'date-fns'
-import { CalendarClock, AlertTriangle, LogIn, Mail } from 'lucide-react'
+import { CalendarClock, AlertTriangle, LogIn } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { Input, PasswordInput } from '@/components/ui/Input'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { Modal } from '@/components/ui/Modal'
 import type { Booking } from '@/types'
 
 function SignInPrompt() {
   const [email, setEmail] = useState('')
-  const [sent, setSent] = useState(false)
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [mode, setMode] = useState<'signin' | 'forgot'>('signin')
+  const [resetSent, setResetSent] = useState(false)
 
-  async function handleSend() {
-    if (!email) return
+  async function handleSignIn() {
+    if (!email || !password) { setError('Please enter your email and password'); return }
     setLoading(true)
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { shouldCreateUser: false },
+    setError('')
+    const { error: err } = await supabase.auth.signInWithPassword({ email, password })
+    if (err) setError('Incorrect email or password.')
+    setLoading(false)
+  }
+
+  async function handleForgotPassword() {
+    if (!email) { setError('Enter your email address above first'); return }
+    setLoading(true)
+    setError('')
+    await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
     })
-    if (!error) setSent(true)
+    setResetSent(true)
     setLoading(false)
   }
 
   return (
-    <div className="flex flex-col items-center justify-center py-20 text-center px-4">
+    <div className="flex flex-col items-center justify-center py-16 text-center px-4">
       <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-4">
         <LogIn className="h-5 w-5 text-gray-500" />
       </div>
       <h2 className="text-lg font-semibold text-gray-900 mb-1">Sign in to view your bookings</h2>
       <p className="text-sm text-gray-500 mb-6 max-w-xs">
-        We'll send a magic link to your email — no password needed.
+        Use the email and password you set up when you booked.
       </p>
-      {sent ? (
-        <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-4 py-3 rounded-lg">
-          <Mail className="h-4 w-4 shrink-0" />
-          Check your inbox for the sign-in link.
+
+      {resetSent ? (
+        <div className="w-full max-w-sm bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-700">
+          Password reset link sent — check your inbox.
         </div>
       ) : (
-        <div className="flex gap-2 w-full max-w-sm">
-          <input
+        <div className="w-full max-w-sm space-y-3 text-left">
+          <Input
+            label="Email"
             type="email"
             value={email}
-            onChange={e => setEmail(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSend()}
+            onChange={(e) => { setEmail(e.target.value); setError('') }}
+            onKeyDown={(e) => e.key === 'Enter' && handleSignIn()}
             placeholder="your@email.com"
-            className="flex-1 h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
           />
-          <Button loading={loading} onClick={handleSend}>Send Link</Button>
+          {mode === 'signin' && (
+            <PasswordInput
+              label="Password"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setError('') }}
+              onKeyDown={(e) => e.key === 'Enter' && handleSignIn()}
+              placeholder="••••••••"
+            />
+          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+          {mode === 'signin' ? (
+            <>
+              <Button fullWidth loading={loading} onClick={handleSignIn}>Sign In</Button>
+              <button
+                onClick={() => { setMode('forgot'); setError('') }}
+                className="w-full text-xs text-gray-400 hover:text-gray-600 text-center"
+              >
+                Forgot password?
+              </button>
+            </>
+          ) : (
+            <>
+              <Button fullWidth loading={loading} onClick={handleForgotPassword}>Send Reset Link</Button>
+              <button
+                onClick={() => { setMode('signin'); setError('') }}
+                className="w-full text-xs text-gray-400 hover:text-gray-600 text-center"
+              >
+                Back to sign in
+              </button>
+            </>
+          )}
         </div>
       )}
+
       <Link to="/book" className="mt-6 text-sm text-gray-400 hover:text-gray-600">
-        Book without an account →
+        Make a new booking →
       </Link>
     </div>
   )

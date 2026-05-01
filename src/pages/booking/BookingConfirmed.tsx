@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { format } from 'date-fns'
-import { CheckCircle2, Calendar, CalendarClock, User, Clock, PoundSterling, Mail } from 'lucide-react'
+import { CheckCircle2, Calendar, CalendarClock, User, Clock, PoundSterling } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { PasswordInput } from '@/components/ui/Input'
 import { buildICSLink } from '@/lib/slots'
 import { formatCurrency, formatDuration } from '@/lib/currency'
 import brand from '@/config/brand'
@@ -21,10 +22,73 @@ interface ConfirmedState {
   isNewUser: boolean
 }
 
+function CreateAccountForm({ email }: { email: string }) {
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState(false)
+
+  async function handleCreate() {
+    if (password.length < 8) { setError('Password must be at least 8 characters'); return }
+    if (password !== confirm) { setError('Passwords do not match'); return }
+    setLoading(true)
+    setError('')
+    const { error: err } = await supabase.auth.signUp({ email, password })
+    if (err) {
+      if (err.message.toLowerCase().includes('already')) {
+        setError('An account with this email already exists. Sign in from My Bookings.')
+      } else {
+        setError('Something went wrong. You can set up your account later from My Bookings.')
+      }
+    } else {
+      setDone(true)
+    }
+    setLoading(false)
+  }
+
+  if (done) {
+    return (
+      <div className="w-full max-w-sm flex items-start gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3.5 text-left">
+        <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-semibold text-green-800">Account created!</p>
+          <p className="text-xs text-green-600 mt-0.5">You're now signed in. Visit My Bookings to manage your appointments.</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="w-full max-w-sm border border-gray-200 rounded-xl p-4 text-left bg-gray-50">
+      <p className="text-sm font-semibold text-gray-800 mb-0.5">Create your account</p>
+      <p className="text-xs text-gray-500 mb-3">
+        Set a password for <span className="font-medium">{email}</span> to manage your bookings.
+      </p>
+      <div className="space-y-2">
+        <PasswordInput
+          placeholder="Choose a password"
+          value={password}
+          onChange={(e) => { setPassword(e.target.value); setError('') }}
+        />
+        <PasswordInput
+          placeholder="Confirm password"
+          value={confirm}
+          onChange={(e) => { setConfirm(e.target.value); setError('') }}
+          onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+        />
+      </div>
+      {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
+      <Button fullWidth loading={loading} onClick={handleCreate} className="mt-3">
+        Create Account
+      </Button>
+    </div>
+  )
+}
+
 export default function BookingConfirmed() {
   const { state } = useLocation()
   const navigate = useNavigate()
-  const [activationSent, setActivationSent] = useState(false)
 
   if (!state?.bookingRef) {
     navigate('/book', { replace: true })
@@ -34,18 +98,6 @@ export default function BookingConfirmed() {
   const s = state as ConfirmedState
   const startsAt = new Date(s.startsAt)
   const endsAt = new Date(s.endsAt)
-
-  // Auto-send account activation magic link for new (guest) customers
-  useEffect(() => {
-    if (!s.isNewUser) return
-    supabase.auth.signInWithOtp({
-      email: s.customerEmail,
-      options: {
-        shouldCreateUser: true,
-        emailRedirectTo: `${window.location.origin}/my-bookings`,
-      },
-    }).then(() => setActivationSent(true))
-  }, [])
 
   const icsUrl = buildICSLink(
     `${s.serviceName} at ${brand.brandName}`,
@@ -57,7 +109,6 @@ export default function BookingConfirmed() {
 
   return (
     <div className="flex flex-col items-center py-10 px-4 text-center">
-      {/* Success icon */}
       <div
         className="h-20 w-20 rounded-full flex items-center justify-center mb-5"
         style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary) 12%, white)' }}
@@ -70,38 +121,26 @@ export default function BookingConfirmed() {
         A confirmation has been sent to <span className="font-medium text-gray-700">{s.customerEmail}</span>.
       </p>
 
-      {/* Reference */}
       <div className="mt-5 px-6 py-3 bg-gray-50 rounded-xl border border-gray-200">
         <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">Booking reference</p>
         <p className="font-mono font-bold text-2xl text-gray-900">{s.bookingRef}</p>
       </div>
 
-      {/* Account activation notice for new customers */}
-      {s.isNewUser && activationSent && (
-        <div className="mt-5 w-full max-w-sm flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3.5 text-left">
-          <Mail className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-blue-800">Activate your account</p>
-            <p className="text-xs text-blue-600 mt-0.5">
-              We've sent a sign-in link to <strong>{s.customerEmail}</strong>. Click it to access your bookings anytime — no password needed.
-            </p>
-          </div>
+      {/* Account creation for new customers */}
+      {s.isNewUser && (
+        <div className="mt-5 w-full max-w-sm">
+          <CreateAccountForm email={s.customerEmail} />
         </div>
       )}
 
-      {/* Booking details */}
       <Card padding="md" className="mt-6 w-full max-w-sm text-left">
         <ul className="space-y-3">
           <li className="flex items-start gap-3">
             <CalendarClock className="h-4 w-4 mt-0.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
             <div>
               <p className="text-xs text-gray-400">Date & time</p>
-              <p className="font-semibold text-gray-900 text-sm">
-                {format(startsAt, 'EEEE d MMMM yyyy')}
-              </p>
-              <p className="text-sm text-gray-700">
-                {format(startsAt, 'HH:mm')} – {format(endsAt, 'HH:mm')}
-              </p>
+              <p className="font-semibold text-gray-900 text-sm">{format(startsAt, 'EEEE d MMMM yyyy')}</p>
+              <p className="text-sm text-gray-700">{format(startsAt, 'HH:mm')} – {format(endsAt, 'HH:mm')}</p>
             </div>
           </li>
           <li className="flex items-start gap-3">
@@ -131,7 +170,6 @@ export default function BookingConfirmed() {
         </ul>
       </Card>
 
-      {/* Actions */}
       <div className="flex flex-col sm:flex-row gap-3 mt-7 w-full max-w-sm">
         <a href={icsUrl} download="booking.ics" className="flex-1">
           <Button variant="secondary" fullWidth>
