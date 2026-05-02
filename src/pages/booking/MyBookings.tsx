@@ -1,21 +1,5 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
-
-interface RpcBookingRow {
-  id: string
-  customer_id: string
-  staff_id: string | null
-  service_id: string
-  starts_at: string
-  ends_at: string
-  status: string
-  notes: string | null
-  created_at: string
-  service_name: string
-  service_price: number
-  staff_name: string | null
-}
 import { format, parseISO, isBefore, addHours } from 'date-fns'
 import { CalendarClock, AlertTriangle, LogIn } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -27,7 +11,22 @@ import { Card } from '@/components/ui/Card'
 import { Input, PasswordInput } from '@/components/ui/Input'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { Modal } from '@/components/ui/Modal'
-import type { Booking } from '@/types'
+
+const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
+
+type MyBooking = {
+  id: string
+  customer_id: string
+  staff_id: string | null
+  service_id: string
+  starts_at: string
+  ends_at: string
+  status: string
+  notes: string | null
+  created_at: string
+  service: { name: string; price: number }
+  staff: { name: string } | null
+}
 
 function SignInPrompt() {
   const [email, setEmail] = useState('')
@@ -125,7 +124,7 @@ function SignInPrompt() {
 export default function MyBookings() {
   const { user } = useAuthStore()
 
-  const [bookings, setBookings] = useState<(Booking & { service: { name: string; price: number }; staff: { name: string } | null })[]>([])
+  const [bookings, setBookings] = useState<MyBooking[]>([])
   const [loading, setLoading] = useState(true)
   const [cancelling, setCancelling] = useState<string | null>(null)
   const [cancelTarget, setCancelTarget] = useState<string | null>(null)
@@ -135,8 +134,9 @@ export default function MyBookings() {
     async function load() {
       const { data } = await supabase.rpc('get_my_bookings', { p_business_id: BUSINESS_ID })
       if (data) {
+        type Row = MyBooking & { service_name: string; service_price: number; staff_name: string | null }
         setBookings(
-          (data as RpcBookingRow[]).map((b) => ({
+          (data as Row[]).map((b) => ({
             ...b,
             service: { name: b.service_name, price: b.service_price },
             staff: b.staff_name ? { name: b.staff_name } : null,
