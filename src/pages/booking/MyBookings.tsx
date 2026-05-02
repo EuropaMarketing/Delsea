@@ -1,6 +1,21 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
+
+interface RpcBookingRow {
+  id: string
+  customer_id: string
+  staff_id: string | null
+  service_id: string
+  starts_at: string
+  ends_at: string
+  status: string
+  notes: string | null
+  created_at: string
+  service_name: string
+  service_price: number
+  staff_name: string | null
+}
 import { format, parseISO, isBefore, addHours } from 'date-fns'
 import { CalendarClock, AlertTriangle, LogIn } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -118,37 +133,15 @@ export default function MyBookings() {
   useEffect(() => {
     if (!user) { setLoading(false); return }
     async function load() {
-      // Look up customer by user_id first, then fall back to email
-      // (email fallback handles cases where link_customer_to_user hasn't run yet)
-      let customerId: string | null = null
-
-      const { data: byUserId } = await supabase
-        .from('customers')
-        .select('id')
-        .eq('user_id', user!.id)
-        .eq('business_id', BUSINESS_ID)
-        .maybeSingle()
-
-      if (byUserId) {
-        customerId = byUserId.id
-      } else if (user!.email) {
-        const { data: byEmail } = await supabase
-          .from('customers')
-          .select('id')
-          .eq('email', user!.email)
-          .eq('business_id', BUSINESS_ID)
-          .maybeSingle()
-        customerId = byEmail?.id ?? null
-      }
-
-      if (customerId) {
-        const { data: bData } = await supabase
-          .from('bookings')
-          .select('*, service:services(name,price), staff:staff(name)')
-          .eq('customer_id', customerId)
-          .eq('business_id', BUSINESS_ID)
-          .order('starts_at', { ascending: false })
-        if (bData) setBookings(bData as typeof bookings)
+      const { data } = await supabase.rpc('get_my_bookings', { p_business_id: BUSINESS_ID })
+      if (data) {
+        setBookings(
+          (data as RpcBookingRow[]).map((b) => ({
+            ...b,
+            service: { name: b.service_name, price: b.service_price },
+            staff: b.staff_name ? { name: b.staff_name } : null,
+          }))
+        )
       }
       setLoading(false)
     }
@@ -157,10 +150,7 @@ export default function MyBookings() {
 
   async function handleCancel(bookingId: string) {
     setCancelling(bookingId)
-    await supabase
-      .from('bookings')
-      .update({ status: 'cancelled' })
-      .eq('id', bookingId)
+    await supabase.rpc('cancel_booking', { p_booking_id: bookingId })
     setBookings((prev) =>
       prev.map((b) => (b.id === bookingId ? { ...b, status: 'cancelled' } : b)),
     )
