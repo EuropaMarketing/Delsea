@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 import { format, parseISO, isBefore, addHours } from 'date-fns'
 import { CalendarClock, AlertTriangle, LogIn } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -125,6 +126,7 @@ export default function MyBookings() {
         .from('customers')
         .select('id')
         .eq('user_id', user!.id)
+        .eq('business_id', BUSINESS_ID)
         .maybeSingle()
 
       if (byUserId) {
@@ -134,6 +136,7 @@ export default function MyBookings() {
           .from('customers')
           .select('id')
           .eq('email', user!.email)
+          .eq('business_id', BUSINESS_ID)
           .maybeSingle()
         customerId = byEmail?.id ?? null
       }
@@ -143,6 +146,7 @@ export default function MyBookings() {
           .from('bookings')
           .select('*, service:services(name,price), staff:staff(name)')
           .eq('customer_id', customerId)
+          .eq('business_id', BUSINESS_ID)
           .order('starts_at', { ascending: false })
         if (bData) setBookings(bData as typeof bookings)
       }
