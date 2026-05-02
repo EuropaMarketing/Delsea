@@ -126,14 +126,17 @@ export default function MyBookings() {
 
   const [bookings, setBookings] = useState<MyBooking[]>([])
   const [loading, setLoading] = useState(true)
+  const [rpcError, setRpcError] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState<string | null>(null)
   const [cancelTarget, setCancelTarget] = useState<string | null>(null)
 
   useEffect(() => {
     if (!user) { setLoading(false); return }
     async function load() {
-      const { data } = await supabase.rpc('get_my_bookings', { p_business_id: BUSINESS_ID })
-      if (data) {
+      const { data, error } = await supabase.rpc('get_my_bookings', { p_business_id: BUSINESS_ID })
+      if (error) {
+        setRpcError(`${error.message} (code: ${error.code})`)
+      } else if (data) {
         type Row = MyBooking & { service_name: string; service_price: number; staff_name: string | null }
         setBookings(
           (data as Row[]).map((b) => ({
@@ -225,6 +228,11 @@ export default function MyBookings() {
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <CalendarClock className="h-10 w-10 text-gray-300 mb-3" />
           <p className="font-medium text-gray-500">No bookings yet.</p>
+          {rpcError && (
+            <p className="mt-3 text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2 max-w-sm text-left">
+              Debug: {rpcError}
+            </p>
+          )}
           <Link to="/book" className="mt-4">
             <Button>Book Now</Button>
           </Link>
