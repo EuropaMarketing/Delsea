@@ -279,9 +279,9 @@ export default function DateTimePicker() {
                   className={cn(
                     'aspect-square rounded-full text-sm flex items-center justify-center transition-all',
                     isSelected
-                      ? 'bg-[var(--color-primary)] text-white font-bold'
+                      ? 'bg-(--color-primary) text-white font-bold'
                       : isToday && hasSlots
-                      ? 'border-2 border-[var(--color-primary)] font-semibold text-[var(--color-primary)]'
+                      ? 'border-2 border-(--color-primary) font-semibold text-(--color-primary)'
                       : hasSlots
                       ? 'hover:bg-gray-100 text-gray-900 cursor-pointer'
                       : 'text-gray-300 cursor-not-allowed',
@@ -348,8 +348,8 @@ export default function DateTimePicker() {
                     className={cn(
                       'py-2.5 text-sm font-medium border transition-all [border-radius:var(--border-radius-sm)]',
                       selectedSlot === slot
-                        ? 'bg-[var(--color-primary)] text-white border-[var(--color-primary)]'
-                        : 'bg-white border-gray-200 text-gray-700 hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]',
+                        ? 'bg-(--color-primary) text-white border-(--color-primary)'
+                        : 'bg-white border-gray-200 text-gray-700 hover:border-(--color-primary) hover:text-(--color-primary)',
                     )}
                   >
                     {slot}

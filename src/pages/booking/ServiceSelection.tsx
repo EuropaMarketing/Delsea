@@ -17,7 +17,7 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 export default function ServiceSelection() {
   const navigate = useNavigate()
   const { draft, setService, setStaff, setServices, services } = useBookingStore()
-  const { favourites, toggle, isFavourite } = useFavourites()
+  const { toggle, isFavourite } = useFavourites()
   const previousBookings = usePreviousBookings()
 
   const [loading, setLoading] = useState(true)
