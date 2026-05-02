@@ -34,7 +34,7 @@ function CreateAccountForm({ email }: { email: string }) {
     if (password !== confirm) { setError('Passwords do not match'); return }
     setLoading(true)
     setError('')
-    const { error: err } = await supabase.auth.signUp({ email, password })
+    const { data, error: err } = await supabase.auth.signUp({ email, password })
     if (err) {
       if (err.message.toLowerCase().includes('already')) {
         setError('An account with this email already exists. Sign in from My Bookings.')
@@ -42,6 +42,14 @@ function CreateAccountForm({ email }: { email: string }) {
         setError('Something went wrong. You can set up your account later from My Bookings.')
       }
     } else {
+      // Link the guest customer record to the new auth account now, before
+      // showing the success message, so My Bookings loads correctly immediately.
+      if (data.user) {
+        await supabase.rpc('link_customer_to_user', {
+          p_user_id: data.user.id,
+          p_email: email,
+        })
+      }
       setDone(true)
     }
     setLoading(false)
