@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Plus, Pencil, Trash2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Plus, Pencil, Trash2, PlaneTakeoff, Camera } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
@@ -17,10 +17,9 @@ interface StaffForm {
   name: string
   role: string
   bio: string
-  avatar_url: string
 }
 
-const emptyForm: StaffForm = { name: '', role: 'staff', bio: '', avatar_url: '' }
+const emptyForm: StaffForm = { name: '', role: 'staff', bio: '' }
 
 interface DaySchedule {
   enabled: boolean
@@ -45,6 +44,10 @@ export default function AdminStaff() {
   const [form, setForm] = useState<StaffForm>(emptyForm)
   const [schedule, setSchedule] = useState<Record<number, DaySchedule>>(defaultSchedule())
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null)
+  const [avatarFile, setAvatarFile] = useState<File | null>(null)
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { load() }, [])
 
@@ -60,7 +63,10 @@ export default function AdminStaff() {
 
   async function openEdit(member: Staff) {
     setEditTarget(member)
-    setForm({ name: member.name, role: member.role, bio: member.bio ?? '', avatar_url: member.avatar_url ?? '' })
+    setForm({ name: member.name, role: member.role, bio: member.bio ?? '' })
+    setCurrentAvatarUrl(member.avatar_url ?? null)
+    setAvatarFile(null)
+    setAvatarPreview(null)
     setErrors({})
 
     const { data: avail } = await supabase
@@ -80,15 +86,35 @@ export default function AdminStaff() {
   function openCreate() {
     setEditTarget(null)
     setForm(emptyForm)
+    setCurrentAvatarUrl(null)
+    setAvatarFile(null)
+    setAvatarPreview(null)
     setSchedule(defaultSchedule())
     setErrors({})
     setModalOpen(true)
+  }
+
+  function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setAvatarFile(file)
+    setAvatarPreview(URL.createObjectURL(file))
   }
 
   function validate() {
     const e: Record<string, string> = {}
     if (!form.name.trim()) e.name = 'Name required'
     return e
+  }
+
+  async function uploadAvatar(staffId: string): Promise<string | null> {
+    if (!avatarFile) return currentAvatarUrl
+    const ext = avatarFile.name.split('.').pop()
+    const path = `avatars/${BUSINESS_ID}/${staffId}.${ext}`
+    const { error } = await supabase.storage.from('assets').upload(path, avatarFile, { upsert: true })
+    if (error) return currentAvatarUrl
+    const { data } = supabase.storage.from('assets').getPublicUrl(path)
+    return data.publicUrl
   }
 
   async function handleSave() {
@@ -99,28 +125,30 @@ export default function AdminStaff() {
     let staffId: string
 
     if (editTarget) {
-      const { data } = await supabase
-        .from('staff')
-        .update({ name: form.name, role: form.role, bio: form.bio || null, avatar_url: form.avatar_url || null })
-        .eq('id', editTarget.id)
-        .select().single()
-      if (data) setStaff((prev) => prev.map((s) => (s.id === editTarget.id ? data as Staff : s)))
       staffId = editTarget.id
-    } else {
+      const avatarUrl = await uploadAvatar(staffId)
       const { data } = await supabase
         .from('staff')
-        .insert({ ...form, bio: form.bio || null, avatar_url: form.avatar_url || null, business_id: BUSINESS_ID })
+        .update({ name: form.name, role: form.role, bio: form.bio || null, avatar_url: avatarUrl })
+        .eq('id', staffId)
         .select().single()
-      if (data) { setStaff((prev) => [...prev, data as Staff]); staffId = (data as Staff).id }
-      else { setSaving(false); return }
+      if (data) setStaff((prev) => prev.map((s) => (s.id === staffId ? data as Staff : s)))
+    } else {
+      staffId = crypto.randomUUID()
+      const avatarUrl = await uploadAvatar(staffId)
+      const { data } = await supabase
+        .from('staff')
+        .insert({ id: staffId, name: form.name, role: form.role, bio: form.bio || null, avatar_url: avatarUrl, business_id: BUSINESS_ID })
+        .select().single()
+      if (!data) { setSaving(false); return }
+      setStaff((prev) => [...prev, data as Staff])
     }
 
-    // Sync availability
-    await supabase.from('availability').delete().eq('staff_id', staffId!)
+    await supabase.from('availability').delete().eq('staff_id', staffId)
     const toInsert = Object.entries(schedule)
       .filter(([, v]) => v.enabled)
       .map(([day, v]) => ({
-        staff_id: staffId!,
+        staff_id: staffId,
         day_of_week: parseInt(day),
         start_time: v.start_time,
         end_time: v.end_time,
@@ -137,7 +165,15 @@ export default function AdminStaff() {
     setStaff((prev) => prev.filter((s) => s.id !== id))
   }
 
+  async function handleToggleHoliday(member: Staff) {
+    const on_holiday = !member.on_holiday
+    await supabase.from('staff').update({ on_holiday }).eq('id', member.id)
+    setStaff((prev) => prev.map((s) => (s.id === member.id ? { ...s, on_holiday } : s)))
+  }
+
   if (loading) return <FullPageSpinner />
+
+  const displayAvatar = avatarPreview ?? currentAvatarUrl
 
   return (
     <div>
@@ -151,18 +187,49 @@ export default function AdminStaff() {
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {staff.map((member) => (
-          <Card key={member.id} padding="md" className="flex flex-col gap-3">
+          <Card
+            key={member.id}
+            padding="md"
+            className={`flex flex-col gap-3 transition-opacity ${member.on_holiday ? 'opacity-60' : ''}`}
+          >
             <div className="flex items-center gap-3">
-              <Avatar src={member.avatar_url} name={member.name} size="lg" />
+              <div className="relative shrink-0">
+                <Avatar src={member.avatar_url} name={member.name} size="lg" />
+                {member.on_holiday && (
+                  <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-amber-400 flex items-center justify-center">
+                    <PlaneTakeoff className="h-3 w-3 text-white" />
+                  </span>
+                )}
+              </div>
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-gray-900 truncate">{member.name}</p>
-                <Badge variant="default" className="mt-1 capitalize">{member.role}</Badge>
+                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                  <Badge variant="default" className="capitalize">{member.role}</Badge>
+                  {member.on_holiday && <Badge variant="warning">On Holiday</Badge>}
+                </div>
               </div>
-              <div className="flex gap-1">
-                <button onClick={() => openEdit(member)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700">
+              <div className="flex gap-1 shrink-0">
+                <button
+                  onClick={() => handleToggleHoliday(member)}
+                  title={member.on_holiday ? 'End holiday' : 'Set on holiday'}
+                  className={`p-1.5 rounded-lg transition-colors ${
+                    member.on_holiday
+                      ? 'bg-amber-100 text-amber-600 hover:bg-amber-200'
+                      : 'hover:bg-gray-100 text-gray-400 hover:text-gray-700'
+                  }`}
+                >
+                  <PlaneTakeoff className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => openEdit(member)}
+                  className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700"
+                >
                   <Pencil className="h-4 w-4" />
                 </button>
-                <button onClick={() => handleDelete(member.id)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600">
+                <button
+                  onClick={() => handleDelete(member.id)}
+                  className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600"
+                >
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
@@ -179,22 +246,66 @@ export default function AdminStaff() {
         size="lg"
       >
         <div className="space-y-4">
+          {/* Avatar upload */}
+          <div className="flex flex-col items-center gap-2">
+            <div className="relative">
+              <Avatar
+                src={displayAvatar}
+                name={form.name || 'New'}
+                size="xl"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="absolute bottom-0 right-0 h-7 w-7 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center hover:bg-gray-50 transition-colors"
+                title="Upload photo"
+              >
+                <Camera className="h-3.5 w-3.5 text-gray-600" />
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="text-xs font-medium hover:underline"
+              style={{ color: 'var(--color-primary)' }}
+            >
+              {displayAvatar ? 'Change photo' : 'Upload photo'}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleAvatarChange}
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Name" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} error={errors.name} />
+            <Input
+              label="Name"
+              required
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              error={errors.name}
+            />
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium text-gray-700">Role</label>
               <select
                 value={form.role}
                 onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
-                className="h-10 px-3 text-sm border border-gray-200 bg-white [border-radius:var(--border-radius-sm)] outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                className="h-10 px-3 text-sm border border-gray-200 bg-white rounded-(--border-radius-sm) outline-none focus:ring-2 focus:ring-(--color-primary)"
               >
                 <option value="staff">Staff</option>
                 <option value="admin">Admin</option>
               </select>
             </div>
           </div>
-          <Input label="Avatar URL" value={form.avatar_url} onChange={(e) => setForm((f) => ({ ...f, avatar_url: e.target.value }))} placeholder="https://…" />
-          <Textarea label="Bio" value={form.bio} onChange={(e) => setForm((f) => ({ ...f, bio: e.target.value }))} />
+
+          <Textarea
+            label="Bio"
+            value={form.bio}
+            onChange={(e) => setForm((f) => ({ ...f, bio: e.target.value }))}
+          />
 
           {/* Working hours */}
           <div>
@@ -206,8 +317,10 @@ export default function AdminStaff() {
                     <input
                       type="checkbox"
                       checked={schedule[i].enabled}
-                      onChange={(e) => setSchedule((s) => ({ ...s, [i]: { ...s[i], enabled: e.target.checked } }))}
-                      className="accent-[var(--color-primary)]"
+                      onChange={(e) =>
+                        setSchedule((s) => ({ ...s, [i]: { ...s[i], enabled: e.target.checked } }))
+                      }
+                      className="accent-(--color-primary)"
                     />
                     <span className="text-sm text-gray-700">{day.slice(0, 3)}</span>
                   </label>
@@ -216,15 +329,19 @@ export default function AdminStaff() {
                       <input
                         type="time"
                         value={schedule[i].start_time}
-                        onChange={(e) => setSchedule((s) => ({ ...s, [i]: { ...s[i], start_time: e.target.value } }))}
-                        className="h-8 px-2 text-xs border border-gray-200 rounded-md outline-none focus:ring-1 focus:ring-[var(--color-primary)]"
+                        onChange={(e) =>
+                          setSchedule((s) => ({ ...s, [i]: { ...s[i], start_time: e.target.value } }))
+                        }
+                        className="h-8 px-2 text-xs border border-gray-200 rounded-md outline-none focus:ring-1 focus:ring-(--color-primary)"
                       />
                       <span className="text-xs text-gray-400">to</span>
                       <input
                         type="time"
                         value={schedule[i].end_time}
-                        onChange={(e) => setSchedule((s) => ({ ...s, [i]: { ...s[i], end_time: e.target.value } }))}
-                        className="h-8 px-2 text-xs border border-gray-200 rounded-md outline-none focus:ring-1 focus:ring-[var(--color-primary)]"
+                        onChange={(e) =>
+                          setSchedule((s) => ({ ...s, [i]: { ...s[i], end_time: e.target.value } }))
+                        }
+                        className="h-8 px-2 text-xs border border-gray-200 rounded-md outline-none focus:ring-1 focus:ring-(--color-primary)"
                       />
                     </>
                   )}

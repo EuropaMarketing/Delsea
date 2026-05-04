@@ -26,6 +26,7 @@ export default function StaffSelection() {
         .from('staff')
         .select('*')
         .eq('business_id', BUSINESS_ID)
+        .eq('on_holiday', false)
         .order('name')
       if (data) setStaffList(data as Staff[])
       setLoading(false)

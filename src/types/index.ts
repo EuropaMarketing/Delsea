@@ -14,6 +14,7 @@ export interface Staff {
   role: string
   avatar_url: string | null
   bio: string | null
+  on_holiday: boolean
 }
 
 export type DepositType = 'none' | 'fixed' | 'percentage'
