@@ -17,7 +17,7 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function DateTimePicker() {
   const navigate = useNavigate()
-  const { draft, services, staff, setDate, setTimeSlot } = useBookingStore()
+  const { draft, services, staff, setDate, setTimeSlot, rescheduleBookingId } = useBookingStore()
 
   const [calMonth, setCalMonth] = useState(() =>
     draft.date ? startOfMonth(draft.date) : startOfMonth(new Date())
@@ -367,8 +367,14 @@ export default function DateTimePicker() {
       </p>
 
       <div className="mt-6 flex justify-between">
-        <Button variant="secondary" onClick={() => navigate('/staff')}>Back</Button>
-        <Button size="lg" disabled={!canContinue} onClick={() => navigate('/details')}>Continue</Button>
+        <Button variant="secondary" onClick={() => navigate(rescheduleBookingId ? '/my-bookings' : '/staff')}>Back</Button>
+        <Button
+          size="lg"
+          disabled={!canContinue}
+          onClick={() => navigate(rescheduleBookingId ? '/reschedule-confirm' : '/details')}
+        >
+          {rescheduleBookingId ? 'Choose this time →' : 'Continue'}
+        </Button>
       </div>
     </div>
   )

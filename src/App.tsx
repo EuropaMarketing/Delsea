@@ -23,6 +23,7 @@ import CustomerDetails from '@/pages/booking/CustomerDetails'
 import Confirmation from '@/pages/booking/Confirmation'
 import MyBookings from '@/pages/booking/MyBookings'
 import BookingConfirmed from '@/pages/booking/BookingConfirmed'
+import RescheduleConfirm from '@/pages/booking/RescheduleConfirm'
 
 // Admin pages
 import ResetPassword from '@/pages/ResetPassword'
@@ -96,6 +97,14 @@ function AppRoutes() {
         element={
           <BookingLayout>
             <BookingConfirmed />
+          </BookingLayout>
+        }
+      />
+      <Route
+        path="/reschedule-confirm"
+        element={
+          <BookingLayout>
+            <RescheduleConfirm />
           </BookingLayout>
         }
       />

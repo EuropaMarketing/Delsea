@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { format, parseISO, isBefore, addHours } from 'date-fns'
-import { CalendarClock, AlertTriangle, LogIn } from 'lucide-react'
+import { CalendarClock, AlertTriangle, LogIn, CalendarRange, Phone } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
+import { useBookingStore } from '@/store/bookingStore'
+import { useBrandStore } from '@/store/brandStore'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -11,6 +13,7 @@ import { Card } from '@/components/ui/Card'
 import { Input, PasswordInput } from '@/components/ui/Input'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { Modal } from '@/components/ui/Modal'
+import type { Service } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
@@ -123,12 +126,18 @@ function SignInPrompt() {
 
 export default function MyBookings() {
   const { user } = useAuthStore()
+  const { services, setServices, setReschedule } = useBookingStore()
+  const { config } = useBrandStore()
+  const navigate = useNavigate()
+  const { state: locationState } = useLocation()
+  const justRescheduled = (locationState as { rescheduled?: boolean } | null)?.rescheduled ?? false
 
   const [bookings, setBookings] = useState<MyBooking[]>([])
   const [loading, setLoading] = useState(true)
   const [rpcError, setRpcError] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState<string | null>(null)
   const [cancelTarget, setCancelTarget] = useState<string | null>(null)
+  const [rescheduling, setRescheduling] = useState<string | null>(null)
 
   useEffect(() => {
     if (!user) { setLoading(false); return }
@@ -161,6 +170,22 @@ export default function MyBookings() {
     setCancelTarget(null)
   }
 
+  async function handleReschedule(booking: MyBooking) {
+    setRescheduling(booking.id)
+    // Ensure services are loaded in the store so DateTimePicker can generate slots
+    if (!services.length) {
+      const { data } = await supabase
+        .from('services')
+        .select('*')
+        .eq('business_id', BUSINESS_ID)
+        .eq('is_active', true)
+      if (data) setServices(data as Service[])
+    }
+    setReschedule(booking.id, booking.starts_at, booking.service_id, booking.staff_id)
+    setRescheduling(null)
+    navigate('/datetime')
+  }
+
   const upcoming = bookings.filter(
     (b) => b.status !== 'cancelled' && isBefore(new Date(), parseISO(b.starts_at)),
   )
@@ -172,9 +197,18 @@ export default function MyBookings() {
   if (!user) return <SignInPrompt />
 
   function BookingCard({ booking }: { booking: typeof bookings[0] }) {
-    const canCancel =
+    const now = new Date()
+    const startsAt = parseISO(booking.starts_at)
+    const isUpcoming = isBefore(now, startsAt)
+    const canActOnline =
       booking.status === 'confirmed' &&
-      isBefore(addHours(new Date(), 24), parseISO(booking.starts_at))
+      isUpcoming &&
+      isBefore(addHours(now, 24), startsAt)
+    const tooCloseToChange =
+      booking.status === 'confirmed' &&
+      isUpcoming &&
+      !isBefore(addHours(now, 24), startsAt)
+    const isThisRescheduling = rescheduling === booking.id
 
     return (
       <Card padding="md" className="flex flex-col gap-3">
@@ -192,21 +226,42 @@ export default function MyBookings() {
         <div className="flex items-center justify-between text-sm">
           <div className="flex items-center gap-1.5 text-gray-600">
             <CalendarClock className="h-3.5 w-3.5 shrink-0" />
-            <span>{format(parseISO(booking.starts_at), 'EEE d MMM yyyy, HH:mm')}</span>
+            <span>{format(startsAt, 'EEE d MMM yyyy, HH:mm')}</span>
           </div>
           <span className="font-bold text-gray-900">
             {booking.service ? formatCurrency(booking.service.price) : '—'}
           </span>
         </div>
-        {canCancel && (
-          <Button
-            variant="danger"
-            size="sm"
-            className="self-start"
-            onClick={() => setCancelTarget(booking.id)}
-          >
-            Cancel Booking
-          </Button>
+        {canActOnline && (
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={isThisRescheduling}
+              onClick={() => handleReschedule(booking)}
+            >
+              <CalendarRange className="h-3.5 w-3.5" />
+              Reschedule
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => setCancelTarget(booking.id)}
+            >
+              Cancel
+            </Button>
+          </div>
+        )}
+        {tooCloseToChange && (
+          <div className="flex items-start gap-2 text-xs text-gray-500 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+            <Phone className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-500" />
+            <span>
+              Within 24 hours of your appointment — to reschedule or cancel, please contact us at{' '}
+              <a href={`mailto:${config.businessEmail}`} className="font-medium text-amber-700 hover:underline">
+                {config.businessEmail}
+              </a>
+            </span>
+          </div>
         )}
       </Card>
     )
@@ -223,6 +278,16 @@ export default function MyBookings() {
           <Button size="sm">New Booking</Button>
         </Link>
       </div>
+
+      {justRescheduled && (
+        <div className="mb-5 flex items-start gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3.5">
+          <CalendarRange className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-green-800">Booking rescheduled</p>
+            <p className="text-xs text-green-600 mt-0.5">Your appointment has been moved to the new time.</p>
+          </div>
+        </div>
+      )}
 
       {bookings.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
