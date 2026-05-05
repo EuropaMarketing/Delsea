@@ -38,7 +38,7 @@ export default function Landing() {
             src={config.logo}
             alt={config.brandName}
             onError={() => setLogoFailed(true)}
-            className="h-20 w-auto max-w-xs object-contain mb-6"
+            className="h-44 w-auto max-w-55 object-contain mb-10"
           />
         ) : (
           <div
