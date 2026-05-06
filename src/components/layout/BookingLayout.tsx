@@ -31,9 +31,14 @@ export function BookingLayout({ children }: { children: React.ReactNode }) {
               {config.brandName}
             </span>
           </Link>
-          <Link to="/my-bookings" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
-            My Bookings
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link to="/memberships" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
+              Memberships
+            </Link>
+            <Link to="/my-bookings" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
+              My Bookings
+            </Link>
+          </div>
         </div>
       </header>
 

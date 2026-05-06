@@ -24,6 +24,8 @@ import Confirmation from '@/pages/booking/Confirmation'
 import MyBookings from '@/pages/booking/MyBookings'
 import BookingConfirmed from '@/pages/booking/BookingConfirmed'
 import RescheduleConfirm from '@/pages/booking/RescheduleConfirm'
+import MembershipPlans from '@/pages/booking/MembershipPlans'
+import MembershipConfirmed from '@/pages/booking/MembershipConfirmed'
 
 // Admin pages
 import ResetPassword from '@/pages/ResetPassword'
@@ -106,6 +108,22 @@ function AppRoutes() {
         element={
           <BookingLayout>
             <RescheduleConfirm />
+          </BookingLayout>
+        }
+      />
+      <Route
+        path="/memberships"
+        element={
+          <BookingLayout>
+            <MembershipPlans />
+          </BookingLayout>
+        }
+      />
+      <Route
+        path="/membership-confirmed"
+        element={
+          <BookingLayout>
+            <MembershipConfirmed />
           </BookingLayout>
         }
       />
