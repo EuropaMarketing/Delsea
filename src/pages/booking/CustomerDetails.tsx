@@ -69,6 +69,14 @@ export default function CustomerDetails() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Also check whenever the email field becomes a valid address (covers guest typing)
+  useEffect(() => {
+    if (!user && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      checkTokenBalance(form.email)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.email])
+
   async function checkTokenBalance(email: string) {
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setTokenInfo(null); return }
     const { data } = await supabase.rpc('get_customer_token_balance', {

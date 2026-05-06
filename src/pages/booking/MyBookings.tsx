@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { format, parseISO, isBefore, addHours } from 'date-fns'
-import { CalendarClock, AlertTriangle, LogIn, CalendarRange, Phone } from 'lucide-react'
+import { CalendarClock, AlertTriangle, LogIn, CalendarRange, Phone, Ticket } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { useBookingStore } from '@/store/bookingStore'
@@ -16,6 +16,14 @@ import { Modal } from '@/components/ui/Modal'
 import type { Service } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
+
+type MyMembership = {
+  id: string
+  tokens_remaining: number
+  purchased_at: string
+  expires_at: string | null
+  plan: { name: string; description: string | null; token_count: number } | null
+}
 
 type MyBooking = {
   id: string
@@ -132,7 +140,9 @@ export default function MyBookings() {
   const { state: locationState } = useLocation()
   const justRescheduled = (locationState as { rescheduled?: boolean } | null)?.rescheduled ?? false
 
+  const [tab, setTab] = useState<'bookings' | 'memberships'>('bookings')
   const [bookings, setBookings] = useState<MyBooking[]>([])
+  const [memberships, setMemberships] = useState<MyMembership[]>([])
   const [loading, setLoading] = useState(true)
   const [rpcError, setRpcError] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState<string | null>(null)
@@ -151,19 +161,27 @@ export default function MyBookings() {
           p_email: currentUser.email,
         })
       }
-      const { data, error } = await supabase.rpc('get_my_bookings', { p_business_id: BUSINESS_ID })
-      if (error) {
-        setRpcError(`${error.message} (code: ${error.code})`)
-      } else if (data) {
+      const [bRes, mRes] = await Promise.all([
+        supabase.rpc('get_my_bookings', { p_business_id: BUSINESS_ID }),
+        supabase
+          .from('customer_memberships')
+          .select('id, tokens_remaining, purchased_at, expires_at, plan:membership_plans(name, description, token_count)')
+          .order('purchased_at', { ascending: false }),
+      ])
+
+      if (bRes.error) {
+        setRpcError(`${bRes.error.message} (code: ${bRes.error.code})`)
+      } else if (bRes.data) {
         type Row = MyBooking & { service_name: string; service_price: number; staff_name: string | null }
         setBookings(
-          (data as Row[]).map((b) => ({
+          (bRes.data as Row[]).map((b) => ({
             ...b,
             service: { name: b.service_name, price: b.service_price },
             staff: b.staff_name ? { name: b.staff_name } : null,
           }))
         )
       }
+      if (mRes.data) setMemberships(mRes.data as unknown as MyMembership[])
       setLoading(false)
     }
     load()
@@ -280,60 +298,155 @@ export default function MyBookings() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">My Bookings</h1>
-          <p className="text-sm text-gray-500 mt-1">Manage your upcoming and past appointments.</p>
+          <h1 className="text-2xl font-bold text-gray-900">My Account</h1>
+          <p className="text-sm text-gray-500 mt-1">Manage your bookings and memberships.</p>
         </div>
         <Link to="/book">
           <Button size="sm">New Booking</Button>
         </Link>
       </div>
 
-      {justRescheduled && (
-        <div className="mb-5 flex items-start gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3.5">
-          <CalendarRange className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-green-800">Booking rescheduled</p>
-            <p className="text-xs text-green-600 mt-0.5">Your appointment has been moved to the new time.</p>
-          </div>
-        </div>
+      {/* Tabs */}
+      <div className="flex gap-1 mb-6 border-b border-gray-200">
+        {(['bookings', 'memberships'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2.5 text-sm font-medium capitalize border-b-2 transition-colors -mb-px flex items-center gap-1.5 ${
+              tab === t
+                ? 'border-(--color-primary) text-(--color-primary)'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {t === 'memberships' && <Ticket className="h-3.5 w-3.5" />}
+            {t === 'bookings' ? 'My Bookings' : `Memberships${memberships.length ? ` (${memberships.length})` : ''}`}
+          </button>
+        ))}
+      </div>
+
+      {/* Bookings tab */}
+      {tab === 'bookings' && (
+        <>
+          {justRescheduled && (
+            <div className="mb-5 flex items-start gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3.5">
+              <CalendarRange className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-green-800">Booking rescheduled</p>
+                <p className="text-xs text-green-600 mt-0.5">Your appointment has been moved to the new time.</p>
+              </div>
+            </div>
+          )}
+
+          {bookings.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <CalendarClock className="h-10 w-10 text-gray-300 mb-3" />
+              <p className="font-medium text-gray-500">No bookings yet.</p>
+              {rpcError && (
+                <p className="mt-3 text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2 max-w-sm text-left">
+                  Debug: {rpcError}
+                </p>
+              )}
+              <Link to="/book" className="mt-4">
+                <Button>Book Now</Button>
+              </Link>
+            </div>
+          ) : (
+            <div className="space-y-8">
+              {upcoming.length > 0 && (
+                <section>
+                  <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                    Upcoming ({upcoming.length})
+                  </h2>
+                  <div className="space-y-3">
+                    {upcoming.map((b) => <BookingCard key={b.id} booking={b} />)}
+                  </div>
+                </section>
+              )}
+              {past.length > 0 && (
+                <section>
+                  <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                    Past & Cancelled ({past.length})
+                  </h2>
+                  <div className="space-y-3 opacity-70">
+                    {past.map((b) => <BookingCard key={b.id} booking={b} />)}
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+        </>
       )}
 
-      {bookings.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <CalendarClock className="h-10 w-10 text-gray-300 mb-3" />
-          <p className="font-medium text-gray-500">No bookings yet.</p>
-          {rpcError && (
-            <p className="mt-3 text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2 max-w-sm text-left">
-              Debug: {rpcError}
-            </p>
-          )}
-          <Link to="/book" className="mt-4">
-            <Button>Book Now</Button>
-          </Link>
-        </div>
-      ) : (
-        <div className="space-y-8">
-          {upcoming.length > 0 && (
-            <section>
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                Upcoming ({upcoming.length})
-              </h2>
-              <div className="space-y-3">
-                {upcoming.map((b) => <BookingCard key={b.id} booking={b} />)}
+      {/* Memberships tab */}
+      {tab === 'memberships' && (
+        <div>
+          {memberships.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <Ticket className="h-10 w-10 text-gray-300 mb-3" />
+              <p className="font-medium text-gray-500">No memberships yet.</p>
+              <Link to="/memberships" className="mt-4">
+                <Button>Browse Plans</Button>
+              </Link>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {memberships.map((m) => {
+                const total = m.plan?.token_count ?? 0
+                const remaining = m.tokens_remaining
+                const pct = total > 0 ? Math.round((remaining / total) * 100) : 0
+                return (
+                  <Card key={m.id} padding="md" className="flex flex-col gap-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-gray-900">{m.plan?.name ?? 'Membership'}</p>
+                        {m.plan?.description && (
+                          <p className="text-xs text-gray-500 mt-0.5">{m.plan.description}</p>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span
+                          className={`text-2xl font-extrabold ${remaining === 0 ? 'text-gray-300' : ''}`}
+                          style={remaining > 0 ? { color: 'var(--color-primary)' } : undefined}
+                        >
+                          {remaining}
+                        </span>
+                        <p className="text-xs text-gray-400">of {total} sessions left</p>
+                      </div>
+                    </div>
+
+                    {/* Progress bar */}
+                    <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="h-1.5 rounded-full transition-all"
+                        style={{ width: `${pct}%`, backgroundColor: 'var(--color-primary)' }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs text-gray-400">
+                      <span>Purchased {format(parseISO(m.purchased_at), 'd MMM yyyy')}</span>
+                      {m.expires_at ? (
+                        <span>Expires {format(parseISO(m.expires_at), 'd MMM yyyy')}</span>
+                      ) : (
+                        <span>No expiry</span>
+                      )}
+                    </div>
+
+                    {remaining === 0 && (
+                      <Link to="/memberships">
+                        <Button variant="secondary" size="sm" fullWidth>Buy More Sessions</Button>
+                      </Link>
+                    )}
+                  </Card>
+                )
+              })}
+              <div className="pt-2 text-center">
+                <Link to="/memberships" className="text-sm font-medium" style={{ color: 'var(--color-primary)' }}>
+                  Browse membership plans →
+                </Link>
               </div>
-            </section>
-          )}
-          {past.length > 0 && (
-            <section>
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                Past & Cancelled ({past.length})
-              </h2>
-              <div className="space-y-3 opacity-70">
-                {past.map((b) => <BookingCard key={b.id} booking={b} />)}
-              </div>
-            </section>
+            </div>
           )}
         </div>
       )}
