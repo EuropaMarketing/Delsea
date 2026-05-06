@@ -4,9 +4,9 @@ import {
   LayoutDashboard, Calendar, List, Scissors, Users, Settings,
   LogOut, Menu, X, Ticket,
 } from 'lucide-react'
-import brand from '@/config/brand'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
+import { useBrandStore } from '@/store/brandStore'
 import { cn } from '@/lib/cn'
 
 const navItems = [
@@ -42,6 +42,7 @@ function NavLink({ item, onClick }: { item: typeof navItems[0]; onClick?: () => 
 export function AdminLayout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
   const { setSession } = useAuthStore()
+  const { config } = useBrandStore()
   const [mobileOpen, setMobileOpen] = useState(false)
 
   const handleLogout = async () => {
@@ -54,7 +55,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
     <div className="flex flex-col h-full">
       <div className="px-4 py-5 border-b border-gray-100">
         <span className="font-bold text-base" style={{ color: 'var(--color-primary)' }}>
-          {brand.brandName}
+          {config.brandName}
         </span>
         <p className="text-xs text-gray-400 mt-0.5">Admin Panel</p>
       </div>
@@ -105,7 +106,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
             <Menu className="h-5 w-5" />
           </button>
           <span className="font-semibold text-sm" style={{ color: 'var(--color-primary)' }}>
-            {brand.brandName} Admin
+            {config.brandName} Admin
           </span>
         </header>
 

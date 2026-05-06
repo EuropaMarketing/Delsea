@@ -3,12 +3,12 @@ import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { format } from 'date-fns'
 import { CheckCircle2, Calendar, CalendarClock, User, Clock, PoundSterling } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { useBrandStore } from '@/store/brandStore'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PasswordInput } from '@/components/ui/Input'
 import { buildICSLink } from '@/lib/slots'
 import { formatCurrency, formatDuration } from '@/lib/currency'
-import brand from '@/config/brand'
 
 interface ConfirmedState {
   bookingRef: string
@@ -108,6 +108,7 @@ function CreateAccountForm({ email }: { email: string }) {
 export default function BookingConfirmed() {
   const { state } = useLocation()
   const navigate = useNavigate()
+  const { config } = useBrandStore()
 
   if (!state?.bookingRef) {
     navigate('/book', { replace: true })
@@ -119,10 +120,10 @@ export default function BookingConfirmed() {
   const endsAt = new Date(s.endsAt)
 
   const icsUrl = buildICSLink(
-    `${s.serviceName} at ${brand.brandName}`,
+    `${s.serviceName} at ${config.brandName}`,
     s.startsAt,
     s.endsAt,
-    brand.brandName,
+    config.brandName,
     `Booking reference: ${s.bookingRef}`,
   )
 

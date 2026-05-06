@@ -2,13 +2,14 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
+import { useBrandStore } from '@/store/brandStore'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
-import brand from '@/config/brand'
 
 export default function AdminLogin() {
   const navigate = useNavigate()
   const { setSession, setAdmin } = useAuthStore()
+  const { config } = useBrandStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -52,7 +53,7 @@ export default function AdminLogin() {
     <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: 'var(--color-background)' }}>
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">{brand.brandName}</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{config.brandName}</h1>
           <p className="text-sm text-gray-500 mt-1">Admin sign in</p>
         </div>
         <div className="bg-white border border-gray-200 brand-card p-6 shadow-sm">

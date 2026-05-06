@@ -1,7 +1,7 @@
 import React from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { CheckCircle2, ChevronRight } from 'lucide-react'
-import brand from '@/config/brand'
+import { useBrandStore } from '@/store/brandStore'
 import { cn } from '@/lib/cn'
 
 const steps = [
@@ -14,6 +14,7 @@ const steps = [
 
 export function BookingLayout({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation()
+  const { config } = useBrandStore()
   const currentIdx = steps.findIndex((s) => s.path === pathname)
 
   return (
@@ -22,12 +23,12 @@ export function BookingLayout({ children }: { children: React.ReactNode }) {
       <header className="bg-white border-b border-gray-100 sticky top-0 z-30">
         <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
-            <img src={brand.logo} alt={brand.brandName} className="h-8 w-auto" onError={(e) => {
+            <img src={config.logo} alt={config.brandName} className="h-8 w-auto" onError={(e) => {
               const t = e.target as HTMLImageElement
               t.style.display = 'none'
             }} />
             <span className="font-semibold text-base" style={{ color: 'var(--color-primary)' }}>
-              {brand.brandName}
+              {config.brandName}
             </span>
           </Link>
           <Link to="/my-bookings" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
@@ -86,21 +87,21 @@ export function BookingLayout({ children }: { children: React.ReactNode }) {
 
       {/* Footer */}
       <footer className="py-8 text-center text-xs text-gray-400 border-t border-gray-100 mt-auto">
-        <p>© {new Date().getFullYear()} {brand.brandName} · {brand.businessEmail}</p>
-        {brand.socialLinks && (
+        <p>© {new Date().getFullYear()} {config.brandName} · {config.businessEmail}</p>
+        {config.socialLinks && (
           <div className="flex justify-center gap-4 mt-2">
-            {brand.socialLinks.instagram && (
-              <a href={brand.socialLinks.instagram} target="_blank" rel="noreferrer" className="hover:text-gray-600">
+            {config.socialLinks.instagram && (
+              <a href={config.socialLinks.instagram} target="_blank" rel="noreferrer" className="hover:text-gray-600">
                 Instagram
               </a>
             )}
-            {brand.socialLinks.facebook && (
-              <a href={brand.socialLinks.facebook} target="_blank" rel="noreferrer" className="hover:text-gray-600">
+            {config.socialLinks.facebook && (
+              <a href={config.socialLinks.facebook} target="_blank" rel="noreferrer" className="hover:text-gray-600">
                 Facebook
               </a>
             )}
-            {brand.socialLinks.tiktok && (
-              <a href={brand.socialLinks.tiktok} target="_blank" rel="noreferrer" className="hover:text-gray-600">
+            {config.socialLinks.tiktok && (
+              <a href={config.socialLinks.tiktok} target="_blank" rel="noreferrer" className="hover:text-gray-600">
                 TikTok
               </a>
             )}
