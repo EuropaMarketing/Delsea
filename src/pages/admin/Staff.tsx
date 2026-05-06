@@ -48,6 +48,8 @@ export default function AdminStaff() {
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null)
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
+  const [avatarError, setAvatarError] = useState('')
+  const [saveError, setSaveError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Leave / blocked-time modal
@@ -76,6 +78,8 @@ export default function AdminStaff() {
     setCurrentAvatarUrl(member.avatar_url ?? null)
     setAvatarFile(null)
     setAvatarPreview(null)
+    setAvatarError('')
+    setSaveError('')
     setErrors({})
 
     const { data: avail } = await supabase
@@ -98,6 +102,8 @@ export default function AdminStaff() {
     setCurrentAvatarUrl(null)
     setAvatarFile(null)
     setAvatarPreview(null)
+    setAvatarError('')
+    setSaveError('')
     setSchedule(defaultSchedule())
     setErrors({})
     setModalOpen(true)
@@ -118,10 +124,14 @@ export default function AdminStaff() {
 
   async function uploadAvatar(staffId: string): Promise<string | null> {
     if (!avatarFile) return currentAvatarUrl
+    setAvatarError('')
     const ext = avatarFile.name.split('.').pop()
     const path = `avatars/${BUSINESS_ID}/${staffId}.${ext}`
     const { error } = await supabase.storage.from('assets').upload(path, avatarFile, { upsert: true })
-    if (error) return currentAvatarUrl
+    if (error) {
+      setAvatarError(`Photo upload failed: ${error.message}`)
+      return currentAvatarUrl
+    }
     const { data } = supabase.storage.from('assets').getPublicUrl(path)
     return data.publicUrl
   }
@@ -130,25 +140,28 @@ export default function AdminStaff() {
     const e = validate()
     if (Object.keys(e).length) { setErrors(e); return }
     setSaving(true)
+    setSaveError('')
 
     let staffId: string
 
     if (editTarget) {
       staffId = editTarget.id
       const avatarUrl = await uploadAvatar(staffId)
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('staff')
         .update({ name: form.name, role: form.role, bio: form.bio || null, avatar_url: avatarUrl })
         .eq('id', staffId)
         .select().single()
+      if (error) { setSaveError(error.message); setSaving(false); return }
       if (data) setStaff((prev) => prev.map((s) => (s.id === staffId ? data as Staff : s)))
     } else {
       staffId = crypto.randomUUID()
       const avatarUrl = await uploadAvatar(staffId)
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('staff')
         .insert({ id: staffId, name: form.name, role: form.role, bio: form.bio || null, avatar_url: avatarUrl, business_id: BUSINESS_ID })
         .select().single()
+      if (error) { setSaveError(error.message); setSaving(false); return }
       if (!data) { setSaving(false); return }
       setStaff((prev) => [...prev, data as Staff])
     }
@@ -331,6 +344,9 @@ export default function AdminStaff() {
               className="hidden"
               onChange={handleAvatarChange}
             />
+            {avatarError && (
+              <p className="text-xs text-red-500 text-center max-w-xs">{avatarError}</p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -403,6 +419,11 @@ export default function AdminStaff() {
             </div>
           </div>
 
+          {saveError && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {saveError}
+            </p>
+          )}
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
             <Button loading={saving} onClick={handleSave}>Save</Button>
