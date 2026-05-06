@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CalendarCheck, Lock } from 'lucide-react'
+import { CalendarCheck, Lock, Info } from 'lucide-react'
 import { useBrandStore } from '@/store/brandStore'
 import { Button } from '@/components/ui/Button'
 
@@ -21,13 +21,16 @@ export default function Landing() {
           <span className="font-bold text-lg" style={{ color: 'var(--color-primary)' }}>
             {config.brandName}
           </span>
-          <Link
-            to="/admin/login"
-            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <Lock className="h-3.5 w-3.5" />
-            Staff login
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link to="/about" className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 transition-colors">
+              <Info className="h-3.5 w-3.5" />
+              About
+            </Link>
+            <Link to="/admin/login" className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors">
+              <Lock className="h-3.5 w-3.5" />
+              Staff login
+            </Link>
+          </div>
         </div>
       </header>
 

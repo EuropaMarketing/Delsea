@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Calendar, List, Scissors, Users, Settings,
-  LogOut, Menu, X, Ticket, UserRound, Banknote,
+  LogOut, Menu, X, Ticket, UserRound, Banknote, Images, Star,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
@@ -18,6 +18,8 @@ const navItems = [
   { label: 'Clients',      icon: UserRound,  path: '/admin/clients' },
   { label: 'Memberships',  icon: Ticket,     path: '/admin/memberships' },
   { label: 'Payroll',      icon: Banknote,   path: '/admin/payroll' },
+  { label: 'Portfolio',    icon: Images,     path: '/admin/portfolio' },
+  { label: 'Reviews',      icon: Star,       path: '/admin/reviews' },
   { label: 'Settings',     icon: Settings,   path: '/admin/settings' },
 ]
 

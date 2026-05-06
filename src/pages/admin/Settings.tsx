@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Upload, ImageIcon } from 'lucide-react'
 import { Textarea } from '@/components/ui/Input'
-import brand, { type BrandConfig, type BorderRadius } from '@/config/brand'
+import brand, { type BrandConfig, type BorderRadius, type OpeningHoursEntry, DEFAULT_OPENING_HOURS } from '@/config/brand'
 import { applyBrandTheme } from '@/lib/theme'
 import { supabase } from '@/lib/supabase'
 import { Input } from '@/components/ui/Input'
@@ -29,7 +29,11 @@ export default function AdminSettings() {
       .eq('id', BUSINESS_ID)
       .single()
       .then(({ data }) => {
-        if (data?.config) setConfig({ ...brand, ...data.config })
+        if (data?.config) {
+        const merged = { ...brand, ...data.config } as BrandConfig
+        if (!merged.openingHours) merged.openingHours = DEFAULT_OPENING_HOURS
+        setConfig(merged)
+      }
       })
   }, [])
 
@@ -219,6 +223,91 @@ export default function AdminSettings() {
               onChange={(e) => handleChange('socialLinks', { ...config.socialLinks, tiktok: e.target.value || undefined })}
               placeholder="https://tiktok.com/@…"
             />
+          </div>
+        </Card>
+
+        {/* About */}
+        <Card padding="md">
+          <h2 className="font-semibold text-gray-900 mb-1">About</h2>
+          <p className="text-xs text-gray-500 mb-4">Shown in the About section of your public page.</p>
+          <Textarea
+            label="About text"
+            value={config.aboutText ?? ''}
+            onChange={(e) => handleChange('aboutText', e.target.value || undefined)}
+            placeholder="Tell clients about your business, your story, and what makes you special…"
+            rows={5}
+          />
+        </Card>
+
+        {/* Opening Hours */}
+        <Card padding="md">
+          <h2 className="font-semibold text-gray-900 mb-1">Opening Hours</h2>
+          <p className="text-xs text-gray-500 mb-4">Displayed on your public About page.</p>
+          <div className="space-y-2">
+            {(config.openingHours ?? DEFAULT_OPENING_HOURS).map((entry, i) => (
+              <div key={entry.day} className="grid grid-cols-[80px_1fr_1fr_auto] items-center gap-2">
+                <span className="text-sm font-medium text-gray-700">{entry.day.slice(0, 3)}</span>
+                <input
+                  type="time"
+                  value={entry.open}
+                  disabled={entry.closed}
+                  onChange={(e) => {
+                    const hours = [...(config.openingHours ?? DEFAULT_OPENING_HOURS)]
+                    hours[i] = { ...hours[i], open: e.target.value }
+                    handleChange('openingHours', hours)
+                  }}
+                  className="h-9 px-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) disabled:opacity-40 disabled:bg-gray-50"
+                />
+                <input
+                  type="time"
+                  value={entry.close}
+                  disabled={entry.closed}
+                  onChange={(e) => {
+                    const hours = [...(config.openingHours ?? DEFAULT_OPENING_HOURS)]
+                    hours[i] = { ...hours[i], close: e.target.value }
+                    handleChange('openingHours', hours)
+                  }}
+                  className="h-9 px-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) disabled:opacity-40 disabled:bg-gray-50"
+                />
+                <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    checked={entry.closed}
+                    onChange={(e) => {
+                      const hours = [...(config.openingHours ?? DEFAULT_OPENING_HOURS)]
+                      hours[i] = { ...hours[i], closed: e.target.checked }
+                      handleChange('openingHours', hours)
+                    }}
+                    className="accent-(--color-primary)"
+                  />
+                  Closed
+                </label>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* Location */}
+        <Card padding="md">
+          <h2 className="font-semibold text-gray-900 mb-1">Location</h2>
+          <p className="text-xs text-gray-500 mb-4">Shown on your public About page.</p>
+          <div className="space-y-4">
+            <Textarea
+              label="Address"
+              value={config.address ?? ''}
+              onChange={(e) => handleChange('address', e.target.value || undefined)}
+              placeholder={'123 High Street\nLondon\nSW1A 1AA'}
+              rows={3}
+            />
+            <Input
+              label="Map embed URL"
+              value={config.mapEmbedUrl ?? ''}
+              onChange={(e) => handleChange('mapEmbedUrl', e.target.value || undefined)}
+              placeholder="https://www.google.com/maps/embed?pb=…"
+            />
+            <p className="text-xs text-gray-400">
+              In Google Maps: Share → Embed a map → copy the <code className="bg-gray-100 px-1 rounded">src</code> value from the iframe code.
+            </p>
           </div>
         </Card>
 

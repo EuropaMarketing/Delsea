@@ -26,6 +26,7 @@ import BookingConfirmed from '@/pages/booking/BookingConfirmed'
 import RescheduleConfirm from '@/pages/booking/RescheduleConfirm'
 import MembershipPlans from '@/pages/booking/MembershipPlans'
 import MembershipConfirmed from '@/pages/booking/MembershipConfirmed'
+import About from '@/pages/booking/About'
 
 // Admin pages
 import ResetPassword from '@/pages/ResetPassword'
@@ -39,6 +40,8 @@ import AdminSettings from '@/pages/admin/Settings'
 import AdminMemberships from '@/pages/admin/Memberships'
 import AdminClients from '@/pages/admin/Clients'
 import AdminPayroll from '@/pages/admin/Payroll'
+import AdminPortfolio from '@/pages/admin/Portfolio'
+import AdminReviews from '@/pages/admin/Reviews'
 
 function AppRoutes() {
   useAuthListener()
@@ -129,6 +132,14 @@ function AppRoutes() {
           </BookingLayout>
         }
       />
+      <Route
+        path="/about"
+        element={
+          <BookingLayout>
+            <About />
+          </BookingLayout>
+        }
+      />
 
       {/* Password reset (linked from email) */}
       <Route path="/reset-password" element={<ResetPassword />} />
@@ -213,6 +224,26 @@ function AppRoutes() {
           <ProtectedRoute adminOnly>
             <AdminLayout>
               <AdminPayroll />
+            </AdminLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/portfolio"
+        element={
+          <ProtectedRoute adminOnly>
+            <AdminLayout>
+              <AdminPortfolio />
+            </AdminLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/reviews"
+        element={
+          <ProtectedRoute adminOnly>
+            <AdminLayout>
+              <AdminReviews />
             </AdminLayout>
           </ProtectedRoute>
         }
