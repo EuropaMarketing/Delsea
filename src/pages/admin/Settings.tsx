@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Upload, ImageIcon } from 'lucide-react'
 import { Textarea } from '@/components/ui/Input'
-import brand, { type BrandConfig, type BorderRadius, type OpeningHoursEntry, DEFAULT_OPENING_HOURS } from '@/config/brand'
+import brand, { type BrandConfig, type BorderRadius, DEFAULT_OPENING_HOURS } from '@/config/brand'
 import { applyBrandTheme } from '@/lib/theme'
 import { supabase } from '@/lib/supabase'
 import { Input } from '@/components/ui/Input'
