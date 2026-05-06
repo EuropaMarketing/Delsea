@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { BookingDraft, Service, Staff } from '@/types'
+import type { BookingDraft, Service, ServiceVariant, Staff } from '@/types'
 
 interface BookingStore {
   draft: BookingDraft
@@ -11,6 +11,7 @@ interface BookingStore {
   tokenMembershipId: string | null
   tokenPlanName: string | null
   setService: (serviceId: string) => void
+  setVariant: (variant: ServiceVariant | null) => void
   setStaff: (staffId: string | null) => void
   setDate: (date: Date) => void
   setTimeSlot: (slot: string) => void
@@ -25,6 +26,10 @@ interface BookingStore {
 
 const emptyDraft: BookingDraft = {
   serviceId: null,
+  variantId: null,
+  variantName: null,
+  variantDuration: null,
+  variantPrice: null,
   staffId: null,
   date: null,
   timeSlot: null,
@@ -45,7 +50,20 @@ export const useBookingStore = create<BookingStore>((set) => ({
   tokenPlanName: null,
 
   setService: (serviceId) =>
-    set((s) => ({ draft: { ...s.draft, serviceId, staffId: null, date: null, timeSlot: null } })),
+    set((s) => ({ draft: { ...s.draft, serviceId, variantId: null, variantName: null, variantDuration: null, variantPrice: null, staffId: null, date: null, timeSlot: null } })),
+
+  setVariant: (variant) =>
+    set((s) => ({
+      draft: {
+        ...s.draft,
+        variantId: variant?.id ?? null,
+        variantName: variant?.name ?? null,
+        variantDuration: variant?.duration_minutes ?? null,
+        variantPrice: variant?.price ?? null,
+        date: null,
+        timeSlot: null,
+      },
+    })),
 
   setStaff: (staffId) =>
     set((s) => ({ draft: { ...s.draft, staffId, date: null, timeSlot: null } })),

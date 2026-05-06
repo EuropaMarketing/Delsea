@@ -19,6 +19,16 @@ export interface Staff {
 
 export type DepositType = 'none' | 'fixed' | 'percentage'
 
+export interface ServiceVariant {
+  id: string
+  service_id: string
+  name: string
+  duration_minutes: number
+  price: number
+  is_active: boolean
+  sort_order: number
+}
+
 export interface Service {
   id: string
   business_id: string
@@ -31,6 +41,7 @@ export interface Service {
   is_self_service: boolean
   deposit_type: DepositType
   deposit_value: number
+  variants?: ServiceVariant[]
 }
 
 export interface Availability {
@@ -100,6 +111,10 @@ export interface BlockedTime {
 
 export interface BookingDraft {
   serviceId: string | null
+  variantId: string | null
+  variantName: string | null
+  variantDuration: number | null
+  variantPrice: number | null
   staffId: string | null
   date: Date | null
   timeSlot: string | null

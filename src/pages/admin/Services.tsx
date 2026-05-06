@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { Service, DepositType } from '@/types'
+import type { Service, ServiceVariant, DepositType } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
@@ -25,13 +25,17 @@ export default function AdminServices() {
   const [editTarget, setEditTarget] = useState<Service | null>(null)
   const [form, setForm] = useState(empty)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [variantsList, setVariantsList] = useState<ServiceVariant[]>([])
+  const [variantForm, setVariantForm] = useState({ name: '', duration_minutes: 60, price: '' })
+  const [addingVariant, setAddingVariant] = useState(false)
+  const [savingVariant, setSavingVariant] = useState(false)
 
   useEffect(() => { load() }, [])
 
   async function load() {
     const { data } = await supabase
       .from('services')
-      .select('*')
+      .select('*, variants:service_variants(id, name, duration_minutes, price, sort_order, is_active)')
       .eq('business_id', BUSINESS_ID)
       .order('category').order('name')
     if (data) setServices(data as Service[])
@@ -45,10 +49,19 @@ export default function AdminServices() {
     setModalOpen(true)
   }
 
-  function openEdit(service: Service) {
+  async function openEdit(service: Service) {
     setEditTarget(service)
     setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, is_self_service: service.is_self_service, deposit_type: service.deposit_type, deposit_value: service.deposit_value })
     setErrors({})
+    setVariantForm({ name: '', duration_minutes: 60, price: '' })
+    setAddingVariant(false)
+    const { data } = await supabase
+      .from('service_variants')
+      .select('*')
+      .eq('service_id', service.id)
+      .eq('is_active', true)
+      .order('sort_order')
+    setVariantsList((data as ServiceVariant[]) ?? [])
     setModalOpen(true)
   }
 
@@ -87,6 +100,33 @@ export default function AdminServices() {
     setServices((prev) => prev.filter((s) => s.id !== id))
   }
 
+  async function handleAddVariant() {
+    if (!editTarget || !variantForm.name.trim()) return
+    setSavingVariant(true)
+    const priceInPence = Math.round(parseFloat(String(variantForm.price)) * 100) || 0
+    const { data } = await supabase
+      .from('service_variants')
+      .insert({
+        service_id: editTarget.id,
+        name: variantForm.name,
+        duration_minutes: variantForm.duration_minutes,
+        price: priceInPence,
+        sort_order: variantsList.length,
+      })
+      .select().single()
+    if (data) {
+      setVariantsList((prev) => [...prev, data as ServiceVariant])
+      setVariantForm({ name: '', duration_minutes: 60, price: '' })
+      setAddingVariant(false)
+    }
+    setSavingVariant(false)
+  }
+
+  async function handleDeleteVariant(id: string) {
+    await supabase.from('service_variants').update({ is_active: false }).eq('id', id)
+    setVariantsList((prev) => prev.filter((v) => v.id !== id))
+  }
+
   if (loading) return <FullPageSpinner />
 
   return (
@@ -113,12 +153,23 @@ export default function AdminServices() {
                 <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{service.description}</p>
               )}
               <p className="text-xs text-gray-400 mt-1">
-                {formatDuration(service.duration_minutes)} · {formatCurrency(service.price)}
-                {service.deposit_type !== 'none' && (
-                  <span className="ml-1 text-amber-600">
-                    · {formatCurrency(calculateDeposit(service))} deposit
-                  </span>
-                )}
+                {(() => {
+                  const av = (service.variants ?? []).filter((v) => v.is_active)
+                  return av.length > 0 ? (
+                    <>
+                      {av.length} variant{av.length !== 1 ? 's' : ''} · from {formatCurrency(Math.min(...av.map((v) => v.price)))}
+                    </>
+                  ) : (
+                    <>
+                      {formatDuration(service.duration_minutes)} · {formatCurrency(service.price)}
+                      {service.deposit_type !== 'none' && (
+                        <span className="ml-1 text-amber-600">
+                          · {formatCurrency(calculateDeposit(service))} deposit
+                        </span>
+                      )}
+                    </>
+                  )
+                })()}
               </p>
             </div>
             <div className="flex items-center gap-1 flex-shrink-0">
@@ -202,6 +253,82 @@ export default function AdminServices() {
               </p>
             </div>
           </label>
+
+          {/* Variants — only available when editing an existing service */}
+          {editTarget && (
+            <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-gray-700">Variants</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Different durations / prices for the same service, e.g. 45 min £45 or 60 min £60.
+                  </p>
+                </div>
+                {!addingVariant && (
+                  <button
+                    type="button"
+                    onClick={() => setAddingVariant(true)}
+                    className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-full border transition-colors"
+                    style={{ borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add
+                  </button>
+                )}
+              </div>
+
+              {variantsList.map((v) => (
+                <div key={v.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-2">
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-gray-900">{v.name}</span>
+                    <span className="text-xs text-gray-500 ml-2">
+                      {formatDuration(v.duration_minutes)} · {formatCurrency(v.price)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteVariant(v.id)}
+                    className="text-gray-400 hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+
+              {addingVariant && (
+                <div className="bg-white border border-gray-200 rounded-lg p-3 space-y-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <Input
+                      label="Name"
+                      value={variantForm.name}
+                      onChange={(e) => setVariantForm((f) => ({ ...f, name: e.target.value }))}
+                      placeholder="e.g. 45 min"
+                    />
+                    <Input
+                      label="Duration (min)"
+                      type="number"
+                      min={5}
+                      value={variantForm.duration_minutes}
+                      onChange={(e) => setVariantForm((f) => ({ ...f, duration_minutes: parseInt(e.target.value) || 0 }))}
+                    />
+                    <Input
+                      label="Price (£)"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={variantForm.price}
+                      onChange={(e) => setVariantForm((f) => ({ ...f, price: e.target.value }))}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" loading={savingVariant} onClick={handleAddVariant}>Add</Button>
+                    <Button size="sm" variant="secondary" onClick={() => setAddingVariant(false)}>Cancel</Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Deposit */}
           <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">

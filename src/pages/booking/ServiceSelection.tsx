@@ -10,13 +10,13 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { Service } from '@/types'
+import type { Service, ServiceVariant } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function ServiceSelection() {
   const navigate = useNavigate()
-  const { draft, setService, setStaff, setServices, services } = useBookingStore()
+  const { draft, setService, setVariant, setStaff, setServices, services } = useBookingStore()
   const { toggle, isFavourite } = useFavourites()
   const previousBookings = usePreviousBookings()
 
@@ -24,12 +24,16 @@ export default function ServiceSelection() {
   const [search, setSearch] = useState('')
   const [activeCategory, setActiveCategory] = useState('All')
   const [selected, setSelected] = useState<string | null>(draft.serviceId)
+  // tracks the chosen variant per service card
+  const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>(() =>
+    draft.variantId && draft.serviceId ? { [draft.serviceId]: draft.variantId } : {}
+  )
 
   useEffect(() => {
     async function load() {
       const { data } = await supabase
         .from('services')
-        .select('*')
+        .select('*, variants:service_variants(id, name, duration_minutes, price, sort_order, is_active)')
         .eq('business_id', BUSINESS_ID)
         .eq('is_active', true)
         .order('category')
@@ -53,9 +57,28 @@ export default function ServiceSelection() {
   function handleSelect(service: Service) {
     setSelected(service.id)
     setService(service.id)
+    // Restore previously chosen variant for this service
+    const prevVariantId = selectedVariants[service.id]
+    if (prevVariantId) {
+      const variant = service.variants?.find((v) => v.id === prevVariantId)
+      if (variant) setVariant(variant)
+    }
+  }
+
+  function handleSelectVariant(service: Service, variant: ServiceVariant) {
+    setSelected(service.id)
+    setService(service.id)
+    setSelectedVariants((prev) => ({ ...prev, [service.id]: variant.id }))
+    setVariant(variant)
   }
 
   function handleQuickBook(service: Service) {
+    const activeVariants = service.variants?.filter((v) => v.is_active) ?? []
+    if (activeVariants.length > 0) {
+      // Variants require explicit selection — scroll the card into view
+      handleSelect(service)
+      return
+    }
     setService(service.id)
     if (service.is_self_service) {
       setStaff(null)
@@ -66,6 +89,13 @@ export default function ServiceSelection() {
   }
 
   function handleBookAgain(serviceId: string, staffId: string | null) {
+    const service = services.find((s) => s.id === serviceId)
+    const activeVariants = service?.variants?.filter((v) => v.is_active) ?? []
+    if (activeVariants.length > 0) {
+      if (service) handleSelect(service)
+      if (staffId) setStaff(staffId)
+      return
+    }
     setService(serviceId)
     if (staffId) setStaff(staffId)
     navigate('/datetime')
@@ -224,13 +254,34 @@ export default function ServiceSelection() {
                   </Badge>
                 </div>
               </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1 text-sm text-gray-500">
-                  <Clock className="h-3.5 w-3.5" />
-                  {formatDuration(service.duration_minutes)}
-                </div>
-                <span className="font-bold text-gray-900">{formatCurrency(service.price)}</span>
-              </div>
+              {(() => {
+                const activeVariants = (service.variants ?? []).filter((v) => v.is_active).sort((a, b) => a.sort_order - b.sort_order)
+                return activeVariants.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {activeVariants.map((v) => (
+                      <button
+                        key={v.id}
+                        onClick={(e) => { e.stopPropagation(); handleSelectVariant(service, v) }}
+                        className={`px-2.5 py-1 text-xs font-medium border rounded-full transition-colors ${
+                          selectedVariants[service.id] === v.id
+                            ? 'bg-(--color-primary) text-white border-(--color-primary)'
+                            : 'bg-white text-gray-600 border-gray-200 hover:border-(--color-primary) hover:text-(--color-primary)'
+                        }`}
+                      >
+                        {v.name} · {formatCurrency(v.price)}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1 text-sm text-gray-500">
+                      <Clock className="h-3.5 w-3.5" />
+                      {formatDuration(service.duration_minutes)}
+                    </div>
+                    <span className="font-bold text-gray-900">{formatCurrency(service.price)}</span>
+                  </div>
+                )
+              })()}
             </Card>
           ))}
         </div>
@@ -239,7 +290,12 @@ export default function ServiceSelection() {
       <div className="mt-6 flex justify-end">
         <Button
           size="lg"
-          disabled={!selected}
+          disabled={(() => {
+            if (!selected) return true
+            const svc = services.find((s) => s.id === selected)
+            const activeVariants = (svc?.variants ?? []).filter((v) => v.is_active)
+            return activeVariants.length > 0 && !selectedVariants[selected]
+          })()}
           onClick={() => {
             const service = services.find(s => s.id === selected)
             if (service?.is_self_service) {

@@ -5,7 +5,7 @@ import { ShieldCheck, Ticket } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
 import { useAuthStore } from '@/store/authStore'
-import { formatCurrency, formatDuration, calculateDeposit } from '@/lib/currency'
+import { formatCurrency, formatDuration } from '@/lib/currency'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 
@@ -31,11 +31,17 @@ export default function Confirmation() {
   const [slotH, slotM] = draft.timeSlot.split(':').map(Number)
   const startsAt = new Date(draft.date)
   startsAt.setHours(slotH, slotM, 0, 0)
-  const endsAt = addMinutes(startsAt, service?.duration_minutes ?? 60)
+  const effectiveDuration = draft.variantDuration ?? service?.duration_minutes ?? 60
+  const effectivePrice = draft.variantPrice ?? service?.price ?? 0
+  const endsAt = addMinutes(startsAt, effectiveDuration)
 
-  const depositAmount = service ? calculateDeposit(service) : 0
+  const depositAmount = service ? (
+    service.deposit_type === 'fixed' ? service.deposit_value :
+    service.deposit_type === 'percentage' ? Math.round(effectivePrice * service.deposit_value / 100) :
+    0
+  ) : 0
   const hasDeposit = depositAmount > 0
-  const balanceDue = (service?.price ?? 0) - depositAmount
+  const balanceDue = effectivePrice - depositAmount
 
   async function handleConfirm() {
     setLoading(true)
@@ -54,6 +60,7 @@ export default function Confirmation() {
           p_phone: draft.customerPhone || null,
           p_staff_id: resolvedStaffId ?? null,
           p_service_id: draft.serviceId,
+          p_variant_id: draft.variantId ?? null,
           p_starts_at: startsAt.toISOString(),
           p_ends_at: endsAt.toISOString(),
           p_notes: draft.notes || null,
@@ -79,8 +86,9 @@ export default function Confirmation() {
         state: {
           bookingRef: ref,
           serviceName: service?.name ?? '',
-          serviceDuration: service?.duration_minutes ?? 0,
-          servicePrice: service?.price ?? 0,
+          variantName: draft.variantName ?? null,
+          serviceDuration: effectiveDuration,
+          servicePrice: effectivePrice,
           staffName: staffMember?.name ?? null,
           startsAt: startsAt.toISOString(),
           endsAt: endsAt.toISOString(),
@@ -119,7 +127,10 @@ export default function Confirmation() {
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">Duration</dt>
-                <dd className="text-gray-700">{service ? formatDuration(service.duration_minutes) : '—'}</dd>
+                <dd className="text-gray-700">
+                  {draft.variantName ?? formatDuration(effectiveDuration)}
+                  {draft.variantName && <span className="text-gray-400 ml-1">({formatDuration(effectiveDuration)})</span>}
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">Date</dt>
@@ -177,7 +188,7 @@ export default function Confirmation() {
               <div className="space-y-3 mb-4">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Total</span>
-                  <span className="font-semibold text-gray-900 line-through">{formatCurrency(service?.price ?? 0)}</span>
+                  <span className="font-semibold text-gray-900 line-through">{formatCurrency(effectivePrice)}</span>
                 </div>
                 <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2.5">
                   <Ticket className="h-4 w-4 text-green-600 shrink-0" />
@@ -191,7 +202,7 @@ export default function Confirmation() {
               <div className="space-y-2 text-sm mb-4">
                 <div className="flex justify-between">
                   <span className="text-gray-500">Total</span>
-                  <span className="font-semibold text-gray-900">{formatCurrency(service?.price ?? 0)}</span>
+                  <span className="font-semibold text-gray-900">{formatCurrency(effectivePrice)}</span>
                 </div>
                 {hasDeposit ? (
                   <div className="border-t border-gray-100 pt-2 mt-2 space-y-2">
@@ -210,7 +221,7 @@ export default function Confirmation() {
                   <div className="border-t border-gray-100 pt-2 mt-2">
                     <div className="flex justify-between text-xs">
                       <span className="text-gray-400">Due at appointment</span>
-                      <span className="text-gray-500">{formatCurrency(service?.price ?? 0)}</span>
+                      <span className="text-gray-500">{formatCurrency(effectivePrice)}</span>
                     </div>
                   </div>
                 )}

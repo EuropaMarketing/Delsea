@@ -128,7 +128,7 @@ export default function DateTimePicker() {
         const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
         return isBefore(s, dEnd) && isAfter(e, dStart)
       })
-      map.set(dayKey, generateTimeSlots(day, availability, service.duration_minutes, bks, blk))
+      map.set(dayKey, generateTimeSlots(day, availability, draft.variantDuration ?? service.duration_minutes, bks, blk))
     }
     return map
   }, [calMonth, service, availability, availableDays, monthBookings, monthBlocked, todayStart])
@@ -197,7 +197,7 @@ export default function DateTimePicker() {
           const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
           return isBefore(s, dEnd) && isAfter(e, dStart)
         })
-        const daySlots = generateTimeSlots(day, availability, service.duration_minutes, dayBks, dayBlk)
+        const daySlots = generateTimeSlots(day, availability, draft.variantDuration ?? service.duration_minutes, dayBks, dayBlk)
         if (daySlots.length > 0) {
           skipMonthLoadKey.current = format(month, 'yyyy-MM')
           setCalMonth(month)
@@ -241,6 +241,7 @@ export default function DateTimePicker() {
         {service && (
           <p className="text-sm text-gray-500 mt-1">
             {service.name}
+            {draft.variantName && ` · ${draft.variantName}`}
             {service.is_self_service
               ? ' · Self-service'
               : staffMember

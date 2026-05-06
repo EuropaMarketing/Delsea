@@ -313,11 +313,16 @@ export default function CustomerDetails() {
           <dl className="space-y-3 text-sm">
             <div>
               <dt className="text-gray-500 text-xs font-medium uppercase tracking-wide">Service</dt>
-              <dd className="font-medium text-gray-900 mt-0.5">{service?.name}</dd>
+              <dd className="font-medium text-gray-900 mt-0.5">
+                {service?.name}
+                {draft.variantName && <span className="text-gray-500 font-normal ml-1">· {draft.variantName}</span>}
+              </dd>
             </div>
             <div>
               <dt className="text-gray-500 text-xs font-medium uppercase tracking-wide">Duration</dt>
-              <dd className="font-medium text-gray-900 mt-0.5">{service ? formatDuration(service.duration_minutes) : '—'}</dd>
+              <dd className="font-medium text-gray-900 mt-0.5">
+                {service ? formatDuration(draft.variantDuration ?? service.duration_minutes) : '—'}
+              </dd>
             </div>
             <div>
               <dt className="text-gray-500 text-xs font-medium uppercase tracking-wide">Team Member</dt>
@@ -334,7 +339,7 @@ export default function CustomerDetails() {
             <div className="pt-3 border-t border-gray-100">
               <dt className="text-gray-500 text-xs font-medium uppercase tracking-wide">Total</dt>
               <dd className="font-bold text-xl text-gray-900 mt-0.5">
-                {service ? formatCurrency(service.price) : '—'}
+                {service ? formatCurrency(draft.variantPrice ?? service.price) : '—'}
               </dd>
             </div>
           </dl>
