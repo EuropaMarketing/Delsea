@@ -8,7 +8,7 @@ import brand from '@/config/brand'
 
 export default function AdminLogin() {
   const navigate = useNavigate()
-  const { setSession } = useAuthStore()
+  const { setSession, setAdmin } = useAuthStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -19,20 +19,30 @@ export default function AdminLogin() {
     setError('')
     setLoading(true)
     try {
-      console.log('attempting login, supabase URL:', import.meta.env.VITE_SUPABASE_URL)
       const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password })
-      console.log('login result:', { data, error: authError })
       if (authError) {
         setError(authError.message)
       } else if (data.session) {
-        setSession(data.session)
-        navigate('/admin')
+        // Check admin status before navigating so ProtectedRoute doesn't bounce back
+        const { data: staffData } = await supabase
+          .from('staff')
+          .select('id')
+          .eq('user_id', data.session.user.id)
+          .eq('role', 'admin')
+          .single()
+        if (!staffData) {
+          await supabase.auth.signOut()
+          setError('This account does not have admin access.')
+        } else {
+          setSession(data.session)
+          setAdmin(true)
+          navigate('/admin')
+        }
       } else {
-        setError('Sign in failed — no session returned. Check console for details.')
+        setError('Sign in failed — no session returned.')
       }
     } catch (err) {
-      console.error('login exception:', err)
-      setError('Unexpected error — check the browser console.')
+      setError('Unexpected error. Please try again.')
     } finally {
       setLoading(false)
     }

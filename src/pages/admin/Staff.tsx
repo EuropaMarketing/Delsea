@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Plus, Pencil, Trash2, PlaneTakeoff, Camera } from 'lucide-react'
+import { format, parseISO, startOfDay, endOfDay, isBefore } from 'date-fns'
+import { Plus, Pencil, Trash2, PlaneTakeoff, Camera, CalendarX2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
@@ -8,7 +9,7 @@ import { Card } from '@/components/ui/Card'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { Staff, Availability } from '@/types'
+import type { Staff, Availability, BlockedTime } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -48,6 +49,14 @@ export default function AdminStaff() {
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Leave / blocked-time modal
+  const [leaveMember, setLeaveMember] = useState<Staff | null>(null)
+  const [leaveBlocks, setLeaveBlocks] = useState<BlockedTime[]>([])
+  const [leaveLoading, setLeaveLoading] = useState(false)
+  const [leaveAdding, setLeaveAdding] = useState(false)
+  const [leaveForm, setLeaveForm] = useState({ startDate: '', endDate: '', reason: '' })
+  const [leaveError, setLeaveError] = useState('')
 
   useEffect(() => { load() }, [])
 
@@ -171,6 +180,43 @@ export default function AdminStaff() {
     setStaff((prev) => prev.map((s) => (s.id === member.id ? { ...s, on_holiday } : s)))
   }
 
+  async function openLeaveModal(member: Staff) {
+    setLeaveMember(member)
+    setLeaveLoading(true)
+    setLeaveForm({ startDate: '', endDate: '', reason: '' })
+    setLeaveError('')
+    const { data } = await supabase
+      .from('blocked_times')
+      .select('*')
+      .eq('staff_id', member.id)
+      .order('starts_at')
+    setLeaveBlocks((data ?? []) as BlockedTime[])
+    setLeaveLoading(false)
+  }
+
+  async function handleAddLeave() {
+    if (!leaveMember) return
+    if (!leaveForm.startDate || !leaveForm.endDate) { setLeaveError('Select a start and end date'); return }
+    if (leaveForm.endDate < leaveForm.startDate) { setLeaveError('End date must be after start date'); return }
+    setLeaveAdding(true)
+    setLeaveError('')
+    const starts_at = startOfDay(new Date(leaveForm.startDate)).toISOString()
+    const ends_at = endOfDay(new Date(leaveForm.endDate)).toISOString()
+    const { data, error } = await supabase
+      .from('blocked_times')
+      .insert({ staff_id: leaveMember.id, starts_at, ends_at, reason: leaveForm.reason || null })
+      .select().single()
+    if (error) { setLeaveError('Failed to save — please try again.'); setLeaveAdding(false); return }
+    setLeaveBlocks((prev) => [...prev, data as BlockedTime].sort((a, b) => a.starts_at.localeCompare(b.starts_at)))
+    setLeaveForm({ startDate: '', endDate: '', reason: '' })
+    setLeaveAdding(false)
+  }
+
+  async function handleDeleteLeave(id: string) {
+    await supabase.from('blocked_times').delete().eq('id', id)
+    setLeaveBlocks((prev) => prev.filter((b) => b.id !== id))
+  }
+
   if (loading) return <FullPageSpinner />
 
   const displayAvatar = avatarPreview ?? currentAvatarUrl
@@ -219,6 +265,13 @@ export default function AdminStaff() {
                   }`}
                 >
                   <PlaneTakeoff className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => openLeaveModal(member)}
+                  title="Manage leave & blocked dates"
+                  className="p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
+                >
+                  <CalendarX2 className="h-4 w-4" />
                 </button>
                 <button
                   onClick={() => openEdit(member)}
@@ -353,6 +406,98 @@ export default function AdminStaff() {
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
             <Button loading={saving} onClick={handleSave}>Save</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Leave / blocked-dates modal */}
+      <Modal
+        open={!!leaveMember}
+        onClose={() => setLeaveMember(null)}
+        title={`Leave & Blocked Dates — ${leaveMember?.name ?? ''}`}
+        size="lg"
+      >
+        <div className="space-y-5">
+          {/* Add new block */}
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-gray-700">Block a date range</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-gray-500">From</label>
+                <input
+                  type="date"
+                  value={leaveForm.startDate}
+                  onChange={(e) => setLeaveForm((f) => ({ ...f, startDate: e.target.value }))}
+                  className="h-9 px-3 text-sm border border-gray-200 rounded-(--border-radius-sm) outline-none focus:ring-2 focus:ring-(--color-primary)"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-gray-500">To</label>
+                <input
+                  type="date"
+                  value={leaveForm.endDate}
+                  min={leaveForm.startDate}
+                  onChange={(e) => setLeaveForm((f) => ({ ...f, endDate: e.target.value }))}
+                  className="h-9 px-3 text-sm border border-gray-200 rounded-(--border-radius-sm) outline-none focus:ring-2 focus:ring-(--color-primary)"
+                />
+              </div>
+            </div>
+            <input
+              type="text"
+              value={leaveForm.reason}
+              onChange={(e) => setLeaveForm((f) => ({ ...f, reason: e.target.value }))}
+              placeholder="Reason (e.g. Annual Leave, Training)"
+              className="w-full h-9 px-3 text-sm border border-gray-200 rounded-(--border-radius-sm) outline-none focus:ring-2 focus:ring-(--color-primary)"
+            />
+            {leaveError && <p className="text-xs text-red-500">{leaveError}</p>}
+            <Button size="sm" loading={leaveAdding} onClick={handleAddLeave}>
+              Block these dates
+            </Button>
+          </div>
+
+          {/* Existing blocks */}
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-2">Scheduled blocks</p>
+            {leaveLoading ? (
+              <p className="text-sm text-gray-400">Loading…</p>
+            ) : leaveBlocks.length === 0 ? (
+              <p className="text-sm text-gray-400">No blocked dates scheduled.</p>
+            ) : (
+              <div className="space-y-2">
+                {leaveBlocks.map((block) => {
+                  const start = parseISO(block.starts_at)
+                  const end = parseISO(block.ends_at)
+                  const isPast = isBefore(end, new Date())
+                  return (
+                    <div
+                      key={block.id}
+                      className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border ${isPast ? 'border-gray-100 bg-gray-50 opacity-50' : 'border-gray-200 bg-white'}`}
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">
+                          {format(start, 'd MMM yyyy')}
+                          {format(start, 'yyyy-MM-dd') !== format(end, 'yyyy-MM-dd') && (
+                            <> → {format(end, 'd MMM yyyy')}</>
+                          )}
+                        </p>
+                        {block.reason && <p className="text-xs text-gray-500">{block.reason}</p>}
+                      </div>
+                      <button
+                        onClick={() => handleDeleteLeave(block.id)}
+                        className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors shrink-0"
+                        title="Remove block"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end pt-1">
+            <Button variant="secondary" onClick={() => setLeaveMember(null)}>Done</Button>
           </div>
         </div>
       </Modal>

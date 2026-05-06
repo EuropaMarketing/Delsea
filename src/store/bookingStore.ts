@@ -7,6 +7,9 @@ interface BookingStore {
   staff: Staff[]
   rescheduleBookingId: string | null
   rescheduleOriginalTime: string | null
+  useToken: boolean
+  tokenMembershipId: string | null
+  tokenPlanName: string | null
   setService: (serviceId: string) => void
   setStaff: (staffId: string | null) => void
   setDate: (date: Date) => void
@@ -16,6 +19,7 @@ interface BookingStore {
   setStaffList: (staff: Staff[]) => void
   setReschedule: (bookingId: string, originalTime: string, serviceId: string, staffId: string | null) => void
   clearReschedule: () => void
+  setTokenChoice: (use: boolean, membershipId: string | null, planName: string | null) => void
   reset: () => void
 }
 
@@ -36,6 +40,9 @@ export const useBookingStore = create<BookingStore>((set) => ({
   staff: [],
   rescheduleBookingId: null,
   rescheduleOriginalTime: null,
+  useToken: false,
+  tokenMembershipId: null,
+  tokenPlanName: null,
 
   setService: (serviceId) =>
     set((s) => ({ draft: { ...s.draft, serviceId, staffId: null, date: null, timeSlot: null } })),
@@ -64,5 +71,15 @@ export const useBookingStore = create<BookingStore>((set) => ({
 
   clearReschedule: () => set({ rescheduleBookingId: null, rescheduleOriginalTime: null }),
 
-  reset: () => set({ draft: { ...emptyDraft }, rescheduleBookingId: null, rescheduleOriginalTime: null }),
+  setTokenChoice: (use, membershipId, planName) =>
+    set({ useToken: use, tokenMembershipId: membershipId, tokenPlanName: planName }),
+
+  reset: () => set({
+    draft: { ...emptyDraft },
+    rescheduleBookingId: null,
+    rescheduleOriginalTime: null,
+    useToken: false,
+    tokenMembershipId: null,
+    tokenPlanName: null,
+  }),
 }))

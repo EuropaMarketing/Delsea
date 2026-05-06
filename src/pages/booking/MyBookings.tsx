@@ -163,6 +163,8 @@ export default function MyBookings() {
   async function handleCancel(bookingId: string) {
     setCancelling(bookingId)
     await supabase.rpc('cancel_booking', { p_booking_id: bookingId })
+    // Refund membership token if one was used (safe to call — returns false if none was used)
+    await supabase.rpc('refund_token_for_booking', { p_booking_id: bookingId })
     setBookings((prev) =>
       prev.map((b) => (b.id === bookingId ? { ...b, status: 'cancelled' } : b)),
     )

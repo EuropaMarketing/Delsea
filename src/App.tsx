@@ -34,6 +34,7 @@ import AdminBookings from '@/pages/admin/Bookings'
 import AdminServices from '@/pages/admin/Services'
 import AdminStaff from '@/pages/admin/Staff'
 import AdminSettings from '@/pages/admin/Settings'
+import AdminMemberships from '@/pages/admin/Memberships'
 
 function AppRoutes() {
   useAuthListener()
@@ -167,6 +168,16 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/admin/memberships"
+        element={
+          <ProtectedRoute adminOnly>
+            <AdminLayout>
+              <AdminMemberships />
+            </AdminLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/admin/settings"
         element={
           <ProtectedRoute adminOnly>
@@ -194,11 +205,10 @@ export default function App() {
       .eq('id', BUSINESS_ID)
       .single()
       .then(({ data }) => {
-        if (data?.config) {
-          const merged = { ...brand, ...data.config }
-          applyBrandTheme(merged)
-          setConfig(merged)
-        }
+        const merged = data?.config ? { ...brand, ...data.config } : brand
+        applyBrandTheme(merged)
+        setConfig(merged)
+        document.title = merged.brandName
       })
   }, [setConfig])
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
-import { CheckCircle2, UserCircle2 } from 'lucide-react'
+import { CheckCircle2, UserCircle2, Ticket } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
 import { useAuthStore } from '@/store/authStore'
@@ -10,9 +10,11 @@ import { Input, PasswordInput, Textarea } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 
+const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
+
 export default function CustomerDetails() {
   const navigate = useNavigate()
-  const { draft, setCustomer, services, staff } = useBookingStore()
+  const { draft, setCustomer, services, staff, useToken, tokenMembershipId, setTokenChoice } = useBookingStore()
   const { user } = useAuthStore()
 
   const [form, setForm] = useState({
@@ -22,6 +24,7 @@ export default function CustomerDetails() {
     notes: draft.notes || '',
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [tokenInfo, setTokenInfo] = useState<{ membershipId: string; planName: string; tokens: number } | null>(null)
 
   // Sign-in flow for returning customers
   const [signInEmail, setSignInEmail] = useState('')
@@ -57,6 +60,21 @@ export default function CustomerDetails() {
         })
     }
   }, [user])
+
+  async function checkTokenBalance(email: string) {
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setTokenInfo(null); return }
+    const { data } = await supabase.rpc('get_customer_token_balance', {
+      p_email: email.toLowerCase(),
+      p_business_id: BUSINESS_ID,
+    })
+    if (data && data.length > 0) {
+      const row = data[0] as { membership_id: string; plan_name: string; tokens_remaining: number }
+      setTokenInfo({ membershipId: row.membership_id, planName: row.plan_name, tokens: row.tokens_remaining })
+    } else {
+      setTokenInfo(null)
+      if (useToken) setTokenChoice(false, null, null)
+    }
+  }
 
   if (!draft.serviceId || !draft.date || !draft.timeSlot) {
     navigate('/book')
@@ -214,10 +232,45 @@ export default function CustomerDetails() {
             required
             value={form.email}
             onChange={(e) => handleChange('email', e.target.value)}
+            onBlur={(e) => checkTokenBalance(e.target.value)}
             placeholder="jane@example.com"
             error={errors.email}
             readOnly={!!user}
           />
+
+          {/* Membership token option */}
+          {tokenInfo && (
+            <Card padding="sm" className="border-2" style={{ borderColor: useToken ? 'var(--color-primary)' : '#e5e7eb' }}>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useToken}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setTokenChoice(true, tokenInfo.membershipId, tokenInfo.planName)
+                    } else {
+                      setTokenChoice(false, null, null)
+                    }
+                  }}
+                  className="mt-0.5 accent-(--color-primary)"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <Ticket className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }} />
+                    <p className="text-sm font-semibold text-gray-900">Use a membership token</p>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {tokenInfo.planName} · {tokenInfo.tokens} session{tokenInfo.tokens !== 1 ? 's' : ''} remaining
+                  </p>
+                  {useToken && (
+                    <p className="text-xs font-medium mt-1" style={{ color: 'var(--color-primary)' }}>
+                      No payment required at appointment
+                    </p>
+                  )}
+                </div>
+              </label>
+            </Card>
+          )}
           <Input
             label="Phone Number"
             type="tel"

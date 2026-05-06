@@ -66,6 +66,28 @@ export interface Customer {
   created_at: string
 }
 
+export interface MembershipPlan {
+  id: string
+  business_id: string
+  name: string
+  description: string | null
+  price: number
+  token_count: number
+  is_active: boolean
+  created_at: string
+}
+
+export interface CustomerMembership {
+  id: string
+  customer_id: string
+  plan_id: string
+  tokens_remaining: number
+  purchased_at: string
+  expires_at: string | null
+  customer?: { id: string; name: string; email: string }
+  plan?: { name: string; token_count: number }
+}
+
 export interface BlockedTime {
   id: string
   staff_id: string
