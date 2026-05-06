@@ -57,7 +57,12 @@ export default function ServiceSelection() {
 
   function handleQuickBook(service: Service) {
     setService(service.id)
-    navigate('/staff')
+    if (service.is_self_service) {
+      setStaff(null)
+      navigate('/datetime')
+    } else {
+      navigate('/staff')
+    }
   }
 
   function handleBookAgain(serviceId: string, staffId: string | null) {
@@ -232,7 +237,19 @@ export default function ServiceSelection() {
       )}
 
       <div className="mt-6 flex justify-end">
-        <Button size="lg" disabled={!selected} onClick={() => navigate('/staff')}>
+        <Button
+          size="lg"
+          disabled={!selected}
+          onClick={() => {
+            const service = services.find(s => s.id === selected)
+            if (service?.is_self_service) {
+              setStaff(null)
+              navigate('/datetime')
+            } else {
+              navigate('/staff')
+            }
+          }}
+        >
           Continue
         </Button>
       </div>

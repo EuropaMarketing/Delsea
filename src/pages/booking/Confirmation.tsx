@@ -43,7 +43,7 @@ export default function Confirmation() {
 
     try {
       let resolvedStaffId = draft.staffId
-      if (!resolvedStaffId && staff.length) resolvedStaffId = staff[0].id
+      if (!resolvedStaffId && !service?.is_self_service && staff.length) resolvedStaffId = staff[0].id
 
       const { data: bookingId, error: bErr } = await supabase
         .rpc('create_booking', {
@@ -133,7 +133,9 @@ export default function Confirmation() {
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">Team member</dt>
-                <dd className="text-gray-700">{staffMember?.name ?? 'Any available'}</dd>
+                <dd className="text-gray-700">
+                  {service?.is_self_service ? 'Self-service' : staffMember?.name ?? 'Any available'}
+                </dd>
               </div>
             </dl>
           </Card>

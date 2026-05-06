@@ -14,7 +14,9 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function StaffSelection() {
   const navigate = useNavigate()
-  const { draft, setStaff, setStaffList, staff } = useBookingStore()
+  const { draft, setStaff, setStaffList, staff, services } = useBookingStore()
+
+  const selectedService = services.find((s) => s.id === draft.serviceId)
 
   const [loading, setLoading] = useState(!staff.length)
   const [selected, setSelected] = useState<string | null>(draft.staffId)
@@ -36,6 +38,11 @@ export default function StaffSelection() {
 
   if (!draft.serviceId) {
     navigate('/book')
+    return null
+  }
+
+  if (selectedService?.is_self_service) {
+    navigate('/datetime', { replace: true })
     return null
   }
 

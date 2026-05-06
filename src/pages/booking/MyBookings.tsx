@@ -227,7 +227,7 @@ export default function MyBookings() {
           <div>
             <p className="font-semibold text-gray-900">{booking.service?.name}</p>
             <p className="text-xs text-gray-500 mt-0.5">
-              {booking.staff?.name ?? 'Any team member'}
+              {booking.staff?.name ?? (booking.staff_id === null ? 'Self-service' : 'Any team member')}
             </p>
           </div>
           <Badge variant={statusBadgeVariant(booking.status)} className="capitalize shrink-0">

@@ -11,13 +11,13 @@ import { useBookingStore } from '@/store/bookingStore'
 import { generateTimeSlots } from '@/lib/slots'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
-import type { Availability, BlockedTime, Booking } from '@/types'
+import type { Availability, BlockedTime, Booking, Staff } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function DateTimePicker() {
   const navigate = useNavigate()
-  const { draft, services, staff, setDate, setTimeSlot, rescheduleBookingId } = useBookingStore()
+  const { draft, services, staff, setDate, setTimeSlot, setStaffList, rescheduleBookingId } = useBookingStore()
 
   const [calMonth, setCalMonth] = useState(() =>
     draft.date ? startOfMonth(draft.date) : startOfMonth(new Date())
@@ -45,19 +45,35 @@ export default function DateTimePicker() {
   useEffect(() => {
     setLoadingAvail(true)
     async function load() {
-      let query = supabase.from('availability').select('*')
+      let staffIds: string[]
       if (draft.staffId) {
-        query = query.eq('staff_id', draft.staffId)
+        staffIds = [draft.staffId]
+      } else if (staff.length) {
+        staffIds = staff.map((s) => s.id)
       } else {
-        const ids = staff.map((s) => s.id)
-        if (ids.length) query = query.in('staff_id', ids)
+        // Self-service path: staff list not yet loaded — fetch it now
+        const { data: staffData } = await supabase
+          .from('staff')
+          .select('*')
+          .eq('business_id', BUSINESS_ID)
+          .order('name')
+        if (staffData) {
+          setStaffList(staffData as Staff[])
+          staffIds = (staffData as Staff[]).map((s) => s.id)
+        } else {
+          staffIds = []
+        }
       }
+
+      let query = supabase.from('availability').select('*')
+      if (staffIds.length) query = query.in('staff_id', staffIds)
       const { data } = await query
       if (data) setAvailability(data as Availability[])
       setLoadingAvail(false)
     }
     load()
-  }, [draft.staffId, staff])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.staffId, staff.length, setStaffList])
 
   // Load all bookings + blocked times for the visible calendar month
   useEffect(() => {
@@ -105,7 +121,9 @@ export default function DateTimePicker() {
       const dayKey = format(day, 'yyyy-MM-dd')
       const dStart = startOfDay(day)
       const dEnd = endOfDay(day)
-      const bks = monthBookings.filter((b) => b.starts_at.startsWith(dayKey))
+      const bks = monthBookings
+        .filter((b) => b.starts_at.startsWith(dayKey))
+        .filter((b) => service.is_self_service ? b.service_id === service.id : true)
       const blk = monthBlocked.filter((bt) => {
         const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
         return isBefore(s, dEnd) && isAfter(e, dStart)
@@ -172,7 +190,9 @@ export default function DateTimePicker() {
         const dayKey = format(day, 'yyyy-MM-dd')
         const dStart = startOfDay(day)
         const dEnd = endOfDay(day)
-        const dayBks = bks.filter((b) => b.starts_at.startsWith(dayKey))
+        const dayBks = bks
+          .filter((b) => b.starts_at.startsWith(dayKey))
+          .filter((b) => service.is_self_service ? b.service_id === service.id : true)
         const dayBlk = blk.filter((bt) => {
           const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
           return isBefore(s, dEnd) && isAfter(e, dStart)
@@ -221,7 +241,11 @@ export default function DateTimePicker() {
         {service && (
           <p className="text-sm text-gray-500 mt-1">
             {service.name}
-            {staffMember ? ` with ${staffMember.name}` : ' · Any available team member'}
+            {service.is_self_service
+              ? ' · Self-service'
+              : staffMember
+              ? ` with ${staffMember.name}`
+              : ' · Any available team member'}
           </p>
         )}
       </div>
@@ -367,7 +391,7 @@ export default function DateTimePicker() {
       </p>
 
       <div className="mt-6 flex justify-between">
-        <Button variant="secondary" onClick={() => navigate(rescheduleBookingId ? '/my-bookings' : '/staff')}>Back</Button>
+        <Button variant="secondary" onClick={() => navigate(rescheduleBookingId ? '/my-bookings' : service?.is_self_service ? '/book' : '/staff')}>Back</Button>
         <Button
           size="lg"
           disabled={!canContinue}

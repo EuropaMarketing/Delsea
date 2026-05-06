@@ -14,7 +14,7 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 const empty: Omit<Service, 'id' | 'business_id'> = {
   name: '', description: null, duration_minutes: 60, price: 0, category: 'General', is_active: true,
-  deposit_type: 'none', deposit_value: 0,
+  is_self_service: false, deposit_type: 'none', deposit_value: 0,
 }
 
 export default function AdminServices() {
@@ -47,7 +47,7 @@ export default function AdminServices() {
 
   function openEdit(service: Service) {
     setEditTarget(service)
-    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, deposit_type: service.deposit_type, deposit_value: service.deposit_value })
+    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, is_self_service: service.is_self_service, deposit_type: service.deposit_type, deposit_value: service.deposit_value })
     setErrors({})
     setModalOpen(true)
   }
@@ -106,6 +106,7 @@ export default function AdminServices() {
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="font-semibold text-gray-900">{service.name}</p>
                 <Badge variant="default">{service.category}</Badge>
+                {service.is_self_service && <Badge variant="brand">Self-service</Badge>}
                 {!service.is_active && <Badge variant="danger">Inactive</Badge>}
               </div>
               {service.description && (
@@ -185,6 +186,22 @@ export default function AdminServices() {
             value={form.category}
             onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
           />
+
+          {/* Self-service toggle */}
+          <label className="flex items-start gap-3 p-3 border border-gray-100 rounded-xl bg-gray-50 cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-(--color-primary)"
+              checked={form.is_self_service}
+              onChange={(e) => setForm((f) => ({ ...f, is_self_service: e.target.checked }))}
+            />
+            <div>
+              <p className="text-sm font-medium text-gray-800">Self-service room</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                No staff member required. Customers book a time slot directly — ideal for rooms like recovery pools or contrast therapy.
+              </p>
+            </div>
+          </label>
 
           {/* Deposit */}
           <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
