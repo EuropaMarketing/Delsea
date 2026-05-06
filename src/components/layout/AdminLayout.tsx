@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Calendar, List, Scissors, Users, Settings,
-  LogOut, Menu, X, Ticket,
+  LogOut, Menu, X, Ticket, UserRound, Banknote,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
@@ -14,9 +14,11 @@ const navItems = [
   { label: 'Calendar',   icon: Calendar,         path: '/admin/calendar' },
   { label: 'Bookings',   icon: List,             path: '/admin/bookings' },
   { label: 'Services',   icon: Scissors,         path: '/admin/services' },
-  { label: 'Staff',        icon: Users,    path: '/admin/staff' },
-  { label: 'Memberships', icon: Ticket,   path: '/admin/memberships' },
-  { label: 'Settings',    icon: Settings, path: '/admin/settings' },
+  { label: 'Staff',        icon: Users,      path: '/admin/staff' },
+  { label: 'Clients',      icon: UserRound,  path: '/admin/clients' },
+  { label: 'Memberships',  icon: Ticket,     path: '/admin/memberships' },
+  { label: 'Payroll',      icon: Banknote,   path: '/admin/payroll' },
+  { label: 'Settings',     icon: Settings,   path: '/admin/settings' },
 ]
 
 function NavLink({ item, onClick }: { item: typeof navItems[0]; onClick?: () => void }) {

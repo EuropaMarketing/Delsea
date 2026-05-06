@@ -37,6 +37,8 @@ import AdminServices from '@/pages/admin/Services'
 import AdminStaff from '@/pages/admin/Staff'
 import AdminSettings from '@/pages/admin/Settings'
 import AdminMemberships from '@/pages/admin/Memberships'
+import AdminClients from '@/pages/admin/Clients'
+import AdminPayroll from '@/pages/admin/Payroll'
 
 function AppRoutes() {
   useAuthListener()
@@ -191,6 +193,26 @@ function AppRoutes() {
           <ProtectedRoute adminOnly>
             <AdminLayout>
               <AdminMemberships />
+            </AdminLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/clients"
+        element={
+          <ProtectedRoute adminOnly>
+            <AdminLayout>
+              <AdminClients />
+            </AdminLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/payroll"
+        element={
+          <ProtectedRoute adminOnly>
+            <AdminLayout>
+              <AdminPayroll />
             </AdminLayout>
           </ProtectedRoute>
         }
