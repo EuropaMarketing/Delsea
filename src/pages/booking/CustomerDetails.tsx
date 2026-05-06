@@ -37,14 +37,16 @@ export default function CustomerDetails() {
   const service = services.find((s) => s.id === draft.serviceId)
   const staffMember = staff.find((s) => s.id === draft.staffId)
 
-  // Pre-fill form when user signs in
+  // Pre-fill form when user signs in and immediately check token balance
   useEffect(() => {
     if (user) {
+      const email = user.email ?? ''
       setForm((f) => ({
         ...f,
-        email: user.email ?? f.email,
+        email,
         name: user.user_metadata?.full_name ?? f.name,
       }))
+      if (email) checkTokenBalance(email)
       // Also try to fetch their customer record for phone
       supabase
         .from('customers')
@@ -60,6 +62,12 @@ export default function CustomerDetails() {
         })
     }
   }, [user])
+
+  // Check token balance on mount if email already in draft (returning to this step)
+  useEffect(() => {
+    if (draft.customerEmail) checkTokenBalance(draft.customerEmail)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function checkTokenBalance(email: string) {
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setTokenInfo(null); return }
