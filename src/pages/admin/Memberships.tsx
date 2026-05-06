@@ -26,6 +26,7 @@ export default function AdminMemberships() {
   const [planForm, setPlanForm] = useState<PlanForm>(emptyPlanForm)
   const [planErrors, setPlanErrors] = useState<Record<string, string>>({})
   const [planSaving, setPlanSaving] = useState(false)
+  const [planSaveError, setPlanSaveError] = useState<string | null>(null)
 
   // Members
   const [memberships, setMemberships] = useState<CustomerMembership[]>([])
@@ -80,7 +81,7 @@ export default function AdminMemberships() {
     setPlanForm({
       name: plan.name,
       description: plan.description ?? '',
-      price: String(plan.price),
+      price: String(plan.price / 100),
       token_count: String(plan.token_count),
     })
     setPlanErrors({})
@@ -99,18 +100,21 @@ export default function AdminMemberships() {
     const e = validatePlan()
     if (Object.keys(e).length) { setPlanErrors(e); return }
     setPlanSaving(true)
+    setPlanSaveError(null)
     const payload = {
       name: planForm.name.trim(),
       description: planForm.description.trim() || null,
-      price: Number(planForm.price),
+      price: Math.round(parseFloat(planForm.price) * 100) || 0,
       token_count: Number(planForm.token_count),
     }
     if (editPlan) {
-      const { data } = await supabase.from('membership_plans').update(payload).eq('id', editPlan.id).select().single()
+      const { data, error } = await supabase.from('membership_plans').update(payload).eq('id', editPlan.id).select().single()
+      if (error) { setPlanSaveError(error.message); setPlanSaving(false); return }
       if (data) setPlans((prev) => prev.map((p) => (p.id === editPlan.id ? data as MembershipPlan : p)))
     } else {
-      const { data } = await supabase.from('membership_plans')
+      const { data, error } = await supabase.from('membership_plans')
         .insert({ ...payload, business_id: BUSINESS_ID }).select().single()
+      if (error) { setPlanSaveError(error.message); setPlanSaving(false); return }
       if (data) setPlans((prev) => [...prev, data as MembershipPlan])
     }
     setPlanSaving(false)
@@ -152,10 +156,10 @@ export default function AdminMemberships() {
 
     if (error) { setAssignError('Failed to assign — please try again.'); setAssigning(false); return }
 
-    await supabase.from('token_transactions').insert({
+    await supabase.from('membership_transactions').insert({
       membership_id: (membership as CustomerMembership).id,
       type: 'purchase',
-      tokens: plan.token_count,
+      amount: plan.token_count,
       note: `Membership assigned: ${plan.name}`,
     })
 
@@ -179,10 +183,10 @@ export default function AdminMemberships() {
       .from('customer_memberships')
       .update({ tokens_remaining: newBalance })
       .eq('id', adjustTarget.id)
-    await supabase.from('token_transactions').insert({
+    await supabase.from('membership_transactions').insert({
       membership_id: adjustTarget.id,
       type: 'manual_adjust',
-      tokens: delta,
+      amount: delta,
       note: adjustNote.trim() || null,
     })
     setMemberships((prev) =>
@@ -358,15 +362,20 @@ export default function AdminMemberships() {
             onChange={(e) => setPlanForm((f) => ({ ...f, description: e.target.value }))}
             placeholder="Brief description shown to customers…" />
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Price" required value={planForm.price}
+            <Input label="Price (£)" required type="number" min={0} step="0.01" value={planForm.price}
               onChange={(e) => setPlanForm((f) => ({ ...f, price: e.target.value }))}
               placeholder="0.00" error={planErrors.price} />
-            <Input label="Sessions (tokens)" required value={planForm.token_count}
+            <Input label="Sessions (tokens)" required type="number" min={1} value={planForm.token_count}
               onChange={(e) => setPlanForm((f) => ({ ...f, token_count: e.target.value }))}
               placeholder="10" error={planErrors.token_count} />
           </div>
+          {planSaveError && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {planSaveError}
+            </p>
+          )}
           <div className="flex justify-end gap-3 pt-1">
-            <Button variant="secondary" onClick={() => setPlanModal(false)}>Cancel</Button>
+            <Button variant="secondary" onClick={() => { setPlanModal(false); setPlanSaveError(null) }}>Cancel</Button>
             <Button loading={planSaving} onClick={handleSavePlan}>Save Plan</Button>
           </div>
         </div>
