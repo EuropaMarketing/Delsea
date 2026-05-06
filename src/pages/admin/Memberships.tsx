@@ -12,11 +12,12 @@ import type { MembershipPlan, CustomerMembership } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
-interface PlanForm { name: string; description: string; price: string; token_count: string }
-const emptyPlanForm: PlanForm = { name: '', description: '', price: '', token_count: '1' }
+interface PlanForm { name: string; description: string; price: string; token_count: string; service_category: string }
+const emptyPlanForm: PlanForm = { name: '', description: '', price: '', token_count: '1', service_category: '' }
 
 export default function AdminMemberships() {
   const [tab, setTab] = useState<'plans' | 'members'>('plans')
+  const [categories, setCategories] = useState<string[]>([])
 
   // Plans
   const [plans, setPlans] = useState<MembershipPlan[]>([])
@@ -42,7 +43,16 @@ export default function AdminMemberships() {
   const [adjustNote, setAdjustNote] = useState('')
   const [adjusting, setAdjusting] = useState(false)
 
-  useEffect(() => { loadPlans() }, [])
+  useEffect(() => {
+    loadPlans()
+    supabase
+      .from('services')
+      .select('category')
+      .eq('business_id', BUSINESS_ID)
+      .then(({ data }) => {
+        if (data) setCategories([...new Set(data.map((s) => s.category as string).filter(Boolean))])
+      })
+  }, [])
   useEffect(() => { if (tab === 'members') loadMemberships() }, [tab])
 
   async function loadPlans() {
@@ -83,6 +93,7 @@ export default function AdminMemberships() {
       description: plan.description ?? '',
       price: String(plan.price / 100),
       token_count: String(plan.token_count),
+      service_category: plan.service_category ?? '',
     })
     setPlanErrors({})
     setPlanModal(true)
@@ -106,6 +117,7 @@ export default function AdminMemberships() {
       description: planForm.description.trim() || null,
       price: Math.round(parseFloat(planForm.price) * 100) || 0,
       token_count: Number(planForm.token_count),
+      service_category: planForm.service_category.trim() || null,
     }
     if (editPlan) {
       const { data, error } = await supabase.from('membership_plans').update(payload).eq('id', editPlan.id).select().single()
@@ -260,13 +272,19 @@ export default function AdminMemberships() {
                       {plan.is_active ? 'Active' : 'Inactive'}
                     </Badge>
                   </div>
-                  <div className="flex items-center gap-3 text-sm">
+                  <div className="flex items-center gap-3 text-sm flex-wrap">
                     <span className="font-bold text-gray-900">{formatCurrency(plan.price)}</span>
                     <span className="text-gray-400">·</span>
                     <span className="flex items-center gap-1 text-gray-600">
                       <Ticket className="h-3.5 w-3.5" />
                       {plan.token_count} {plan.token_count === 1 ? 'session' : 'sessions'}
                     </span>
+                    {plan.service_category && (
+                      <>
+                        <span className="text-gray-400">·</span>
+                        <Badge variant="default">{plan.service_category} only</Badge>
+                      </>
+                    )}
                   </div>
                   <div className="flex gap-1.5 mt-1">
                     <Button variant="secondary" size="sm" onClick={() => openEditPlan(plan)}>
@@ -369,6 +387,26 @@ export default function AdminMemberships() {
               onChange={(e) => setPlanForm((f) => ({ ...f, token_count: e.target.value }))}
               placeholder="10" error={planErrors.token_count} />
           </div>
+          {/* Category restriction */}
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">
+              Service Category <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <select
+              value={planForm.service_category}
+              onChange={(e) => setPlanForm((f) => ({ ...f, service_category: e.target.value }))}
+              className="h-10 px-3 text-sm border border-gray-200 bg-white rounded-(--border-radius-sm) outline-none focus:ring-2 focus:ring-(--color-primary)"
+            >
+              <option value="">Any category — works for all services</option>
+              {categories.map((cat) => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400">
+              Restrict this membership so tokens can only be redeemed against services in this category.
+            </p>
+          </div>
+
           {planSaveError && (
             <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
               {planSaveError}

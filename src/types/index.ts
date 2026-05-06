@@ -75,6 +75,7 @@ export interface MembershipPlan {
   price: number
   token_count: number
   is_active: boolean
+  service_category: string | null
   created_at: string
 }
 

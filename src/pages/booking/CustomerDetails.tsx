@@ -24,7 +24,7 @@ export default function CustomerDetails() {
     notes: draft.notes || '',
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const [tokenInfo, setTokenInfo] = useState<{ membershipId: string; planName: string; tokens: number } | null>(null)
+  const [tokenInfo, setTokenInfo] = useState<{ membershipId: string; planName: string; tokens: number; serviceCategory: string | null } | null>(null)
 
   // Sign-in flow for returning customers
   const [signInEmail, setSignInEmail] = useState('')
@@ -69,23 +69,25 @@ export default function CustomerDetails() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Also check whenever the email field becomes a valid address (covers guest typing)
+  // Re-check whenever email becomes valid or the service (category) changes
   useEffect(() => {
-    if (!user && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-      checkTokenBalance(form.email)
+    const email = form.email || draft.customerEmail
+    if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      checkTokenBalance(email)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.email])
+  }, [form.email, service?.category])
 
   async function checkTokenBalance(email: string) {
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setTokenInfo(null); return }
     const { data } = await supabase.rpc('get_customer_token_balance', {
       p_email: email.toLowerCase(),
       p_business_id: BUSINESS_ID,
+      p_category: service?.category ?? null,
     })
     if (data && data.length > 0) {
-      const row = data[0] as { membership_id: string; plan_name: string; tokens_remaining: number }
-      setTokenInfo({ membershipId: row.membership_id, planName: row.plan_name, tokens: row.tokens_remaining })
+      const row = data[0] as { membership_id: string; plan_name: string; tokens_remaining: number; service_category: string | null }
+      setTokenInfo({ membershipId: row.membership_id, planName: row.plan_name, tokens: row.tokens_remaining, serviceCategory: row.service_category })
     } else {
       setTokenInfo(null)
       if (useToken) setTokenChoice(false, null, null)
@@ -277,6 +279,9 @@ export default function CustomerDetails() {
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {tokenInfo.planName} · {tokenInfo.tokens} session{tokenInfo.tokens !== 1 ? 's' : ''} remaining
+                    {tokenInfo.serviceCategory && (
+                      <span className="ml-1 text-gray-400">· {tokenInfo.serviceCategory} only</span>
+                    )}
                   </p>
                   {useToken && (
                     <p className="text-xs font-medium mt-1" style={{ color: 'var(--color-primary)' }}>
