@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import {
-  format, addWeeks, subWeeks, startOfWeek, eachDayOfInterval, addDays,
-  parseISO, differenceInMinutes, setHours, setMinutes, isSameDay, addMinutes,
+  format, addDays, subDays, startOfDay, endOfDay,
+  parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday,
 } from 'date-fns'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -27,6 +27,14 @@ type RichBooking = Booking & {
   customer: { name: string }
 }
 
+type BlockedTime = {
+  id: string
+  staff_id: string
+  starts_at: string
+  ends_at: string
+  reason: string | null
+}
+
 interface DragState {
   bookingId: string
   startY: number
@@ -35,10 +43,9 @@ interface DragState {
 }
 
 export default function AdminCalendar() {
-  const [weekStart, setWeekStart] = useState(
-    startOfWeek(new Date(), { weekStartsOn: 1 }),
-  )
+  const [selectedDay, setSelectedDay] = useState(new Date())
   const [bookings, setBookings] = useState<RichBooking[]>([])
+  const [blockedTimes, setBlockedTimes] = useState<BlockedTime[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
   const [services, setServices] = useState<Service[]>([])
   const [loading, setLoading] = useState(true)
@@ -63,31 +70,38 @@ export default function AdminCalendar() {
   // Resize drag state
   const [drag, setDrag] = useState<DragState | null>(null)
 
-  const weekDays = eachDayOfInterval({ start: weekStart, end: addDays(weekStart, 6) })
-
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const [staffRes, bookRes, svcRes] = await Promise.all([
+      const dayStart = startOfDay(selectedDay).toISOString()
+      const dayEnd = endOfDay(selectedDay).toISOString()
+
+      const [staffRes, bookRes, svcRes, blockRes] = await Promise.all([
         supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name'),
         supabase
           .from('bookings')
           .select('*, service:services(name,category), staff:staff(name), customer:customers(name)')
           .eq('business_id', BUSINESS_ID)
-          .gte('starts_at', weekStart.toISOString())
-          .lte('starts_at', addDays(weekStart, 7).toISOString())
+          .gte('starts_at', dayStart)
+          .lte('starts_at', dayEnd)
           .neq('status', 'cancelled'),
         supabase.from('services').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).order('name'),
+        supabase
+          .from('blocked_times')
+          .select('id, staff_id, starts_at, ends_at, reason')
+          .lt('starts_at', dayEnd)
+          .gt('ends_at', dayStart),
       ])
       if (staffRes.data) setStaff(staffRes.data as Staff[])
       if (bookRes.data) setBookings(bookRes.data as RichBooking[])
       if (svcRes.data) setServices(svcRes.data as Service[])
+      if (blockRes.data) setBlockedTimes(blockRes.data as BlockedTime[])
       setLoading(false)
     }
     load()
-  }, [weekStart])
+  }, [selectedDay])
 
-  // Attach drag-resize listeners to document
+  // Drag-to-resize listeners
   useEffect(() => {
     if (!drag) return
 
@@ -136,17 +150,24 @@ export default function AdminCalendar() {
     return Object.fromEntries(cats.map((c, i) => [c, SERVICE_COLORS[i % SERVICE_COLORS.length]]))
   }, [bookings])
 
-  function positionBooking(startsAt: string, endsAt: string) {
+  // Position a time block within the visible grid, clamping to START_HOUR–END_HOUR
+  function positionBlock(startsAt: string, endsAt: string) {
+    const dayFloor = setMinutes(setHours(selectedDay, START_HOUR), 0)
+    const dayCeil = setMinutes(setHours(selectedDay, END_HOUR), 0)
     const start = parseISO(startsAt)
     const end = parseISO(endsAt)
-    const top = (differenceInMinutes(start, setMinutes(setHours(start, START_HOUR), 0)) / 60) * HOUR_HEIGHT
-    const height = Math.max((differenceInMinutes(end, start) / 60) * HOUR_HEIGHT, 20)
+    const clampedStart = start < dayFloor ? dayFloor : start
+    const clampedEnd = end > dayCeil ? dayCeil : end
+    const top = (differenceInMinutes(clampedStart, dayFloor) / 60) * HOUR_HEIGHT
+    const height = Math.max((differenceInMinutes(clampedEnd, clampedStart) / 60) * HOUR_HEIGHT, 20)
     return { top, height }
   }
 
   function openNewBooking(e: React.MouseEvent<HTMLDivElement>, staffId: string) {
     if ((e.target as HTMLElement).closest('[data-booking]')) return
     if (drag) return
+    const member = staff.find(s => s.id === staffId)
+    if (member?.on_holiday) return
     const rect = e.currentTarget.getBoundingClientRect()
     const y = e.clientY - rect.top
     const minutesFromStart = (y / HOUR_HEIGHT) * 60
@@ -155,9 +176,8 @@ export default function AdminCalendar() {
     const h = Math.min(Math.floor(snapped / 60), END_HOUR - 1)
     const m = snapped % 60
     const startTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-    const today = format(new Date(), 'yyyy-MM-dd')
     setNewBookingStaffId(staffId)
-    setNbDate(today)
+    setNbDate(format(selectedDay, 'yyyy-MM-dd'))
     setNbTime(startTime)
     setNbServiceId(services[0]?.id ?? '')
     setNbName(''); setNbEmail(''); setNbPhone(''); setNbNotes('')
@@ -249,72 +269,108 @@ export default function AdminCalendar() {
   if (loading) return <FullPageSpinner />
 
   const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR + i)
+  const todaySelected = isToday(selectedDay)
 
   return (
     <div className={cn(drag && 'select-none')}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-gray-900">Calendar</h1>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Calendar</h1>
+          <p className={cn('text-sm font-medium mt-0.5', todaySelected ? 'text-(--color-primary)' : 'text-gray-500')}>
+            {todaySelected ? 'Today · ' : ''}{format(selectedDay, 'EEEE d MMMM yyyy')}
+          </p>
+        </div>
+        <div className="flex items-center gap-1">
           <button
-            onClick={() => setWeekStart(w => subWeeks(w, 1))}
-            className="p-1.5 rounded-lg hover:bg-gray-100"
+            onClick={() => setSelectedDay(d => subDays(d, 1))}
+            className="p-2 rounded-lg hover:bg-gray-100"
+            title="Previous day"
           >
             <ChevronLeft className="h-5 w-5 text-gray-600" />
           </button>
-          <span className="text-sm font-medium text-gray-700 min-w-45 text-center">
-            {format(weekStart, 'd MMM')} – {format(addDays(weekStart, 6), 'd MMM yyyy')}
-          </span>
           <button
-            onClick={() => setWeekStart(w => addWeeks(w, 1))}
-            className="p-1.5 rounded-lg hover:bg-gray-100"
+            onClick={() => setSelectedDay(d => addDays(d, 1))}
+            className="p-2 rounded-lg hover:bg-gray-100"
+            title="Next day"
           >
             <ChevronRight className="h-5 w-5 text-gray-600" />
           </button>
-          <button
-            onClick={() => setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))}
-            className="ml-2 px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50"
-          >
-            Today
-          </button>
+          {!todaySelected && (
+            <button
+              onClick={() => setSelectedDay(new Date())}
+              className="ml-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50"
+            >
+              Today
+            </button>
+          )}
         </div>
       </div>
 
       <div className="bg-white border border-gray-200 brand-card overflow-hidden overflow-x-auto">
-        {/* Staff name header */}
-        <div className="grid border-b border-gray-100" style={{ gridTemplateColumns: `56px repeat(${staff.length || 1}, minmax(140px, 1fr))` }}>
+        {/* Staff header row */}
+        <div
+          className="grid border-b border-gray-200"
+          style={{ gridTemplateColumns: `56px repeat(${staff.length || 1}, minmax(140px, 1fr))` }}
+        >
           <div className="border-r border-gray-100" />
           {staff.map(member => (
-            <div key={member.id} className="px-3 py-2.5 border-r border-gray-100 last:border-r-0 text-center">
-              <p className="text-xs font-semibold text-gray-700 truncate">{member.name}</p>
-              <p className="text-xs text-gray-400 capitalize">{member.role}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* Date row */}
-        <div className="grid border-b border-gray-200 bg-gray-50" style={{ gridTemplateColumns: `56px repeat(${staff.length || 1}, minmax(140px, 1fr))` }}>
-          <div className="border-r border-gray-100" />
-          {staff.map(member => (
-            <div key={member.id} className="px-3 py-1.5 border-r border-gray-100 last:border-r-0 text-center">
-              {weekDays.map(day => (
-                <span
-                  key={day.toISOString()}
-                  className={cn(
-                    'text-xs font-medium mr-1',
-                    isSameDay(day, new Date()) ? 'text-(--color-primary)' : 'text-gray-500',
-                  )}
-                >
-                  {format(day, 'EEE d')}
-                </span>
-              ))}
+            <div
+              key={member.id}
+              className={cn(
+                'px-3 py-3 border-r border-gray-100 last:border-r-0 flex flex-col items-center gap-1.5',
+                member.on_holiday ? 'bg-amber-50' : '',
+              )}
+            >
+              {/* Avatar */}
+              <div className="relative">
+                {member.avatar_url ? (
+                  <img
+                    src={member.avatar_url}
+                    alt={member.name}
+                    className={cn(
+                      'h-10 w-10 rounded-full object-cover',
+                      member.on_holiday && 'opacity-60',
+                    )}
+                  />
+                ) : (
+                  <div className={cn(
+                    'h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold',
+                    member.on_holiday
+                      ? 'bg-amber-100 text-amber-500'
+                      : 'bg-gray-100 text-gray-500',
+                  )}>
+                    {member.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                {member.on_holiday && (
+                  <span className="absolute -bottom-0.5 -right-0.5 text-sm leading-none">✈︎</span>
+                )}
+              </div>
+              <div className="text-center">
+                <p className={cn(
+                  'text-xs font-semibold truncate max-w-28',
+                  member.on_holiday ? 'text-amber-700' : 'text-gray-800',
+                )}>
+                  {member.name}
+                </p>
+                <p className={cn(
+                  'text-xs mt-0.5 capitalize',
+                  member.on_holiday ? 'text-amber-500 font-medium' : 'text-gray-400',
+                )}>
+                  {member.on_holiday ? 'On Holiday' : member.role}
+                </p>
+              </div>
             </div>
           ))}
         </div>
 
         {/* Time grid */}
         <div className="overflow-y-auto" style={{ maxHeight: `${HOUR_HEIGHT * (END_HOUR - START_HOUR)}px` }}>
-          <div className="relative grid" style={{ gridTemplateColumns: `56px repeat(${staff.length || 1}, minmax(140px, 1fr))` }}>
+          <div
+            className="relative grid"
+            style={{ gridTemplateColumns: `56px repeat(${staff.length || 1}, minmax(140px, 1fr))` }}
+          >
             {/* Hour labels */}
             <div className="border-r border-gray-100">
               {hours.map(h => (
@@ -323,85 +379,131 @@ export default function AdminCalendar() {
                   className="text-right pr-2 text-xs text-gray-400 border-t border-gray-100 first:border-t-0"
                   style={{ height: HOUR_HEIGHT }}
                 >
-                  <span className="relative -top-2">{format(setMinutes(setHours(new Date(), h), 0), 'HH:mm')}</span>
+                  <span className="relative -top-2">
+                    {format(setMinutes(setHours(new Date(), h), 0), 'HH:mm')}
+                  </span>
                 </div>
               ))}
             </div>
 
             {/* Staff columns */}
-            {staff.map(member => (
-              <div
-                key={member.id}
-                className="relative border-r border-gray-100 last:border-r-0 cursor-crosshair"
-                style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
-                onClick={e => openNewBooking(e, member.id)}
-              >
-                {/* Hour lines */}
-                {hours.map(h => (
-                  <div
-                    key={h}
-                    className="absolute w-full border-t border-gray-100"
-                    style={{ top: (h - START_HOUR) * HOUR_HEIGHT }}
-                  />
-                ))}
+            {staff.map(member => {
+              const memberBlocks = blockedTimes.filter(bt => bt.staff_id === member.id)
+              return (
+                <div
+                  key={member.id}
+                  className={cn(
+                    'relative border-r border-gray-100 last:border-r-0',
+                    member.on_holiday ? 'cursor-not-allowed' : 'cursor-crosshair',
+                  )}
+                  style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
+                  onClick={e => openNewBooking(e, member.id)}
+                >
+                  {/* Hour lines */}
+                  {hours.map(h => (
+                    <div
+                      key={h}
+                      className="absolute w-full border-t border-gray-100"
+                      style={{ top: (h - START_HOUR) * HOUR_HEIGHT }}
+                    />
+                  ))}
 
-                {/* Bookings */}
-                {bookings
-                  .filter(b => b.staff_id === member.id)
-                  .map(booking => {
-                    const isDragging = drag?.bookingId === booking.id
-                    const endsAt = isDragging ? drag.currentEndsAt : booking.ends_at
-                    const { top, height } = positionBooking(booking.starts_at, endsAt)
-                    const color = categoryColorMap[booking.service?.category] ?? '#7C3AED'
+                  {/* On holiday: full column overlay */}
+                  {member.on_holiday && (
+                    <div
+                      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1.5"
+                      style={{
+                        backgroundColor: 'rgba(254,243,199,0.55)',
+                        backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 14px, rgba(251,191,36,0.07) 14px, rgba(251,191,36,0.07) 28px)',
+                      }}
+                    >
+                      <span className="text-3xl leading-none">✈︎</span>
+                      <p className="text-xs font-bold text-amber-700">On Holiday</p>
+                      <p className="text-xs text-amber-500">No availability</p>
+                    </div>
+                  )}
+
+                  {/* Blocked time ranges (advance leave) */}
+                  {!member.on_holiday && memberBlocks.map(bt => {
+                    const { top, height } = positionBlock(bt.starts_at, bt.ends_at)
                     return (
                       <div
-                        key={booking.id}
-                        data-booking="true"
-                        className={cn(
-                          'absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden transition-shadow',
-                          isDragging ? 'shadow-lg ring-2 ring-offset-1' : 'hover:brightness-95',
-                        )}
+                        key={bt.id}
+                        className="absolute left-0.5 right-0.5 rounded overflow-hidden z-10 pointer-events-none"
                         style={{
                           top,
                           height,
-                          backgroundColor: `${color}22`,
-                          borderLeft: `3px solid ${color}`,
-                          ...(isDragging ? { ringColor: color } : {}),
+                          backgroundColor: 'rgba(254,243,199,0.75)',
+                          backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(251,191,36,0.18) 6px, rgba(251,191,36,0.18) 12px)',
+                          borderLeft: '3px solid #F59E0B',
                         }}
-                        title={`${booking.customer?.name} — ${booking.service?.name}`}
                       >
-                        <p className="text-xs font-semibold truncate" style={{ color }}>
-                          {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
+                        <p className="text-xs font-semibold text-amber-700 px-1.5 pt-1 truncate leading-tight">
+                          On Leave
                         </p>
-                        <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
-                        {isDragging && (
-                          <p className="text-xs font-medium mt-0.5" style={{ color }}>
-                            → {format(parseISO(endsAt), 'HH:mm')}
-                          </p>
+                        {bt.reason && (
+                          <p className="text-xs text-amber-600 px-1.5 truncate">{bt.reason}</p>
                         )}
-
-                        {/* Drag-to-resize handle */}
-                        <div
-                          data-booking="true"
-                          className="absolute bottom-0 left-0 right-0 h-3 cursor-s-resize flex items-end justify-center pb-0.5"
-                          onMouseDown={e => {
-                            e.stopPropagation()
-                            e.preventDefault()
-                            setDrag({
-                              bookingId: booking.id,
-                              startY: e.clientY,
-                              originalEndsAt: booking.ends_at,
-                              currentEndsAt: booking.ends_at,
-                            })
-                          }}
-                        >
-                          <div className="w-8 h-1 rounded-full opacity-40" style={{ backgroundColor: color }} />
-                        </div>
                       </div>
                     )
                   })}
-              </div>
-            ))}
+
+                  {/* Bookings */}
+                  {bookings
+                    .filter(b => b.staff_id === member.id)
+                    .map(booking => {
+                      const isDragging = drag?.bookingId === booking.id
+                      const endsAt = isDragging ? drag.currentEndsAt : booking.ends_at
+                      const { top, height } = positionBlock(booking.starts_at, endsAt)
+                      const color = categoryColorMap[booking.service?.category] ?? '#7C3AED'
+                      return (
+                        <div
+                          key={booking.id}
+                          data-booking="true"
+                          className={cn(
+                            'absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden transition-shadow z-20',
+                            isDragging ? 'shadow-lg' : 'hover:brightness-95',
+                          )}
+                          style={{
+                            top,
+                            height,
+                            backgroundColor: `${color}22`,
+                            borderLeft: `3px solid ${color}`,
+                          }}
+                          title={`${booking.customer?.name} — ${booking.service?.name}`}
+                        >
+                          <p className="text-xs font-semibold truncate leading-tight" style={{ color }}>
+                            {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
+                          </p>
+                          <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
+                          {isDragging && (
+                            <p className="text-xs font-medium mt-0.5" style={{ color }}>
+                              → {format(parseISO(endsAt), 'HH:mm')}
+                            </p>
+                          )}
+                          {/* Drag-to-resize handle */}
+                          <div
+                            data-booking="true"
+                            className="absolute bottom-0 left-0 right-0 h-3 cursor-s-resize flex items-end justify-center pb-0.5"
+                            onMouseDown={e => {
+                              e.stopPropagation()
+                              e.preventDefault()
+                              setDrag({
+                                bookingId: booking.id,
+                                startY: e.clientY,
+                                originalEndsAt: booking.ends_at,
+                                currentEndsAt: booking.ends_at,
+                              })
+                            }}
+                          >
+                            <div className="w-8 h-1 rounded-full opacity-40" style={{ backgroundColor: color }} />
+                          </div>
+                        </div>
+                      )
+                    })}
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>
@@ -412,7 +514,9 @@ export default function AdminCalendar() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <p className="text-sm font-medium text-gray-700 mb-1">Staff member</p>
-              <p className="text-sm text-gray-900">{staff.find(s => s.id === newBookingStaffId)?.name}</p>
+              <p className="text-sm text-gray-900 font-semibold">
+                {staff.find(s => s.id === newBookingStaffId)?.name}
+              </p>
             </div>
             <div>
               <label className="text-sm font-medium text-gray-700 mb-1 block">Service</label>
@@ -478,6 +582,7 @@ export default function AdminCalendar() {
               </div>
             )}
           </div>
+
           <Input
             label="Email"
             type="email"
