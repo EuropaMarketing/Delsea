@@ -1,9 +1,9 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import {
   format, addDays, subDays, startOfDay, endOfDay,
   parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday,
 } from 'date-fns'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { Modal } from '@/components/ui/Modal'
@@ -69,6 +69,24 @@ export default function AdminCalendar() {
 
   // Resize drag state
   const [drag, setDrag] = useState<DragState | null>(null)
+
+  // Current time line
+  const [now, setNow] = useState(new Date())
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60_000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Auto-scroll to current time whenever the selected day changes
+  useEffect(() => {
+    if (!scrollRef.current) return
+    const target = isToday(selectedDay)
+      ? ((now.getHours() - START_HOUR) * 60 + now.getMinutes()) / 60 * HOUR_HEIGHT - 120
+      : 0
+    scrollRef.current.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
+  }, [selectedDay])
 
   useEffect(() => {
     async function load() {
@@ -270,6 +288,10 @@ export default function AdminCalendar() {
 
   const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR + i)
   const todaySelected = isToday(selectedDay)
+  const timeLineTop =
+    todaySelected && now.getHours() >= START_HOUR && now.getHours() < END_HOUR
+      ? ((now.getHours() - START_HOUR) * 60 + now.getMinutes()) / 60 * HOUR_HEIGHT
+      : null
 
   return (
     <div className={cn(drag && 'select-none')}>
@@ -283,19 +305,44 @@ export default function AdminCalendar() {
         </div>
         <div className="flex items-center gap-1">
           <button
+            onClick={() => setSelectedDay(d => subDays(d, 7))}
+            className="p-2 rounded-lg hover:bg-gray-100"
+            title="Previous week"
+          >
+            <ChevronsLeft className="h-4 w-4 text-gray-500" />
+          </button>
+          <button
             onClick={() => setSelectedDay(d => subDays(d, 1))}
             className="p-2 rounded-lg hover:bg-gray-100"
             title="Previous day"
           >
-            <ChevronLeft className="h-5 w-5 text-gray-600" />
+            <ChevronLeft className="h-4 w-4 text-gray-600" />
           </button>
+
+          <input
+            type="date"
+            value={format(selectedDay, 'yyyy-MM-dd')}
+            onChange={e => {
+              if (e.target.value) setSelectedDay(new Date(e.target.value + 'T12:00:00'))
+            }}
+            className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white cursor-pointer hover:bg-gray-50 outline-none focus:ring-2 focus:ring-(--color-primary) focus:border-(--color-primary)"
+          />
+
           <button
             onClick={() => setSelectedDay(d => addDays(d, 1))}
             className="p-2 rounded-lg hover:bg-gray-100"
             title="Next day"
           >
-            <ChevronRight className="h-5 w-5 text-gray-600" />
+            <ChevronRight className="h-4 w-4 text-gray-600" />
           </button>
+          <button
+            onClick={() => setSelectedDay(d => addDays(d, 7))}
+            className="p-2 rounded-lg hover:bg-gray-100"
+            title="Next week"
+          >
+            <ChevronsRight className="h-4 w-4 text-gray-500" />
+          </button>
+
           {!todaySelected && (
             <button
               onClick={() => setSelectedDay(new Date())}
@@ -366,7 +413,7 @@ export default function AdminCalendar() {
         </div>
 
         {/* Time grid */}
-        <div className="overflow-y-auto" style={{ maxHeight: `${HOUR_HEIGHT * (END_HOUR - START_HOUR)}px` }}>
+        <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: `${HOUR_HEIGHT * (END_HOUR - START_HOUR)}px` }}>
           <div
             className="relative grid"
             style={{ gridTemplateColumns: `56px repeat(${staff.length || 1}, minmax(140px, 1fr))` }}
@@ -504,6 +551,19 @@ export default function AdminCalendar() {
                 </div>
               )
             })}
+
+            {/* Current time line */}
+            {timeLineTop !== null && (
+              <div
+                className="absolute right-0 pointer-events-none z-30"
+                style={{ top: timeLineTop, left: 56 }}
+              >
+                <div className="relative">
+                  <div className="absolute -left-1.5 -top-1.5 h-3 w-3 rounded-full bg-(--color-primary) opacity-80" />
+                  <div className="h-px w-full opacity-40" style={{ backgroundColor: 'var(--color-primary)' }} />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
