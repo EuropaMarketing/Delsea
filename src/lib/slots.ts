@@ -12,9 +12,19 @@ export function generateTimeSlots(
   blockedTimes: BlockedTime[],
 ): string[] {
   const dayOfWeek = getDay(date)
-  const dayAvail = availability.filter((a) => a.day_of_week === dayOfWeek)
-  if (!dayAvail.length) return []
+  const rawDayAvail = availability.filter((a) => a.day_of_week === dayOfWeek)
+  if (!rawDayAvail.length) return []
 
+  // Deduplicate windows so multiple staff with identical hours don't produce duplicate slots
+  const seen = new Set<string>()
+  const dayAvail = rawDayAvail.filter((a) => {
+    const key = `${a.start_time}|${a.end_time}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+
+  const slotSet = new Set<string>()
   const slots: string[] = []
   const slotStep = 15
 
@@ -53,7 +63,8 @@ export function generateTimeSlots(
       })
 
       if (!overlapsBooking && !overlapsBlock) {
-        slots.push(format(current, 'HH:mm'))
+        const label = format(current, 'HH:mm')
+        if (!slotSet.has(label)) { slotSet.add(label); slots.push(label) }
       }
 
       current = addMinutes(current, slotStep)

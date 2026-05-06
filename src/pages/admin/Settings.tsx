@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Upload, ImageIcon } from 'lucide-react'
+import { Textarea } from '@/components/ui/Input'
 import brand, { type BrandConfig, type BorderRadius } from '@/config/brand'
 import { applyBrandTheme } from '@/lib/theme'
 import { supabase } from '@/lib/supabase'
@@ -217,6 +218,30 @@ export default function AdminSettings() {
               value={config.socialLinks?.tiktok ?? ''}
               onChange={(e) => handleChange('socialLinks', { ...config.socialLinks, tiktok: e.target.value || undefined })}
               placeholder="https://tiktok.com/@…"
+            />
+          </div>
+        </Card>
+
+        {/* Booking Policies */}
+        <Card padding="md">
+          <h2 className="font-semibold text-gray-900 mb-1">Booking Policies</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            These appear on the checkout screen before every booking. Plain text only.
+          </p>
+          <div className="space-y-4">
+            <Textarea
+              label="Cancellation Policy"
+              value={config.cancellationPolicy ?? ''}
+              onChange={(e) => handleChange('cancellationPolicy', e.target.value || undefined)}
+              placeholder="e.g. Cancellations made less than 24 hours before your appointment will incur a 50% charge."
+              rows={3}
+            />
+            <Textarea
+              label="Important Information"
+              value={config.importantInfo ?? ''}
+              onChange={(e) => handleChange('importantInfo', e.target.value || undefined)}
+              placeholder="e.g. Please arrive 10 minutes early. Wear comfortable clothing. Avoid eating a heavy meal beforehand."
+              rows={3}
             />
           </div>
         </Card>

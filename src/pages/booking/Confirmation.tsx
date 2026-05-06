@@ -1,10 +1,11 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format, addMinutes } from 'date-fns'
-import { ShieldCheck, Ticket } from 'lucide-react'
+import { ShieldCheck, Ticket, AlertCircle, Info } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
 import { useAuthStore } from '@/store/authStore'
+import { useBrandStore } from '@/store/brandStore'
 import { formatCurrency, formatDuration } from '@/lib/currency'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -15,6 +16,7 @@ export default function Confirmation() {
   const navigate = useNavigate()
   const { draft, services, staff, reset, useToken, tokenMembershipId, tokenPlanName } = useBookingStore()
   const { user } = useAuthStore()
+  const { config: brandConfig } = useBrandStore()
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -245,6 +247,29 @@ export default function Confirmation() {
           </Card>
         </div>
       </div>
+
+      {(brandConfig.cancellationPolicy || brandConfig.importantInfo) && (
+        <div className="mt-6 space-y-3">
+          {brandConfig.cancellationPolicy && (
+            <div className="flex gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+              <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-amber-800 mb-1">Cancellation Policy</p>
+                <p className="text-xs text-amber-700 whitespace-pre-line">{brandConfig.cancellationPolicy}</p>
+              </div>
+            </div>
+          )}
+          {brandConfig.importantInfo && (
+            <div className="flex gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+              <Info className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-blue-800 mb-1">Important Information</p>
+                <p className="text-xs text-blue-700 whitespace-pre-line">{brandConfig.importantInfo}</p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-6">
         <Button variant="secondary" onClick={() => navigate('/details')}>

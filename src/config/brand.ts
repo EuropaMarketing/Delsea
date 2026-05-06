@@ -19,6 +19,8 @@ export interface BrandConfig {
   locale: string
   businessEmail: string
   socialLinks?: SocialLinks
+  cancellationPolicy?: string
+  importantInfo?: string
 }
 
 const brand: BrandConfig = {
