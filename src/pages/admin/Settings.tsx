@@ -56,7 +56,7 @@ export default function AdminSettings() {
       .upload(path, file, { upsert: true })
 
     if (uploadError) {
-      setLogoError('Upload failed — check the storage bucket exists and is public.')
+      setLogoError(`Upload failed: ${uploadError.message}`)
       setLogoUploading(false)
       return
     }
