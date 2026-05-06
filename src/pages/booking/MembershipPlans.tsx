@@ -76,40 +76,22 @@ export default function MembershipPlans() {
     setPurchaseError(null)
 
     try {
-      // Upsert customer record
-      const { data: customer, error: custErr } = await supabase
-        .from('customers')
-        .upsert(
-          { business_id: BUSINESS_ID, user_id: user?.id ?? null, name: name.trim(), email: email.trim().toLowerCase() },
-          { onConflict: 'business_id,email', ignoreDuplicates: false }
-        )
-        .select('id')
-        .single()
-
-      if (custErr || !customer) throw custErr ?? new Error('Could not create customer record')
-
-      // Assign membership
-      const { data: membership, error: memErr } = await supabase
-        .from('customer_memberships')
-        .insert({ customer_id: customer.id, plan_id: selectedPlan.id, tokens_remaining: selectedPlan.token_count })
-        .select('id')
-        .single()
-
-      if (memErr || !membership) throw memErr ?? new Error('Could not assign membership')
-
-      // Record transaction
-      await supabase.from('membership_transactions').insert({
-        membership_id: membership.id,
-        type: 'purchase',
-        amount: selectedPlan.token_count,
-        note: `Membership purchased: ${selectedPlan.name}`,
+      const { data: membershipId, error } = await supabase.rpc('purchase_membership', {
+        p_business_id: BUSINESS_ID,
+        p_plan_id: selectedPlan.id,
+        p_name: name.trim(),
+        p_email: email.trim().toLowerCase(),
+        p_user_id: user?.id ?? null,
       })
+
+      if (error) throw new Error(error.message)
+      if (!membershipId) throw new Error('No membership ID returned')
 
       navigate('/membership-confirmed', {
         state: { planName: selectedPlan.name, tokenCount: selectedPlan.token_count, email: email.trim().toLowerCase() },
       })
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Something went wrong — please try again.'
+      const msg = err instanceof Error ? err.message : String(err)
       setPurchaseError(msg)
     } finally {
       setPurchasing(false)
