@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Pencil, Ticket, Users, Search, Trash2, PlusCircle, MinusCircle } from 'lucide-react'
+import { Plus, Pencil, Ticket, Users, Search, PlusCircle, MinusCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge } from '@/components/ui/Badge'

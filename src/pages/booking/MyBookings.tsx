@@ -142,6 +142,14 @@ export default function MyBookings() {
   useEffect(() => {
     if (!user) { setLoading(false); return }
     async function load() {
+      // Ensure any guest bookings (made before account creation) are linked to this auth user.
+      // This must complete before fetching bookings to avoid a race with the auth listener.
+      if (user.email) {
+        await supabase.rpc('link_customer_to_user', {
+          p_user_id: user.id,
+          p_email: user.email,
+        })
+      }
       const { data, error } = await supabase.rpc('get_my_bookings', { p_business_id: BUSINESS_ID })
       if (error) {
         setRpcError(`${error.message} (code: ${error.code})`)

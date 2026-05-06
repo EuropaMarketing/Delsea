@@ -29,6 +29,8 @@ function CreateAccountForm({ email }: { email: string }) {
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
 
+  const [needsConfirmation, setNeedsConfirmation] = useState(false)
+
   async function handleCreate() {
     if (password.length < 8) { setError('Password must be at least 8 characters'); return }
     if (password !== confirm) { setError('Passwords do not match'); return }
@@ -42,21 +44,30 @@ function CreateAccountForm({ email }: { email: string }) {
         setError('Something went wrong. You can set up your account later from My Bookings.')
       }
     } else {
-      // Link the guest customer record to the new auth account now, before
-      // showing the success message, so My Bookings loads correctly immediately.
+      // Link the guest customer record to this auth user so bookings are visible immediately.
       if (data.user) {
         await supabase.rpc('link_customer_to_user', {
           p_user_id: data.user.id,
           p_email: email,
         })
       }
+      // If Supabase requires email confirmation, data.session will be null.
+      setNeedsConfirmation(!data.session)
       setDone(true)
     }
     setLoading(false)
   }
 
   if (done) {
-    return (
+    return needsConfirmation ? (
+      <div className="w-full max-w-sm flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3.5 text-left">
+        <CheckCircle2 className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-semibold text-blue-800">Check your email</p>
+          <p className="text-xs text-blue-600 mt-0.5">We've sent a confirmation link to {email}. Once confirmed, sign in from My Bookings to manage your appointments.</p>
+        </div>
+      </div>
+    ) : (
       <div className="w-full max-w-sm flex items-start gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3.5 text-left">
         <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
         <div>

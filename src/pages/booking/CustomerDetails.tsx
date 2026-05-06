@@ -14,7 +14,7 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function CustomerDetails() {
   const navigate = useNavigate()
-  const { draft, setCustomer, services, staff, useToken, tokenMembershipId, setTokenChoice } = useBookingStore()
+  const { draft, setCustomer, services, staff, useToken, setTokenChoice } = useBookingStore()
   const { user } = useAuthStore()
 
   const [form, setForm] = useState({
