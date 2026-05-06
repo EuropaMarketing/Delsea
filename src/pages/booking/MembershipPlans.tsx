@@ -23,6 +23,7 @@ export default function MembershipPlans() {
   const [selectedPlan, setSelectedPlan] = useState<MembershipPlan | null>(null)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [namePrefilled, setNamePrefilled] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [purchasing, setPurchasing] = useState(false)
   const [purchaseError, setPurchaseError] = useState<string | null>(null)
@@ -44,7 +45,10 @@ export default function MembershipPlans() {
   useEffect(() => {
     if (user) {
       setEmail(user.email ?? '')
-      if (user.user_metadata?.full_name) setName(user.user_metadata.full_name)
+      if (user.user_metadata?.full_name) {
+        setName(user.user_metadata.full_name)
+        setNamePrefilled(true)
+      }
     }
   }, [user])
 
@@ -52,6 +56,7 @@ export default function MembershipPlans() {
     setSelectedPlan(plan)
     setErrors({})
     setPurchaseError(null)
+    if (!user) { setName(''); setEmail(''); setNamePrefilled(false) }
   }
 
   function validate() {
@@ -193,7 +198,7 @@ export default function MembershipPlans() {
               onChange={(e) => { setName(e.target.value); setErrors((v) => { const n = { ...v }; delete n.name; return n }) }}
               placeholder="Jane Smith"
               error={errors.name}
-              readOnly={!!user}
+              readOnly={namePrefilled}
             />
             <Input
               label="Email Address"
