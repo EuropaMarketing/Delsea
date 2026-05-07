@@ -168,12 +168,24 @@ export default function MyBookings() {
           p_email: currentUser.email,
         })
       }
+      // Fetch customer IDs for this user first, so we can filter memberships to
+      // only this user's own — admins would otherwise see all memberships via RLS.
+      const { data: customerRows } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('user_id', currentUser.id)
+        .eq('business_id', BUSINESS_ID)
+      const customerIds = (customerRows ?? []).map((c) => c.id)
+
       const [bRes, mRes] = await Promise.all([
         supabase.rpc('get_my_bookings', { p_business_id: BUSINESS_ID }),
-        supabase
-          .from('customer_memberships')
-          .select('id, tokens_remaining, purchased_at, expires_at, plan:membership_plans(name, description, token_count)')
-          .order('purchased_at', { ascending: false }),
+        customerIds.length
+          ? supabase
+              .from('customer_memberships')
+              .select('id, tokens_remaining, purchased_at, expires_at, plan:membership_plans(name, description, token_count)')
+              .in('customer_id', customerIds)
+              .order('purchased_at', { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
       ])
 
       if (bRes.error) {

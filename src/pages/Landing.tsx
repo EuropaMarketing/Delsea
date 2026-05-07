@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { CalendarCheck, Lock, Info, CalendarX } from 'lucide-react'
+import { CalendarCheck, Lock, Info, CalendarX, UserCircle2 } from 'lucide-react'
 import { format, getDay, startOfDay, endOfDay } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { useBrandStore } from '@/store/brandStore'
+import { useAuthStore } from '@/store/authStore'
 import { generateTimeSlots } from '@/lib/slots'
 import { Button } from '@/components/ui/Button'
 import type { Availability, BlockedTime, Booking } from '@/types'
@@ -12,6 +13,7 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function Landing() {
   const { config } = useBrandStore()
+  const { user } = useAuthStore()
   const [logoFailed, setLogoFailed] = useState(false)
   const [slotsToday, setSlotsToday] = useState<'loading' | 'available' | 'none'>('loading')
 
@@ -88,10 +90,25 @@ export default function Landing() {
               <Info className="h-3.5 w-3.5" />
               About
             </Link>
-            <Link to="/admin/login" className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors">
-              <Lock className="h-3.5 w-3.5" />
-              Staff login
-            </Link>
+            {user ? (
+              <div className="flex items-center gap-2.5">
+                <Link to="/my-bookings" className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-900 transition-colors">
+                  <UserCircle2 className="h-3.5 w-3.5" />
+                  <span className="max-w-35 truncate">{user.email}</span>
+                </Link>
+                <button
+                  onClick={() => supabase.auth.signOut()}
+                  className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  Sign out
+                </button>
+              </div>
+            ) : (
+              <Link to="/admin/login" className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors">
+                <Lock className="h-3.5 w-3.5" />
+                Staff login
+              </Link>
+            )}
           </div>
         </div>
       </header>

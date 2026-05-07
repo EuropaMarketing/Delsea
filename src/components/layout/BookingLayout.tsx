@@ -1,7 +1,9 @@
 import React from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { CheckCircle2, ChevronRight } from 'lucide-react'
+import { CheckCircle2, ChevronRight, UserCircle2 } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 import { useBrandStore } from '@/store/brandStore'
+import { useAuthStore } from '@/store/authStore'
 import { cn } from '@/lib/cn'
 
 const steps = [
@@ -15,6 +17,7 @@ const steps = [
 export function BookingLayout({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation()
   const { config } = useBrandStore()
+  const { user } = useAuthStore()
   const currentIdx = steps.findIndex((s) => s.path === pathname)
 
   return (
@@ -41,6 +44,20 @@ export function BookingLayout({ children }: { children: React.ReactNode }) {
             <Link to="/my-bookings" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
               My Bookings
             </Link>
+            {user && (
+              <div className="flex items-center gap-2 border-l border-gray-100 pl-4">
+                <Link to="/my-bookings" className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 transition-colors">
+                  <UserCircle2 className="h-3.5 w-3.5" />
+                  <span className="max-w-35 truncate hidden sm:block">{user.email}</span>
+                </Link>
+                <button
+                  onClick={() => supabase.auth.signOut()}
+                  className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  Sign out
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </header>
