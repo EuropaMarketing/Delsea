@@ -52,7 +52,7 @@ export default function AdminResources() {
     setSaving(true)
     setError('')
 
-    if (editTarget) {
+    if (editTarget && editTarget.id) {
       const { error: err } = await supabase
         .from('resources')
         .update({ name: form.name.trim(), description: form.description.trim() || null })
