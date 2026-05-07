@@ -37,20 +37,20 @@ export function Modal({ open, onClose, title, children, size = 'md', className }
       />
       <div
         className={cn(
-          'relative z-10 w-full bg-white shadow-xl brand-card overflow-hidden',
+          'relative z-10 w-full bg-white shadow-xl brand-card overflow-hidden flex flex-col max-h-[90vh]',
           sizes[size],
           className,
         )}
       >
         {title && (
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
             <h2 className="text-base font-semibold text-gray-900">{title}</h2>
             <Button variant="ghost" size="sm" className="!p-1.5 !h-auto" onClick={onClose}>
               <X className="h-4 w-4" />
             </Button>
           </div>
         )}
-        <div className="p-5">{children}</div>
+        <div className="p-5 overflow-y-auto">{children}</div>
       </div>
     </div>
   )
