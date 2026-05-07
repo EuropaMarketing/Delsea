@@ -3,11 +3,12 @@ import {
   format, addDays, subDays, startOfDay, endOfDay,
   parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday,
 } from 'date-fns'
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Star } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Star, Users, CheckCircle2, XCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
+import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Input, Textarea } from '@/components/ui/Input'
 import { cn } from '@/lib/cn'
 import type { Booking, Staff, Service, Customer } from '@/types'
@@ -70,6 +71,10 @@ export default function AdminCalendar() {
 
   // Resize drag state
   const [drag, setDrag] = useState<DragState | null>(null)
+
+  // Booking detail / actions
+  const [selectedBooking, setSelectedBooking] = useState<RichBooking | null>(null)
+  const [actionLoading, setActionLoading] = useState(false)
 
   // Current time line
   const [now, setNow] = useState(new Date())
@@ -233,6 +238,19 @@ export default function AdminCalendar() {
     setNbSuggestions([]); setNbShowSuggestions(false); setNbSelectedCustomerId(null)
   }
 
+  async function handleBookingAction(bookingId: string, status: 'completed' | 'cancelled') {
+    if (status === 'cancelled' && !confirm('Cancel this booking?')) return
+    setActionLoading(true)
+    await supabase.from('bookings').update({ status }).eq('id', bookingId)
+    if (status === 'cancelled') {
+      setBookings(prev => prev.filter(b => b.id !== bookingId))
+    } else {
+      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status } as RichBooking : b))
+    }
+    setSelectedBooking(null)
+    setActionLoading(false)
+  }
+
   async function searchCustomers(query: string) {
     if (query.length < 2) { setNbSuggestions([]); setNbShowSuggestions(false); return }
     const { data } = await supabase
@@ -384,14 +402,14 @@ export default function AdminCalendar() {
         {/* Staff header row */}
         <div
           className="grid border-b border-gray-200"
-          style={{ gridTemplateColumns: `56px repeat(${staff.length || 1}, minmax(140px, 1fr))` }}
+          style={{ gridTemplateColumns: `56px repeat(${staff.length + 1}, minmax(140px, 1fr))` }}
         >
           <div className="border-r border-gray-100" />
           {staff.map(member => (
             <div
               key={member.id}
               className={cn(
-                'px-3 py-3 border-r border-gray-100 last:border-r-0 flex flex-col items-center gap-1.5',
+                'px-3 py-3 border-r border-gray-100 flex flex-col items-center gap-1.5 ',
                 member.on_holiday ? 'bg-amber-50' : '',
               )}
             >
@@ -443,13 +461,24 @@ export default function AdminCalendar() {
               </div>
             </div>
           ))}
+
+          {/* Unstaffed / self-service column header */}
+          <div className="px-3 py-3 flex flex-col items-center gap-1.5 bg-gray-50/60">
+            <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
+              <Users className="h-5 w-5 text-gray-400" />
+            </div>
+            <div className="text-center">
+              <p className="text-xs font-semibold text-gray-500">Self-service</p>
+              <p className="text-xs text-gray-400 mt-0.5">Unassigned</p>
+            </div>
+          </div>
         </div>
 
         {/* Time grid */}
         <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: `${HOUR_HEIGHT * (END_HOUR - START_HOUR)}px` }}>
           <div
             className="relative grid"
-            style={{ gridTemplateColumns: `56px repeat(${staff.length || 1}, minmax(140px, 1fr))` }}
+            style={{ gridTemplateColumns: `56px repeat(${staff.length + 1}, minmax(140px, 1fr))` }}
           >
             {/* Hour labels */}
             <div className="border-r border-gray-100">
@@ -473,7 +502,7 @@ export default function AdminCalendar() {
                 <div
                   key={member.id}
                   className={cn(
-                    'relative border-r border-gray-100 last:border-r-0',
+                    'relative border-r border-gray-100',
                     member.on_holiday ? 'cursor-not-allowed' : 'cursor-crosshair',
                   )}
                   style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
@@ -540,9 +569,11 @@ export default function AdminCalendar() {
                         <div
                           key={booking.id}
                           data-booking="true"
+                          onClick={() => !isDragging && setSelectedBooking(booking)}
                           className={cn(
-                            'absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden transition-shadow z-20',
+                            'absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden transition-shadow z-20 cursor-pointer',
                             isDragging ? 'shadow-lg' : 'hover:brightness-95',
+                            booking.status === 'completed' && 'opacity-50',
                           )}
                           style={{
                             top,
@@ -584,6 +615,45 @@ export default function AdminCalendar() {
                 </div>
               )
             })}
+
+            {/* Unstaffed / self-service column */}
+            <div
+              className="relative border-gray-100 bg-gray-50/30"
+              style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
+            >
+              {hours.map(h => (
+                <div
+                  key={h}
+                  className="absolute w-full border-t border-gray-100"
+                  style={{ top: (h - START_HOUR) * HOUR_HEIGHT }}
+                />
+              ))}
+              {bookings.filter(b => b.staff_id === null).map(booking => {
+                const { top, height } = positionBlock(booking.starts_at, booking.ends_at)
+                const color = categoryColorMap[booking.service?.category] ?? '#7C3AED'
+                return (
+                  <div
+                    key={booking.id}
+                    data-booking="true"
+                    onClick={() => setSelectedBooking(booking)}
+                    className={cn(
+                      'absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden cursor-pointer z-20',
+                      booking.status === 'completed' ? 'opacity-50' : 'hover:brightness-95',
+                    )}
+                    style={{ top, height, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
+                    title={`${booking.customer?.name} — ${booking.service?.name}`}
+                  >
+                    <p className="text-xs font-semibold truncate leading-tight" style={{ color }}>
+                      {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
+                    </p>
+                    <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
+                    {(booking.spots_booked ?? 1) > 1 && (
+                      <p className="text-xs text-gray-500">{booking.spots_booked} spots</p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
 
             {/* Current time line */}
             {timeLineTop !== null && (
@@ -707,6 +777,68 @@ export default function AdminCalendar() {
             <Button onClick={handleCreateBooking} loading={nbSaving}>Create Booking</Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Booking detail modal */}
+      <Modal
+        open={!!selectedBooking}
+        onClose={() => setSelectedBooking(null)}
+        title={selectedBooking ? `${format(parseISO(selectedBooking.starts_at), 'HH:mm')} – ${format(parseISO(selectedBooking.ends_at), 'HH:mm')}` : ''}
+        size="sm"
+      >
+        {selectedBooking && (
+          <div className="space-y-4">
+            <dl className="space-y-2.5 text-sm">
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Service</dt>
+                <dd className="font-medium text-gray-900">{selectedBooking.service?.name}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Customer</dt>
+                <dd className="font-medium text-gray-900">{selectedBooking.customer?.name}</dd>
+              </div>
+              {selectedBooking.staff && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Staff</dt>
+                  <dd className="text-gray-700">{selectedBooking.staff.name}</dd>
+                </div>
+              )}
+              {(selectedBooking.spots_booked ?? 1) > 1 && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Spots</dt>
+                  <dd className="font-semibold text-gray-900">{selectedBooking.spots_booked}</dd>
+                </div>
+              )}
+              <div className="flex justify-between items-center">
+                <dt className="text-gray-500">Status</dt>
+                <dd><Badge variant={statusBadgeVariant(selectedBooking.status)} className="capitalize">{selectedBooking.status}</Badge></dd>
+              </div>
+            </dl>
+            {(selectedBooking.status === 'confirmed' || selectedBooking.status === 'pending') && (
+              <div className="flex gap-2 pt-2 border-t border-gray-100">
+                <Button
+                  fullWidth
+                  variant="secondary"
+                  loading={actionLoading}
+                  onClick={() => handleBookingAction(selectedBooking.id, 'completed')}
+                  className="text-green-700! border-green-200! hover:bg-green-50!"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  Complete
+                </Button>
+                <Button
+                  fullWidth
+                  variant="danger"
+                  loading={actionLoading}
+                  onClick={() => handleBookingAction(selectedBooking.id, 'cancelled')}
+                >
+                  <XCircle className="h-4 w-4" />
+                  Cancel
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
     </div>
   )

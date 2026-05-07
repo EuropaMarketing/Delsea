@@ -1,10 +1,10 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { applyBrandTheme } from '@/lib/theme'
 import brand from '@/config/brand'
 import { supabase } from '@/lib/supabase'
 import { useAuthListener } from '@/hooks/useAuth'
-import { useBrandStore } from '@/store/brandStore'
+import { useBrandStore, hasCachedBrand } from '@/store/brandStore'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
@@ -266,10 +266,11 @@ function AppRoutes() {
 
 export default function App() {
   const { setConfig } = useBrandStore()
+  // Repeat visits: hasCachedBrand=true (theme already applied synchronously), skip loading screen
+  // First visit: show blank white until Supabase config arrives
+  const [brandLoaded, setBrandLoaded] = useState(hasCachedBrand)
 
   useEffect(() => {
-    // Apply defaults immediately, then override with any saved config from the database
-    applyBrandTheme(brand)
     supabase
       .from('businesses')
       .select('config')
@@ -280,8 +281,13 @@ export default function App() {
         applyBrandTheme(merged)
         setConfig(merged)
         document.title = merged.brandName
+        setBrandLoaded(true)
       })
   }, [setConfig])
+
+  if (!brandLoaded) {
+    return <div className="h-screen w-screen bg-white" />
+  }
 
   return (
     <BrowserRouter>
