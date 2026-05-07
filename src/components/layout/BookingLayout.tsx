@@ -1,6 +1,6 @@
 import React from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { CheckCircle2, ChevronRight, UserCircle2 } from 'lucide-react'
+import { CheckCircle2, ChevronRight, UserCircle2, LayoutDashboard } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBrandStore } from '@/store/brandStore'
 import { useAuthStore } from '@/store/authStore'
@@ -17,7 +17,7 @@ const steps = [
 export function BookingLayout({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation()
   const { config } = useBrandStore()
-  const { user } = useAuthStore()
+  const { user, isAdmin } = useAuthStore()
   const currentIdx = steps.findIndex((s) => s.path === pathname)
 
   return (
@@ -46,6 +46,12 @@ export function BookingLayout({ children }: { children: React.ReactNode }) {
             </Link>
             {user && (
               <div className="flex items-center gap-2 border-l border-gray-100 pl-4">
+                {isAdmin && (
+                  <Link to="/admin" className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 transition-colors">
+                    <LayoutDashboard className="h-3.5 w-3.5" />
+                    <span className="hidden sm:block">Admin</span>
+                  </Link>
+                )}
                 <Link to="/my-bookings" className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 transition-colors">
                   <UserCircle2 className="h-3.5 w-3.5" />
                   <span className="max-w-35 truncate hidden sm:block">{user.email}</span>

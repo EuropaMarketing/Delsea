@@ -5,6 +5,7 @@ import { format, getDay, startOfDay, endOfDay } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { useBrandStore } from '@/store/brandStore'
 import { useAuthStore } from '@/store/authStore'
+import { LayoutDashboard } from 'lucide-react'
 import { generateTimeSlots } from '@/lib/slots'
 import { Button } from '@/components/ui/Button'
 import type { Availability, BlockedTime, Booking } from '@/types'
@@ -13,7 +14,7 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function Landing() {
   const { config } = useBrandStore()
-  const { user } = useAuthStore()
+  const { user, isAdmin } = useAuthStore()
   const [logoFailed, setLogoFailed] = useState(false)
   const [slotsToday, setSlotsToday] = useState<'loading' | 'available' | 'none'>('loading')
 
@@ -92,6 +93,12 @@ export default function Landing() {
             </Link>
             {user ? (
               <div className="flex items-center gap-2.5">
+                {isAdmin && (
+                  <Link to="/admin" className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 transition-colors">
+                    <LayoutDashboard className="h-3.5 w-3.5" />
+                    Admin
+                  </Link>
+                )}
                 <Link to="/my-bookings" className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-900 transition-colors">
                   <UserCircle2 className="h-3.5 w-3.5" />
                   <span className="max-w-35 truncate">{user.email}</span>
