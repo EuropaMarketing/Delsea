@@ -116,7 +116,7 @@ export default function AdminDiscounts() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-mono font-bold text-gray-900 text-sm tracking-wide">{code.code}</span>
-                    <Badge variant={code.is_active ? 'success' : 'neutral'}>
+                    <Badge variant={code.is_active ? 'success' : 'default'}>
                       {code.is_active ? 'Active' : 'Inactive'}
                     </Badge>
                     <span className="text-sm font-semibold" style={{ color: 'var(--color-primary)' }}>

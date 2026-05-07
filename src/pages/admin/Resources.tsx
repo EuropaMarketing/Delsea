@@ -33,11 +33,6 @@ export default function AdminResources() {
       })
   }, [])
 
-  function openCreate() {
-    setEditTarget(null)
-    setForm({ ...emptyForm })
-    setError('')
-  }
 
   function openEdit(resource: Resource) {
     setEditTarget(resource)
@@ -118,7 +113,7 @@ export default function AdminResources() {
                   <div className="flex items-center gap-2">
                     <DoorOpen className="h-4 w-4 text-gray-400 shrink-0" />
                     <p className="font-semibold text-gray-900">{resource.name}</p>
-                    <Badge variant={resource.is_active ? 'success' : 'neutral'}>
+                    <Badge variant={resource.is_active ? 'success' : 'default'}>
                       {resource.is_active ? 'Active' : 'Inactive'}
                     </Badge>
                   </div>
