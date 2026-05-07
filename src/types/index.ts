@@ -39,9 +39,21 @@ export interface Service {
   category: string
   is_active: boolean
   is_self_service: boolean
+  is_group_session: boolean
+  max_capacity: number | null
   deposit_type: DepositType
   deposit_value: number
   variants?: ServiceVariant[]
+}
+
+export interface ServiceSession {
+  id: string
+  business_id: string
+  service_id: string
+  day_of_week: number
+  start_time: string
+  is_active: boolean
+  created_at: string
 }
 
 export interface Availability {

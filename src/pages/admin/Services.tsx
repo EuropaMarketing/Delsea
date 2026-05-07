@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
+import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Users } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDuration, calculateDeposit } from '@/lib/currency'
 import { Badge } from '@/components/ui/Badge'
@@ -8,13 +8,15 @@ import { Card } from '@/components/ui/Card'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { Service, ServiceVariant, DepositType } from '@/types'
+import type { Service, ServiceSession, ServiceVariant, DepositType } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
 const empty: Omit<Service, 'id' | 'business_id'> = {
   name: '', description: null, duration_minutes: 60, price: 0, category: 'General', is_active: true,
-  is_self_service: false, deposit_type: 'none', deposit_value: 0,
+  is_self_service: false, is_group_session: false, max_capacity: null, deposit_type: 'none', deposit_value: 0,
 }
 
 export default function AdminServices() {
@@ -29,6 +31,10 @@ export default function AdminServices() {
   const [variantForm, setVariantForm] = useState({ name: '', duration_minutes: 60, price: '' })
   const [addingVariant, setAddingVariant] = useState(false)
   const [savingVariant, setSavingVariant] = useState(false)
+  const [sessionsList, setSessionsList] = useState<ServiceSession[]>([])
+  const [sessionForm, setSessionForm] = useState({ day_of_week: 1, start_time: '09:00' })
+  const [addingSession, setAddingSession] = useState(false)
+  const [savingSession, setSavingSession] = useState(false)
 
   useEffect(() => { load() }, [])
 
@@ -51,17 +57,18 @@ export default function AdminServices() {
 
   async function openEdit(service: Service) {
     setEditTarget(service)
-    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, is_self_service: service.is_self_service, deposit_type: service.deposit_type, deposit_value: service.deposit_value })
+    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, is_self_service: service.is_self_service, is_group_session: service.is_group_session, max_capacity: service.max_capacity, deposit_type: service.deposit_type, deposit_value: service.deposit_value })
     setErrors({})
     setVariantForm({ name: '', duration_minutes: 60, price: '' })
     setAddingVariant(false)
-    const { data } = await supabase
-      .from('service_variants')
-      .select('*')
-      .eq('service_id', service.id)
-      .eq('is_active', true)
-      .order('sort_order')
-    setVariantsList((data as ServiceVariant[]) ?? [])
+    setAddingSession(false)
+    setSessionForm({ day_of_week: 1, start_time: '09:00' })
+    const [variantsRes, sessionsRes] = await Promise.all([
+      supabase.from('service_variants').select('*').eq('service_id', service.id).eq('is_active', true).order('sort_order'),
+      supabase.from('service_sessions').select('*').eq('service_id', service.id).eq('is_active', true).order('day_of_week').order('start_time'),
+    ])
+    setVariantsList((variantsRes.data as ServiceVariant[]) ?? [])
+    setSessionsList((sessionsRes.data as ServiceSession[]) ?? [])
     setModalOpen(true)
   }
 
@@ -78,11 +85,16 @@ export default function AdminServices() {
     if (Object.keys(e).length) { setErrors(e); return }
     setSaving(true)
 
+    const payload = {
+      ...form,
+      // Group sessions are always self-service
+      is_self_service: form.is_self_service || form.is_group_session,
+    }
     if (editTarget) {
-      const { data } = await supabase.from('services').update(form).eq('id', editTarget.id).select().single()
+      const { data } = await supabase.from('services').update(payload).eq('id', editTarget.id).select().single()
       if (data) setServices((prev) => prev.map((s) => (s.id === editTarget.id ? data as Service : s)))
     } else {
-      const { data } = await supabase.from('services').insert({ ...form, business_id: BUSINESS_ID }).select().single()
+      const { data } = await supabase.from('services').insert({ ...payload, business_id: BUSINESS_ID }).select().single()
       if (data) setServices((prev) => [...prev, data as Service])
     }
     setSaving(false)
@@ -127,6 +139,29 @@ export default function AdminServices() {
     setVariantsList((prev) => prev.filter((v) => v.id !== id))
   }
 
+  async function handleAddSession() {
+    if (!editTarget) return
+    setSavingSession(true)
+    const { data } = await supabase
+      .from('service_sessions')
+      .insert({ business_id: BUSINESS_ID, service_id: editTarget.id, day_of_week: sessionForm.day_of_week, start_time: sessionForm.start_time })
+      .select().single()
+    if (data) {
+      setSessionsList((prev) =>
+        [...prev, data as ServiceSession].sort((a, b) =>
+          a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time)
+        )
+      )
+      setAddingSession(false)
+    }
+    setSavingSession(false)
+  }
+
+  async function handleDeleteSession(id: string) {
+    await supabase.from('service_sessions').update({ is_active: false }).eq('id', id)
+    setSessionsList((prev) => prev.filter((s) => s.id !== id))
+  }
+
   if (loading) return <FullPageSpinner />
 
   return (
@@ -146,7 +181,8 @@ export default function AdminServices() {
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="font-semibold text-gray-900">{service.name}</p>
                 <Badge variant="default">{service.category}</Badge>
-                {service.is_self_service && <Badge variant="brand">Self-service</Badge>}
+                {service.is_group_session && <Badge variant="brand"><Users className="h-3 w-3 mr-1 inline" />Group · max {service.max_capacity ?? 8}</Badge>}
+                {service.is_self_service && !service.is_group_session && <Badge variant="brand">Self-service</Badge>}
                 {!service.is_active && <Badge variant="danger">Inactive</Badge>}
               </div>
               {service.description && (
@@ -244,6 +280,7 @@ export default function AdminServices() {
               type="checkbox"
               className="mt-0.5 accent-(--color-primary)"
               checked={form.is_self_service}
+              disabled={form.is_group_session}
               onChange={(e) => setForm((f) => ({ ...f, is_self_service: e.target.checked }))}
             />
             <div>
@@ -253,6 +290,39 @@ export default function AdminServices() {
               </p>
             </div>
           </label>
+
+          {/* Group session toggle */}
+          <label className="flex items-start gap-3 p-3 border border-gray-100 rounded-xl bg-gray-50 cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-(--color-primary)"
+              checked={form.is_group_session}
+              onChange={(e) => setForm((f) => ({
+                ...f,
+                is_group_session: e.target.checked,
+                is_self_service: e.target.checked ? true : f.is_self_service,
+                max_capacity: e.target.checked ? (f.max_capacity ?? 8) : null,
+              }))}
+            />
+            <div>
+              <p className="text-sm font-medium text-gray-800">Group session</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Multiple clients can book the same fixed time slot up to a maximum capacity — ideal for classes or group therapy.
+              </p>
+            </div>
+          </label>
+
+          {/* Max capacity — only for group sessions */}
+          {form.is_group_session && (
+            <Input
+              label="Max capacity per session"
+              type="number"
+              min={1}
+              max={100}
+              value={form.max_capacity ?? 8}
+              onChange={(e) => setForm((f) => ({ ...f, max_capacity: parseInt(e.target.value) || 1 }))}
+            />
+          )}
 
           {/* Variants — only available when editing an existing service */}
           {editTarget && (
@@ -324,6 +394,84 @@ export default function AdminServices() {
                   <div className="flex gap-2">
                     <Button size="sm" loading={savingVariant} onClick={handleAddVariant}>Add</Button>
                     <Button size="sm" variant="secondary" onClick={() => setAddingVariant(false)}>Cancel</Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Session schedule — only for group sessions when editing */}
+          {editTarget && form.is_group_session && (
+            <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-gray-700">Session Schedule</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Set the recurring days and times this session runs.</p>
+                </div>
+                {!addingSession && (
+                  <button
+                    type="button"
+                    onClick={() => setAddingSession(true)}
+                    className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-full border transition-colors"
+                    style={{ borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add
+                  </button>
+                )}
+              </div>
+
+              {sessionsList.length === 0 && !addingSession && (
+                <p className="text-xs text-gray-400 text-center py-2">No sessions scheduled yet. Add one above.</p>
+              )}
+
+              {DAY_NAMES.map((dayName, dow) => {
+                const daySessions = sessionsList.filter((s) => s.day_of_week === dow)
+                if (!daySessions.length) return null
+                return (
+                  <div key={dow}>
+                    <p className="text-xs font-semibold text-gray-500 mb-1">{dayName}</p>
+                    <div className="space-y-1">
+                      {daySessions.map((s) => (
+                        <div key={s.id} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
+                          <span className="text-sm font-medium text-gray-900">{s.start_time.substring(0, 5)}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSession(s.id)}
+                            className="text-gray-400 hover:text-red-500 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+
+              {addingSession && (
+                <div className="bg-white border border-gray-200 rounded-lg p-3 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs font-medium text-gray-700 mb-1 block">Day</label>
+                      <select
+                        value={sessionForm.day_of_week}
+                        onChange={(e) => setSessionForm((f) => ({ ...f, day_of_week: parseInt(e.target.value) }))}
+                        className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
+                      >
+                        {DAY_NAMES.map((d, i) => <option key={i} value={i}>{d}</option>)}
+                      </select>
+                    </div>
+                    <Input
+                      label="Start time"
+                      type="time"
+                      value={sessionForm.start_time}
+                      onChange={(e) => setSessionForm((f) => ({ ...f, start_time: e.target.value }))}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" loading={savingSession} onClick={handleAddSession}>Add</Button>
+                    <Button size="sm" variant="secondary" onClick={() => setAddingSession(false)}>Cancel</Button>
                   </div>
                 </div>
               )}

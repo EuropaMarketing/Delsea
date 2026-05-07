@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   format, addMonths, subMonths, startOfMonth, endOfMonth,
   eachDayOfInterval, isSameDay, isBefore, isAfter, startOfDay, endOfDay,
-  getDay, addDays, isSameMonth,
+  getDay, addDays, isSameMonth, parseISO,
 } from 'date-fns'
 import { ChevronLeft, ChevronRight, Globe, CalendarSearch } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -11,7 +11,7 @@ import { useBookingStore } from '@/store/bookingStore'
 import { generateTimeSlots } from '@/lib/slots'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
-import type { Availability, BlockedTime, Booking, Staff } from '@/types'
+import type { Availability, BlockedTime, Booking, ServiceSession, Staff } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
@@ -25,6 +25,7 @@ export default function DateTimePicker() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(draft.date ?? null)
   const [selectedSlot, setSelectedSlot] = useState<string | null>(draft.timeSlot || null)
   const [availability, setAvailability] = useState<Availability[]>([])
+  const [groupSessions, setGroupSessions] = useState<ServiceSession[]>([])
   const [monthBookings, setMonthBookings] = useState<Booking[]>([])
   const [monthBlocked, setMonthBlocked] = useState<BlockedTime[]>([])
   const [loadingAvail, setLoadingAvail] = useState(true)
@@ -41,8 +42,9 @@ export default function DateTimePicker() {
 
   if (!draft.serviceId) { navigate('/book'); return null }
 
-  // Load staff availability schedule (day-of-week rules)
+  // Load staff availability schedule (day-of-week rules) — skipped for group sessions
   useEffect(() => {
+    if (service?.is_group_session) return
     setLoadingAvail(true)
     async function load() {
       let staffIds: string[]
@@ -51,7 +53,6 @@ export default function DateTimePicker() {
       } else if (staff.length) {
         staffIds = staff.map((s) => s.id)
       } else {
-        // Self-service path: staff list not yet loaded — fetch it now
         const { data: staffData } = await supabase
           .from('staff')
           .select('*')
@@ -73,7 +74,24 @@ export default function DateTimePicker() {
     }
     load()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.staffId, staff.length, setStaffList])
+  }, [draft.staffId, staff.length, setStaffList, service?.is_group_session])
+
+  // Load session schedule for group sessions
+  useEffect(() => {
+    if (!service?.is_group_session) return
+    setLoadingAvail(true)
+    async function load() {
+      const { data } = await supabase
+        .from('service_sessions')
+        .select('*')
+        .eq('service_id', service!.id)
+        .eq('is_active', true)
+      if (data) setGroupSessions(data as ServiceSession[])
+      setLoadingAvail(false)
+    }
+    load()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [service?.id, service?.is_group_session])
 
   // Load all bookings + blocked times for the visible calendar month
   useEffect(() => {
@@ -107,14 +125,37 @@ export default function DateTimePicker() {
   }, [calMonth])
 
   const availableDays = useMemo(
-    () => new Set(availability.map((a) => a.day_of_week)),
-    [availability]
+    () => service?.is_group_session
+      ? new Set(groupSessions.map((s) => s.day_of_week))
+      : new Set(availability.map((a) => a.day_of_week)),
+    [service?.is_group_session, groupSessions, availability]
   )
 
   // Compute available slots for every non-past day in the calendar month
   const slotsPerDay = useMemo(() => {
-    if (!service || !availability.length) return new Map<string, string[]>()
+    if (!service) return new Map<string, string[]>()
     const map = new Map<string, string[]>()
+
+    if (service.is_group_session) {
+      if (!groupSessions.length) return map
+      const maxCap = service.max_capacity ?? 8
+      for (const day of eachDayOfInterval({ start: startOfMonth(calMonth), end: endOfMonth(calMonth) })) {
+        if (isBefore(day, todayStart)) continue
+        const daySessions = groupSessions.filter((s) => s.day_of_week === getDay(day))
+        if (!daySessions.length) continue
+        const dayKey = format(day, 'yyyy-MM-dd')
+        const counts: Record<string, number> = {}
+        for (const b of monthBookings.filter((b) => b.service_id === service.id && b.starts_at.startsWith(dayKey))) {
+          const t = format(parseISO(b.starts_at), 'HH:mm')
+          counts[t] = (counts[t] ?? 0) + 1
+        }
+        const available = daySessions.filter((s) => (counts[s.start_time.substring(0, 5)] ?? 0) < maxCap)
+        if (available.length) map.set(dayKey, available.map((s) => s.start_time.substring(0, 5)))
+      }
+      return map
+    }
+
+    if (!availability.length) return map
     for (const day of eachDayOfInterval({ start: startOfMonth(calMonth), end: endOfMonth(calMonth) })) {
       if (isBefore(day, todayStart)) continue
       if (!availableDays.has(getDay(day))) continue
@@ -131,7 +172,7 @@ export default function DateTimePicker() {
       map.set(dayKey, generateTimeSlots(day, availability, draft.variantDuration ?? service.duration_minutes, bks, blk))
     }
     return map
-  }, [calMonth, service, availability, availableDays, monthBookings, monthBlocked, todayStart])
+  }, [calMonth, service, groupSessions, availability, availableDays, monthBookings, monthBlocked, todayStart])
 
   // Auto-select the first available day once data is ready (runs once)
   useEffect(() => {
@@ -156,6 +197,26 @@ export default function DateTimePicker() {
     [selectedDate, slotsPerDay]
   )
 
+  // Capacity-aware slot list for group sessions on the selected date
+  const groupSlots = useMemo(() => {
+    if (!service?.is_group_session || !selectedDate || !groupSessions.length) return []
+    const daySessions = groupSessions
+      .filter((s) => s.day_of_week === getDay(selectedDate))
+      .sort((a, b) => a.start_time.localeCompare(b.start_time))
+    if (!daySessions.length) return []
+    const dayKey = format(selectedDate, 'yyyy-MM-dd')
+    const counts: Record<string, number> = {}
+    for (const b of monthBookings.filter((b) => b.service_id === service.id && b.starts_at.startsWith(dayKey))) {
+      const t = format(parseISO(b.starts_at), 'HH:mm')
+      counts[t] = (counts[t] ?? 0) + 1
+    }
+    const maxCap = service.max_capacity ?? 8
+    return daySessions.map((s) => ({
+      time: s.start_time.substring(0, 5),
+      spotsLeft: Math.max(0, maxCap - (counts[s.start_time.substring(0, 5)] ?? 0)),
+    }))
+  }, [service, selectedDate, groupSessions, monthBookings])
+
   const monthHasSlots = useMemo(
     () => [...slotsPerDay.values()].some((s) => s.length > 0),
     [slotsPerDay]
@@ -167,6 +228,7 @@ export default function DateTimePicker() {
     setFindingNext(true)
     let from = addDays(endOfMonth(calMonth), 1)
     const limit = addDays(new Date(), 90)
+    const maxCap = service.max_capacity ?? 8
 
     while (isBefore(from, limit)) {
       const month = startOfMonth(from)
@@ -177,27 +239,45 @@ export default function DateTimePicker() {
           .gte('starts_at', month.toISOString())
           .lte('starts_at', monthEnd.toISOString())
           .neq('status', 'cancelled'),
-        supabase.from('blocked_times').select('*')
-          .lt('starts_at', monthEnd.toISOString())
-          .gt('ends_at', month.toISOString()),
+        service.is_group_session
+          ? Promise.resolve({ data: [] as BlockedTime[] })
+          : supabase.from('blocked_times').select('*')
+              .lt('starts_at', monthEnd.toISOString())
+              .gt('ends_at', month.toISOString()),
       ])
       const bks = (bRes.data ?? []) as Booking[]
       const blk = (btRes.data ?? []) as BlockedTime[]
 
       for (const day of eachDayOfInterval({ start: month, end: monthEnd })) {
         if (isBefore(day, todayStart)) continue
-        if (!availableDays.has(getDay(day))) continue
         const dayKey = format(day, 'yyyy-MM-dd')
-        const dStart = startOfDay(day)
-        const dEnd = endOfDay(day)
-        const dayBks = bks
-          .filter((b) => b.starts_at.startsWith(dayKey))
-          .filter((b) => service.is_self_service ? b.service_id === service.id : true)
-        const dayBlk = blk.filter((bt) => {
-          const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
-          return isBefore(s, dEnd) && isAfter(e, dStart)
-        })
-        const daySlots = generateTimeSlots(day, availability, draft.variantDuration ?? service.duration_minutes, dayBks, dayBlk)
+        let daySlots: string[] = []
+
+        if (service.is_group_session) {
+          const daySessions = groupSessions.filter((s) => s.day_of_week === getDay(day))
+          if (!daySessions.length) continue
+          const counts: Record<string, number> = {}
+          for (const b of bks.filter((b) => b.service_id === service.id && b.starts_at.startsWith(dayKey))) {
+            const t = format(parseISO(b.starts_at), 'HH:mm')
+            counts[t] = (counts[t] ?? 0) + 1
+          }
+          daySlots = daySessions
+            .filter((s) => (counts[s.start_time.substring(0, 5)] ?? 0) < maxCap)
+            .map((s) => s.start_time.substring(0, 5))
+        } else {
+          if (!availableDays.has(getDay(day))) continue
+          const dStart = startOfDay(day)
+          const dEnd = endOfDay(day)
+          const dayBks = bks
+            .filter((b) => b.starts_at.startsWith(dayKey))
+            .filter((b) => service.is_self_service ? b.service_id === service.id : true)
+          const dayBlk = blk.filter((bt) => {
+            const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
+            return isBefore(s, dEnd) && isAfter(e, dStart)
+          })
+          daySlots = generateTimeSlots(day, availability, draft.variantDuration ?? service.duration_minutes, dayBks, dayBlk)
+        }
+
         if (daySlots.length > 0) {
           skipMonthLoadKey.current = format(month, 'yyyy-MM')
           setCalMonth(month)
@@ -355,6 +435,50 @@ export default function DateTimePicker() {
               <Globe className="h-8 w-8 mb-2 opacity-40" />
               <p className="text-sm">Select a date to see available times</p>
             </div>
+          ) : service?.is_group_session ? (
+            groupSlots.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-gray-400 py-12">
+                <p className="text-sm font-medium">No sessions on this day.</p>
+                <p className="text-xs mt-1">Try a different date.</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm font-medium text-gray-700 mb-3">
+                  {format(selectedDate!, 'EEEE, d MMMM')}
+                </p>
+                <div className="space-y-2">
+                  {groupSlots.map((slot) => (
+                    <button
+                      key={slot.time}
+                      disabled={slot.spotsLeft === 0}
+                      onClick={() => slot.spotsLeft > 0 && handleSlotClick(slot.time)}
+                      className={cn(
+                        'w-full flex items-center justify-between px-4 py-3 text-sm font-medium border transition-all rounded-(--border-radius-sm)',
+                        slot.spotsLeft === 0
+                          ? 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed'
+                          : selectedSlot === slot.time
+                          ? 'bg-(--color-primary) text-white border-(--color-primary)'
+                          : 'bg-white border-gray-200 text-gray-700 hover:border-(--color-primary) hover:text-(--color-primary)',
+                      )}
+                    >
+                      <span>{slot.time}</span>
+                      <span className={cn(
+                        'text-xs font-semibold px-2 py-0.5 rounded-full',
+                        slot.spotsLeft === 0
+                          ? 'bg-red-100 text-red-600'
+                          : slot.spotsLeft <= 2
+                          ? 'bg-amber-100 text-amber-700'
+                          : selectedSlot === slot.time
+                          ? 'bg-white/20 text-white'
+                          : 'bg-green-100 text-green-700',
+                      )}>
+                        {slot.spotsLeft === 0 ? 'Full' : `${slot.spotsLeft} spot${slot.spotsLeft === 1 ? '' : 's'} left`}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )
           ) : slots.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-gray-400 py-12">
               <p className="text-sm font-medium">No availability on this day.</p>
