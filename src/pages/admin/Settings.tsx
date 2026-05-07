@@ -318,6 +318,12 @@ export default function AdminSettings() {
             These appear on the checkout screen before every booking. Plain text only.
           </p>
           <div className="space-y-4">
+            <Input
+              label="Google Review URL"
+              value={config.googleReviewUrl ?? ''}
+              onChange={(e) => handleChange('googleReviewUrl', e.target.value || undefined)}
+              placeholder="https://g.page/r/your-business-id/review"
+            />
             <Textarea
               label="Cancellation Policy"
               value={config.cancellationPolicy ?? ''}

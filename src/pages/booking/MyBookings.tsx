@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { format, parseISO, isBefore, addHours } from 'date-fns'
-import { CalendarClock, AlertTriangle, LogIn, CalendarRange, Phone, Ticket, Star, CheckCircle2 } from 'lucide-react'
+import { CalendarClock, AlertTriangle, LogIn, CalendarRange, Phone, Ticket, Star, CheckCircle2, ExternalLink } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { useBookingStore } from '@/store/bookingStore'
@@ -155,6 +155,7 @@ export default function MyBookings() {
   const [reviewerName, setReviewerName] = useState('')
   const [reviewSubmitting, setReviewSubmitting] = useState(false)
   const [reviewError, setReviewError] = useState('')
+  const [showGooglePrompt, setShowGooglePrompt] = useState(false)
 
   useEffect(() => {
     if (!user) { setLoading(false); return }
@@ -255,6 +256,7 @@ export default function MyBookings() {
     } else {
       setReviewedIds((prev) => new Set([...prev, reviewTarget.id]))
       setReviewTarget(null)
+      if (reviewRating === 5 && config.googleReviewUrl) setShowGooglePrompt(true)
     }
     setReviewSubmitting(false)
   }

@@ -42,6 +42,7 @@ export interface BrandConfig {
   openingHours?: OpeningHoursEntry[]
   address?: string
   mapEmbedUrl?: string
+  googleReviewUrl?: string
 }
 
 const brand: BrandConfig = {
