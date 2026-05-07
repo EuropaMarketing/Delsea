@@ -3,7 +3,7 @@ import {
   format, addDays, subDays, startOfDay, endOfDay,
   parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday,
 } from 'date-fns'
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Star } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { Modal } from '@/components/ui/Modal'
@@ -49,6 +49,7 @@ export default function AdminCalendar() {
   const [staff, setStaff] = useState<Staff[]>([])
   const [services, setServices] = useState<Service[]>([])
   const [loading, setLoading] = useState(true)
+  const [ratings, setRatings] = useState<Record<string, { avg: number; count: number }>>({})
 
   // New booking modal state
   const [newBookingStaffId, setNewBookingStaffId] = useState<string | null>(null)
@@ -87,6 +88,31 @@ export default function AdminCalendar() {
       : 0
     scrollRef.current.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
   }, [selectedDay])
+
+  useEffect(() => {
+    async function loadRatings() {
+      const { data } = await supabase
+        .from('staff_reviews')
+        .select('staff_id, rating')
+        .eq('business_id', BUSINESS_ID)
+        .eq('is_approved', true)
+        .not('staff_id', 'is', null)
+      if (!data) return
+      const map: Record<string, { total: number; count: number }> = {}
+      for (const r of data) {
+        if (!r.staff_id) continue
+        if (!map[r.staff_id]) map[r.staff_id] = { total: 0, count: 0 }
+        map[r.staff_id].total += r.rating
+        map[r.staff_id].count++
+      }
+      const result: Record<string, { avg: number; count: number }> = {}
+      for (const [id, { total, count }] of Object.entries(map)) {
+        result[id] = { avg: Math.round((total / count) * 10) / 10, count }
+      }
+      setRatings(result)
+    }
+    loadRatings()
+  }, [])
 
   useEffect(() => {
     async function load() {
@@ -407,6 +433,13 @@ export default function AdminCalendar() {
                 )}>
                   {member.on_holiday ? 'On Holiday' : member.role}
                 </p>
+                {!member.on_holiday && ratings[member.id] && (
+                  <div className="flex items-center justify-center gap-0.5 mt-0.5">
+                    <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                    <span className="text-xs font-semibold text-gray-600">{ratings[member.id].avg}</span>
+                    <span className="text-xs text-gray-400">({ratings[member.id].count})</span>
+                  </div>
+                )}
               </div>
             </div>
           ))}

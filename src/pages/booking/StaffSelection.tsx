@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users } from 'lucide-react'
+import { Users, Star } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
 import { Card } from '@/components/ui/Card'
@@ -12,6 +12,8 @@ import type { Staff } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
+type StaffRating = { avg: number; count: number }
+
 export default function StaffSelection() {
   const navigate = useNavigate()
   const { draft, setStaff, setStaffList, staff, services } = useBookingStore()
@@ -20,17 +22,45 @@ export default function StaffSelection() {
 
   const [loading, setLoading] = useState(!staff.length)
   const [selected, setSelected] = useState<string | null>(draft.staffId)
+  const [ratings, setRatings] = useState<Record<string, StaffRating>>({})
+
+  function computeRatings(rows: { staff_id: string | null; rating: number }[]) {
+    const map: Record<string, { total: number; count: number }> = {}
+    for (const r of rows) {
+      if (!r.staff_id) continue
+      if (!map[r.staff_id]) map[r.staff_id] = { total: 0, count: 0 }
+      map[r.staff_id].total += r.rating
+      map[r.staff_id].count++
+    }
+    const result: Record<string, StaffRating> = {}
+    for (const [id, { total, count }] of Object.entries(map)) {
+      result[id] = { avg: Math.round((total / count) * 10) / 10, count }
+    }
+    setRatings(result)
+  }
 
   useEffect(() => {
-    if (staff.length) { setLoading(false); return }
     async function load() {
-      const { data } = await supabase
-        .from('staff')
-        .select('*')
+      const reviewsPromise = supabase
+        .from('staff_reviews')
+        .select('staff_id, rating')
         .eq('business_id', BUSINESS_ID)
-        .eq('on_holiday', false)
-        .order('name')
-      if (data) setStaffList(data as Staff[])
+        .eq('is_approved', true)
+        .not('staff_id', 'is', null)
+
+      if (staff.length) {
+        const { data } = await reviewsPromise
+        if (data) computeRatings(data)
+        setLoading(false)
+        return
+      }
+
+      const [staffRes, reviewsRes] = await Promise.all([
+        supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).eq('on_holiday', false).order('name'),
+        reviewsPromise,
+      ])
+      if (staffRes.data) setStaffList(staffRes.data as Staff[])
+      if (reviewsRes.data) computeRatings(reviewsRes.data)
       setLoading(false)
     }
     load()
@@ -97,6 +127,13 @@ export default function StaffSelection() {
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-gray-900">{member.name}</p>
               <Badge variant="default" className="mt-1 capitalize">{member.role}</Badge>
+              {ratings[member.id] && (
+                <div className="flex items-center gap-1 mt-1.5">
+                  <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                  <span className="text-sm font-semibold text-gray-800">{ratings[member.id].avg}</span>
+                  <span className="text-xs text-gray-400">({ratings[member.id].count})</span>
+                </div>
+              )}
               {member.bio && (
                 <p className="text-xs text-gray-500 mt-1.5 line-clamp-2">{member.bio}</p>
               )}
