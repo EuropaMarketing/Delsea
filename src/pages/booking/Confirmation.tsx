@@ -34,7 +34,8 @@ export default function Confirmation() {
   const startsAt = new Date(draft.date)
   startsAt.setHours(slotH, slotM, 0, 0)
   const effectiveDuration = draft.variantDuration ?? service?.duration_minutes ?? 60
-  const effectivePrice = draft.variantPrice ?? service?.price ?? 0
+  const effectiveUnitPrice = draft.variantPrice ?? service?.price ?? 0
+  const effectivePrice = effectiveUnitPrice * (draft.spotsBooked ?? 1)
   const endsAt = addMinutes(startsAt, effectiveDuration)
 
   const depositAmount = service ? (
@@ -66,6 +67,7 @@ export default function Confirmation() {
           p_starts_at: startsAt.toISOString(),
           p_ends_at: endsAt.toISOString(),
           p_notes: draft.notes || null,
+          p_spots_booked: draft.spotsBooked ?? 1,
         })
 
       if (bErr) throw bErr
@@ -144,6 +146,12 @@ export default function Confirmation() {
                   {format(startsAt, 'HH:mm')} – {format(endsAt, 'HH:mm')}
                 </dd>
               </div>
+              {(draft.spotsBooked ?? 1) > 1 && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Spots</dt>
+                  <dd className="font-semibold text-gray-900">{draft.spotsBooked}</dd>
+                </div>
+              )}
               <div className="flex justify-between">
                 <dt className="text-gray-500">Team member</dt>
                 <dd className="text-gray-700">
@@ -202,6 +210,11 @@ export default function Confirmation() {
               </div>
             ) : (
               <div className="space-y-2 text-sm mb-4">
+                {(draft.spotsBooked ?? 1) > 1 && (
+                  <div className="flex justify-between text-xs text-gray-400">
+                    <span>{formatCurrency(effectiveUnitPrice)} × {draft.spotsBooked} spots</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-gray-500">Total</span>
                   <span className="font-semibold text-gray-900">{formatCurrency(effectivePrice)}</span>

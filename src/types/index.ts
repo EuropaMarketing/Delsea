@@ -74,6 +74,7 @@ export interface Booking {
   ends_at: string
   status: BookingStatus
   notes: string | null
+  spots_booked?: number
   created_at: string
   staff?: Staff
   service?: Service
@@ -130,6 +131,7 @@ export interface BookingDraft {
   staffId: string | null
   date: Date | null
   timeSlot: string | null
+  spotsBooked: number
   customerName: string
   customerEmail: string
   customerPhone: string

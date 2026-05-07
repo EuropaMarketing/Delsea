@@ -17,7 +17,7 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function DateTimePicker() {
   const navigate = useNavigate()
-  const { draft, services, staff, setDate, setTimeSlot, setStaffList, rescheduleBookingId } = useBookingStore()
+  const { draft, services, staff, setDate, setTimeSlot, setSpotsBooked, setStaffList, rescheduleBookingId } = useBookingStore()
 
   const [calMonth, setCalMonth] = useState(() =>
     draft.date ? startOfMonth(draft.date) : startOfMonth(new Date())
@@ -147,7 +147,7 @@ export default function DateTimePicker() {
         const counts: Record<string, number> = {}
         for (const b of monthBookings.filter((b) => b.service_id === service.id && b.starts_at.startsWith(dayKey))) {
           const t = format(parseISO(b.starts_at), 'HH:mm')
-          counts[t] = (counts[t] ?? 0) + 1
+          counts[t] = (counts[t] ?? 0) + (b.spots_booked ?? 1)
         }
         const available = daySessions.filter((s) => (counts[s.start_time.substring(0, 5)] ?? 0) < maxCap)
         if (available.length) map.set(dayKey, available.map((s) => s.start_time.substring(0, 5)))
@@ -509,6 +509,38 @@ export default function DateTimePicker() {
           )}
         </div>
       </div>
+
+      {/* Spots picker — shown after selecting a group session slot */}
+      {service?.is_group_session && selectedSlot && (() => {
+        const slot = groupSlots.find((s) => s.time === selectedSlot)
+        const maxSpots = slot?.spotsLeft ?? 1
+        return (
+          <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-xl">
+            <p className="text-sm font-semibold text-gray-800 mb-3">How many spots?</p>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setSpotsBooked(Math.max(1, draft.spotsBooked - 1))}
+                disabled={draft.spotsBooked <= 1}
+                className="h-9 w-9 rounded-full border border-gray-300 bg-white flex items-center justify-center text-lg font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-30 transition-colors"
+              >
+                −
+              </button>
+              <span className="text-2xl font-bold text-gray-900 w-6 text-center">{draft.spotsBooked}</span>
+              <button
+                onClick={() => setSpotsBooked(Math.min(maxSpots, draft.spotsBooked + 1))}
+                disabled={draft.spotsBooked >= maxSpots}
+                className="h-9 w-9 rounded-full border border-gray-300 bg-white flex items-center justify-center text-lg font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-30 transition-colors"
+              >
+                +
+              </button>
+              <span className="text-xs text-gray-400">{maxSpots} spot{maxSpots !== 1 ? 's' : ''} available</span>
+            </div>
+            {draft.spotsBooked === maxSpots && maxSpots > 1 && (
+              <p className="text-xs text-amber-600 mt-2">This will fill the session.</p>
+            )}
+          </div>
+        )
+      })()}
 
       <p className="flex items-center gap-1 text-xs text-gray-400 mt-4">
         <Globe className="h-3.5 w-3.5" />

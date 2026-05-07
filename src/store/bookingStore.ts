@@ -20,6 +20,7 @@ interface BookingStore {
   setStaffList: (staff: Staff[]) => void
   setReschedule: (bookingId: string, originalTime: string, serviceId: string, staffId: string | null) => void
   clearReschedule: () => void
+  setSpotsBooked: (n: number) => void
   setTokenChoice: (use: boolean, membershipId: string | null, planName: string | null) => void
   reset: () => void
 }
@@ -33,6 +34,7 @@ const emptyDraft: BookingDraft = {
   staffId: null,
   date: null,
   timeSlot: null,
+  spotsBooked: 1,
   customerName: '',
   customerEmail: '',
   customerPhone: '',
@@ -69,10 +71,13 @@ export const useBookingStore = create<BookingStore>((set) => ({
     set((s) => ({ draft: { ...s.draft, staffId, date: null, timeSlot: null } })),
 
   setDate: (date) =>
-    set((s) => ({ draft: { ...s.draft, date, timeSlot: null } })),
+    set((s) => ({ draft: { ...s.draft, date, timeSlot: null, spotsBooked: 1 } })),
 
   setTimeSlot: (timeSlot) =>
-    set((s) => ({ draft: { ...s.draft, timeSlot } })),
+    set((s) => ({ draft: { ...s.draft, timeSlot, spotsBooked: 1 } })),
+
+  setSpotsBooked: (n) =>
+    set((s) => ({ draft: { ...s.draft, spotsBooked: n } })),
 
   setCustomer: (fields) =>
     set((s) => ({ draft: { ...s.draft, ...fields } })),
