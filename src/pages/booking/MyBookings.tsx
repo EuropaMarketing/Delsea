@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { format, parseISO, isBefore, addHours } from 'date-fns'
-import { CalendarClock, AlertTriangle, LogIn, CalendarRange, Phone, Ticket } from 'lucide-react'
+import { CalendarClock, AlertTriangle, LogIn, CalendarRange, Phone, Ticket, Star, CheckCircle2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { useBookingStore } from '@/store/bookingStore'
@@ -148,6 +148,13 @@ export default function MyBookings() {
   const [cancelling, setCancelling] = useState<string | null>(null)
   const [cancelTarget, setCancelTarget] = useState<string | null>(null)
   const [rescheduling, setRescheduling] = useState<string | null>(null)
+  const [reviewTarget, setReviewTarget] = useState<MyBooking | null>(null)
+  const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set())
+  const [reviewRating, setReviewRating] = useState(5)
+  const [reviewComment, setReviewComment] = useState('')
+  const [reviewerName, setReviewerName] = useState('')
+  const [reviewSubmitting, setReviewSubmitting] = useState(false)
+  const [reviewError, setReviewError] = useState('')
 
   useEffect(() => {
     if (!user) { setLoading(false); return }
@@ -173,13 +180,24 @@ export default function MyBookings() {
         setRpcError(`${bRes.error.message} (code: ${bRes.error.code})`)
       } else if (bRes.data) {
         type Row = MyBooking & { service_name: string; service_price: number; staff_name: string | null }
-        setBookings(
-          (bRes.data as Row[]).map((b) => ({
-            ...b,
-            service: { name: b.service_name, price: b.service_price },
-            staff: b.staff_name ? { name: b.staff_name } : null,
-          }))
-        )
+        const mapped = (bRes.data as Row[]).map((b) => ({
+          ...b,
+          service: { name: b.service_name, price: b.service_price },
+          staff: b.staff_name ? { name: b.staff_name } : null,
+        }))
+        setBookings(mapped)
+
+        // Check which past bookings have already been reviewed
+        const ids = mapped.map((b) => b.id)
+        if (ids.length) {
+          const { data: reviewed } = await supabase
+            .from('staff_reviews')
+            .select('booking_id')
+            .in('booking_id', ids)
+          if (reviewed) {
+            setReviewedIds(new Set(reviewed.filter((r) => r.booking_id).map((r) => r.booking_id as string)))
+          }
+        }
       }
       if (mRes.data) setMemberships(mRes.data as unknown as MyMembership[])
       setLoading(false)
@@ -197,6 +215,36 @@ export default function MyBookings() {
     )
     setCancelling(null)
     setCancelTarget(null)
+  }
+
+  function openReview(booking: MyBooking) {
+    setReviewTarget(booking)
+    setReviewRating(5)
+    setReviewComment('')
+    setReviewError('')
+    setReviewerName(user?.user_metadata?.full_name ?? '')
+  }
+
+  async function handleSubmitReview() {
+    if (!reviewTarget || !reviewerName.trim()) { setReviewError('Please enter your name'); return }
+    setReviewSubmitting(true)
+    setReviewError('')
+    const { error } = await supabase.from('staff_reviews').insert({
+      business_id: BUSINESS_ID,
+      booking_id: reviewTarget.id,
+      staff_id: reviewTarget.staff_id,
+      reviewer_name: reviewerName.trim(),
+      rating: reviewRating,
+      comment: reviewComment.trim() || null,
+      is_approved: true,
+    })
+    if (error) {
+      setReviewError(error.message.includes('unique') ? 'You have already reviewed this booking.' : error.message)
+    } else {
+      setReviewedIds((prev) => new Set([...prev, reviewTarget.id]))
+      setReviewTarget(null)
+    }
+    setReviewSubmitting(false)
   }
 
   async function handleReschedule(booking: MyBooking) {
@@ -238,6 +286,8 @@ export default function MyBookings() {
       isUpcoming &&
       !isBefore(addHours(now, 24), startsAt)
     const isThisRescheduling = rescheduling === booking.id
+    const isReviewable = !isUpcoming && booking.status !== 'cancelled'
+    const alreadyReviewed = reviewedIds.has(booking.id)
 
     return (
       <Card padding="md" className="flex flex-col gap-3">
@@ -291,6 +341,19 @@ export default function MyBookings() {
               </a>
             </span>
           </div>
+        )}
+        {isReviewable && (
+          alreadyReviewed ? (
+            <div className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Review submitted — thank you!
+            </div>
+          ) : (
+            <Button variant="secondary" size="sm" onClick={() => openReview(booking)} className="self-start">
+              <Star className="h-3.5 w-3.5" />
+              Leave a Review
+            </Button>
+          )
         )}
       </Card>
     )
@@ -450,6 +513,83 @@ export default function MyBookings() {
           )}
         </div>
       )}
+
+      {/* Review modal */}
+      <Modal
+        open={!!reviewTarget}
+        onClose={() => setReviewTarget(null)}
+        title="Leave a Review"
+        size="sm"
+      >
+        {reviewTarget && (
+          <div className="space-y-4">
+            <div className="bg-gray-50 rounded-lg px-3 py-2.5 text-sm">
+              <p className="font-medium text-gray-900">{reviewTarget.service.name}</p>
+              {reviewTarget.staff && (
+                <p className="text-xs text-gray-500 mt-0.5">with {reviewTarget.staff.name}</p>
+              )}
+            </div>
+
+            {/* Star rating */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-gray-700">Your rating</label>
+              <div className="flex gap-1">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setReviewRating(n)}
+                    className="p-0.5 transition-transform hover:scale-110"
+                  >
+                    <Star
+                      className={`h-8 w-8 transition-colors ${
+                        n <= reviewRating ? 'fill-amber-400 text-amber-400' : 'text-gray-200 hover:text-amber-200'
+                      }`}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Name */}
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">Your name</label>
+              <input
+                type="text"
+                value={reviewerName}
+                onChange={(e) => setReviewerName(e.target.value)}
+                placeholder="Jane Smith"
+                className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+              />
+            </div>
+
+            {/* Comment */}
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">Comment <span className="text-gray-400 font-normal">(optional)</span></label>
+              <textarea
+                value={reviewComment}
+                onChange={(e) => setReviewComment(e.target.value)}
+                placeholder="Tell us about your experience…"
+                rows={3}
+                className="w-full px-3 py-2 text-sm border border-gray-200 bg-white rounded-lg outline-none resize-none focus:ring-2 focus:ring-(--color-primary)"
+              />
+            </div>
+
+            {reviewError && (
+              <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {reviewError}
+              </p>
+            )}
+
+            <div className="flex gap-3">
+              <Button variant="secondary" fullWidth onClick={() => setReviewTarget(null)}>Cancel</Button>
+              <Button fullWidth loading={reviewSubmitting} onClick={handleSubmitReview}>
+                Submit Review
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={!!cancelTarget}
