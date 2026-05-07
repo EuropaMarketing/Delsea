@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { Service, ServiceSession, ServiceVariant, DepositType } from '@/types'
+import type { Service, ServiceSession, ServiceVariant, DepositType, Resource } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
@@ -17,10 +17,12 @@ const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frid
 const empty: Omit<Service, 'id' | 'business_id'> = {
   name: '', description: null, duration_minutes: 60, price: 0, category: 'General', is_active: true,
   is_self_service: false, is_group_session: false, max_capacity: null, deposit_type: 'none', deposit_value: 0,
+  resource_id: null,
 }
 
 export default function AdminServices() {
   const [services, setServices] = useState<Service[]>([])
+  const [resources, setResources] = useState<Resource[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
@@ -39,12 +41,16 @@ export default function AdminServices() {
   useEffect(() => { load() }, [])
 
   async function load() {
-    const { data } = await supabase
-      .from('services')
-      .select('*, variants:service_variants(id, name, duration_minutes, price, sort_order, is_active)')
-      .eq('business_id', BUSINESS_ID)
-      .order('category').order('name')
-    if (data) setServices(data as Service[])
+    const [svcRes, resRes] = await Promise.all([
+      supabase
+        .from('services')
+        .select('*, variants:service_variants(id, name, duration_minutes, price, sort_order, is_active)')
+        .eq('business_id', BUSINESS_ID)
+        .order('category').order('name'),
+      supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).order('name'),
+    ])
+    if (svcRes.data) setServices(svcRes.data as Service[])
+    if (resRes.data) setResources(resRes.data as Resource[])
     setLoading(false)
   }
 
@@ -57,7 +63,7 @@ export default function AdminServices() {
 
   async function openEdit(service: Service) {
     setEditTarget(service)
-    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, is_self_service: service.is_self_service, is_group_session: service.is_group_session, max_capacity: service.max_capacity, deposit_type: service.deposit_type, deposit_value: service.deposit_value })
+    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, is_self_service: service.is_self_service, is_group_session: service.is_group_session, max_capacity: service.max_capacity, deposit_type: service.deposit_type, deposit_value: service.deposit_value, resource_id: service.resource_id ?? null })
     setErrors({})
     setVariantForm({ name: '', duration_minutes: 60, price: '' })
     setAddingVariant(false)
@@ -534,6 +540,20 @@ export default function AdminServices() {
               </p>
             )}
           </div>
+
+          {resources.length > 0 && (
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1 block">Required Resource</label>
+              <select
+                value={form.resource_id ?? ''}
+                onChange={e => setForm(f => ({ ...f, resource_id: e.target.value || null }))}
+                className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+              >
+                <option value="">No resource required</option>
+                {resources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>

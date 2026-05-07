@@ -43,6 +43,7 @@ export interface Service {
   max_capacity: number | null
   deposit_type: DepositType
   deposit_value: number
+  resource_id: string | null
   variants?: ServiceVariant[]
 }
 
@@ -70,11 +71,15 @@ export interface Booking {
   customer_id: string
   staff_id: string | null
   service_id: string
+  variant_id?: string | null
   starts_at: string
   ends_at: string
   status: BookingStatus
   notes: string | null
   spots_booked?: number
+  resource_id?: string | null
+  discount_code_id?: string | null
+  discount_amount?: number
   created_at: string
   staff?: Staff
   service?: Service
@@ -120,6 +125,30 @@ export interface BlockedTime {
   starts_at: string
   ends_at: string
   reason: string | null
+}
+
+export interface Resource {
+  id: string
+  business_id: string
+  name: string
+  description: string | null
+  is_active: boolean
+  created_at: string
+}
+
+export interface DiscountCode {
+  id: string
+  business_id: string
+  code: string
+  description: string | null
+  type: 'percentage' | 'fixed'
+  value: number
+  min_order_value: number | null
+  expires_at: string | null
+  max_uses: number | null
+  used_count: number
+  is_active: boolean
+  created_at: string
 }
 
 export interface BookingDraft {

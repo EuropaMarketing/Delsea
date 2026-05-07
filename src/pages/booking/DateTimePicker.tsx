@@ -164,7 +164,9 @@ export default function DateTimePicker() {
       const dEnd = endOfDay(day)
       const bks = monthBookings
         .filter((b) => b.starts_at.startsWith(dayKey))
-        .filter((b) => service.is_self_service ? b.service_id === service.id : true)
+        .filter((b) => service.is_self_service
+          ? b.service_id === service.id || (service.resource_id != null && b.resource_id === service.resource_id)
+          : true)
       const blk = monthBlocked.filter((bt) => {
         const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
         return isBefore(s, dEnd) && isAfter(e, dStart)
@@ -270,7 +272,9 @@ export default function DateTimePicker() {
           const dEnd = endOfDay(day)
           const dayBks = bks
             .filter((b) => b.starts_at.startsWith(dayKey))
-            .filter((b) => service.is_self_service ? b.service_id === service.id : true)
+            .filter((b) => service.is_self_service
+              ? b.service_id === service.id || (service.resource_id != null && b.resource_id === service.resource_id)
+              : true)
           const dayBlk = blk.filter((bt) => {
             const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
             return isBefore(s, dEnd) && isAfter(e, dStart)
