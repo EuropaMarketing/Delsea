@@ -10,6 +10,8 @@ export function generateTimeSlots(
   durationMinutes: number,
   existingBookings: Booking[],
   blockedTimes: BlockedTime[],
+  preBuffer = 0,
+  postBuffer = 0,
 ): string[] {
   const dayOfWeek = getDay(date)
   const rawDayAvail = availability.filter((a) => a.day_of_week === dayOfWeek)
@@ -38,7 +40,9 @@ export function generateTimeSlots(
     while (isBefore(addMinutes(current, durationMinutes), end) ||
            addMinutes(current, durationMinutes).getTime() === end.getTime()) {
 
-      const slotEnd = addMinutes(current, durationMinutes)
+      // The window this slot occupies including buffers
+      const slotWindowStart = addMinutes(current, -preBuffer)
+      const slotWindowEnd = addMinutes(current, durationMinutes + postBuffer)
       const nowPlusFive = addMinutes(new Date(), 5)
 
       // Skip past slots
@@ -47,19 +51,19 @@ export function generateTimeSlots(
         continue
       }
 
-      // Check overlap with bookings
+      // Check overlap with bookings (against the full buffered window)
       const overlapsBooking = existingBookings.some((b) => {
         if (b.status === 'cancelled') return false
         const bStart = parseISO(b.starts_at)
         const bEnd = parseISO(b.ends_at)
-        return isBefore(current, bEnd) && isAfter(slotEnd, bStart)
+        return isBefore(slotWindowStart, bEnd) && isAfter(slotWindowEnd, bStart)
       })
 
       // Check overlap with blocked times
       const overlapsBlock = blockedTimes.some((bt) => {
         const bStart = parseISO(bt.starts_at)
         const bEnd = parseISO(bt.ends_at)
-        return isBefore(current, bEnd) && isAfter(slotEnd, bStart)
+        return isBefore(slotWindowStart, bEnd) && isAfter(slotWindowEnd, bStart)
       })
 
       if (!overlapsBooking && !overlapsBlock) {

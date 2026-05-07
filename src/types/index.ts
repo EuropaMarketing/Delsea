@@ -44,6 +44,8 @@ export interface Service {
   deposit_type: DepositType
   deposit_value: number
   resource_id: string | null
+  pre_buffer_minutes: number
+  post_buffer_minutes: number
   variants?: ServiceVariant[]
 }
 

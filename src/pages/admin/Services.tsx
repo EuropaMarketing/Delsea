@@ -17,7 +17,7 @@ const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frid
 const empty: Omit<Service, 'id' | 'business_id'> = {
   name: '', description: null, duration_minutes: 60, price: 0, category: 'General', is_active: true,
   is_self_service: false, is_group_session: false, max_capacity: null, deposit_type: 'none', deposit_value: 0,
-  resource_id: null,
+  resource_id: null, pre_buffer_minutes: 0, post_buffer_minutes: 0,
 }
 
 export default function AdminServices() {
@@ -63,7 +63,7 @@ export default function AdminServices() {
 
   async function openEdit(service: Service) {
     setEditTarget(service)
-    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, is_self_service: service.is_self_service, is_group_session: service.is_group_session, max_capacity: service.max_capacity, deposit_type: service.deposit_type, deposit_value: service.deposit_value, resource_id: service.resource_id ?? null })
+    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, is_self_service: service.is_self_service, is_group_session: service.is_group_session, max_capacity: service.max_capacity, deposit_type: service.deposit_type, deposit_value: service.deposit_value, resource_id: service.resource_id ?? null, pre_buffer_minutes: service.pre_buffer_minutes ?? 0, post_buffer_minutes: service.post_buffer_minutes ?? 0 })
     setErrors({})
     setVariantForm({ name: '', duration_minutes: 60, price: '' })
     setAddingVariant(false)
@@ -272,6 +272,26 @@ export default function AdminServices() {
               onChange={(e) => setForm((f) => ({ ...f, price: Math.round(parseFloat(e.target.value) * 100) || 0 }))}
               placeholder="0.00"
               error={errors.price}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Pre-buffer (minutes)"
+              type="number"
+              min={0}
+              value={form.pre_buffer_minutes || ''}
+              onChange={(e) => setForm((f) => ({ ...f, pre_buffer_minutes: parseInt(e.target.value) || 0 }))}
+              placeholder="0"
+              hint="Prep time before client arrives"
+            />
+            <Input
+              label="Post-buffer (minutes)"
+              type="number"
+              min={0}
+              value={form.post_buffer_minutes || ''}
+              onChange={(e) => setForm((f) => ({ ...f, post_buffer_minutes: parseInt(e.target.value) || 0 }))}
+              placeholder="0"
+              hint="Clean-down time after service"
             />
           </div>
           <Input

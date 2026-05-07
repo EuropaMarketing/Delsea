@@ -43,7 +43,11 @@ export default function Confirmation() {
   const effectiveUnitPrice = draft.variantPrice ?? service?.price ?? 0
   const effectivePrice = effectiveUnitPrice * (draft.spotsBooked ?? 1)
   const discountedPrice = effectivePrice - (discountInfo?.amount ?? 0)
-  const endsAt = addMinutes(startsAt, effectiveDuration)
+  // endsAt includes post-buffer so the calendar blocks clean-down time;
+  // the client-visible end time uses effectiveDuration only.
+  const postBuffer = service?.post_buffer_minutes ?? 0
+  const endsAt = addMinutes(startsAt, effectiveDuration + postBuffer)
+  const clientEndsAt = addMinutes(startsAt, effectiveDuration)
 
   const depositAmount = service ? (
     service.deposit_type === 'fixed' ? service.deposit_value :
@@ -131,7 +135,7 @@ export default function Confirmation() {
           servicePrice: discountedPrice,
           staffName: staffMember?.name ?? null,
           startsAt: startsAt.toISOString(),
-          endsAt: endsAt.toISOString(),
+          endsAt: clientEndsAt.toISOString(),
           customerEmail,
           isNewUser: wasGuest,
           depositAmount,
@@ -179,7 +183,7 @@ export default function Confirmation() {
               <div className="flex justify-between">
                 <dt className="text-gray-500">Time</dt>
                 <dd className="font-medium" style={{ color: 'var(--color-primary)' }}>
-                  {format(startsAt, 'HH:mm')} – {format(endsAt, 'HH:mm')}
+                  {format(startsAt, 'HH:mm')} – {format(clientEndsAt, 'HH:mm')}
                 </dd>
               </div>
               {(draft.spotsBooked ?? 1) > 1 && (

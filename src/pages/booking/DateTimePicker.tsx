@@ -171,7 +171,7 @@ export default function DateTimePicker() {
         const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
         return isBefore(s, dEnd) && isAfter(e, dStart)
       })
-      map.set(dayKey, generateTimeSlots(day, availability, draft.variantDuration ?? service.duration_minutes, bks, blk))
+      map.set(dayKey, generateTimeSlots(day, availability, draft.variantDuration ?? service.duration_minutes, bks, blk, service.pre_buffer_minutes, service.post_buffer_minutes))
     }
     return map
   }, [calMonth, service, groupSessions, availability, availableDays, monthBookings, monthBlocked, todayStart])
@@ -279,7 +279,7 @@ export default function DateTimePicker() {
             const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
             return isBefore(s, dEnd) && isAfter(e, dStart)
           })
-          daySlots = generateTimeSlots(day, availability, draft.variantDuration ?? service.duration_minutes, dayBks, dayBlk)
+          daySlots = generateTimeSlots(day, availability, draft.variantDuration ?? service.duration_minutes, dayBks, dayBlk, service.pre_buffer_minutes, service.post_buffer_minutes)
         }
 
         if (daySlots.length > 0) {
