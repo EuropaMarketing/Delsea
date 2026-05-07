@@ -606,6 +606,36 @@ export default function MyBookings() {
       </Modal>
 
       <Modal
+        open={showGooglePrompt}
+        onClose={() => setShowGooglePrompt(false)}
+        title="Thank you for your review!"
+        size="sm"
+      >
+        <div className="flex flex-col items-center text-center gap-4">
+          <div className="flex gap-0.5">
+            {[1,2,3,4,5].map((i) => (
+              <Star key={i} className="h-7 w-7 fill-amber-400 text-amber-400" />
+            ))}
+          </div>
+          <p className="text-sm text-gray-600">
+            We're so glad you had a great experience! Would you mind sharing it on Google too? It only takes a moment and helps others find us.
+          </p>
+          <div className="flex flex-col gap-2 w-full">
+            <Button
+              fullWidth
+              onClick={() => { window.open(config.googleReviewUrl, '_blank', 'noopener,noreferrer'); setShowGooglePrompt(false) }}
+            >
+              <ExternalLink className="h-4 w-4" />
+              Leave a Google Review
+            </Button>
+            <Button variant="secondary" fullWidth onClick={() => setShowGooglePrompt(false)}>
+              Maybe later
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
         open={!!cancelTarget}
         onClose={() => setCancelTarget(null)}
         title="Cancel Booking"
