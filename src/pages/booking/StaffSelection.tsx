@@ -56,7 +56,7 @@ export default function StaffSelection() {
       }
 
       const [staffRes, reviewsRes] = await Promise.all([
-        supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).eq('on_holiday', false).order('name'),
+        supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).not('on_holiday', 'is', true).order('name'),
         reviewsPromise,
       ])
       if (staffRes.data) setStaffList(staffRes.data as Staff[])

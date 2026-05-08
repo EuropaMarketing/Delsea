@@ -42,7 +42,7 @@ export default function Landing() {
       const dayEnd = endOfDay(today).toISOString()
 
       const [staffRes, availRes, bookRes, blockRes] = await Promise.all([
-        supabase.from('staff').select('id').eq('business_id', BUSINESS_ID).neq('on_holiday', true),
+        supabase.from('staff').select('id').eq('business_id', BUSINESS_ID).not('on_holiday', 'is', true),
         supabase.from('availability').select('*').eq('day_of_week', dow),
         supabase.from('bookings').select('*')
           .eq('business_id', BUSINESS_ID)
