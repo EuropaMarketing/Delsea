@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Ticket } from 'lucide-react'
+import { Ticket, Tag, CheckCircle2, X } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { formatCurrency } from '@/lib/currency'
@@ -27,6 +27,11 @@ export default function MembershipPlans() {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [purchasing, setPurchasing] = useState(false)
   const [purchaseError, setPurchaseError] = useState<string | null>(null)
+
+  const [discountCode, setDiscountCode] = useState('')
+  const [discountApplying, setDiscountApplying] = useState(false)
+  const [discountError, setDiscountError] = useState<string | null>(null)
+  const [discountInfo, setDiscountInfo] = useState<{ amount: number; code: string } | null>(null)
 
   useEffect(() => {
     supabase
@@ -56,7 +61,30 @@ export default function MembershipPlans() {
     setSelectedPlan(plan)
     setErrors({})
     setPurchaseError(null)
+    setDiscountCode('')
+    setDiscountError(null)
+    setDiscountInfo(null)
     if (!user) { setName(''); setEmail(''); setNamePrefilled(false) }
+  }
+
+  async function handleApplyDiscount() {
+    if (!selectedPlan || !discountCode.trim()) return
+    setDiscountApplying(true)
+    setDiscountError(null)
+    const { data, error: rpcErr } = await supabase.rpc('validate_discount_code', {
+      p_code: discountCode.trim(),
+      p_business_id: BUSINESS_ID,
+      p_order_value: selectedPlan.price,
+    })
+    if (rpcErr) {
+      setDiscountError(rpcErr.message)
+      setDiscountInfo(null)
+    } else if (data) {
+      const d = data as { discount_amount: number; code: string }
+      setDiscountInfo({ amount: d.discount_amount, code: d.code })
+      setDiscountError(null)
+    }
+    setDiscountApplying(false)
   }
 
   function validate() {
@@ -86,6 +114,14 @@ export default function MembershipPlans() {
 
       if (error) throw new Error(error.message)
       if (!membershipId) throw new Error('No membership ID returned')
+
+      if (discountInfo && discountCode.trim()) {
+        await supabase.rpc('apply_discount_to_membership', {
+          p_membership_id: membershipId as string,
+          p_code: discountCode.trim(),
+          p_business_id: BUSINESS_ID,
+        })
+      }
 
       navigate('/membership-confirmed', {
         state: { planName: selectedPlan.name, tokenCount: selectedPlan.token_count, email: email.trim().toLowerCase() },
@@ -156,7 +192,7 @@ export default function MembershipPlans() {
         {selectedPlan && (
           <div className="space-y-4">
             {/* Order summary */}
-            <div className="bg-gray-50 border border-gray-100 rounded-xl p-4">
+            <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 space-y-2">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Order Summary</p>
               <div className="flex items-center justify-between">
                 <div>
@@ -166,10 +202,22 @@ export default function MembershipPlans() {
                     {selectedPlan.token_count} {selectedPlan.token_count === 1 ? 'session' : 'sessions'}
                   </p>
                 </div>
-                <span className="text-xl font-extrabold text-gray-900">
+                <span className={`text-xl font-extrabold ${discountInfo ? 'line-through text-gray-400 text-base' : 'text-gray-900'}`}>
                   {formatCurrency(selectedPlan.price)}
                 </span>
               </div>
+              {discountInfo && (
+                <>
+                  <div className="flex justify-between text-sm text-green-700">
+                    <span className="flex items-center gap-1"><Tag className="h-3.5 w-3.5" />{discountInfo.code}</span>
+                    <span className="font-semibold">−{formatCurrency(discountInfo.amount)}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-gray-900 border-t border-gray-200 pt-2">
+                    <span>Total</span>
+                    <span>{formatCurrency(selectedPlan.price - discountInfo.amount)}</span>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Customer details */}
@@ -193,6 +241,36 @@ export default function MembershipPlans() {
               readOnly={!!user}
             />
 
+            {/* Discount code */}
+            <div className="border-t border-gray-100 pt-3">
+              {discountInfo ? (
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-green-700 font-medium">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    Code <span className="font-mono">{discountInfo.code}</span> applied
+                  </div>
+                  <button onClick={() => { setDiscountInfo(null); setDiscountCode('') }} className="text-gray-400 hover:text-gray-600">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={discountCode}
+                    onChange={e => { setDiscountCode(e.target.value.toUpperCase()); setDiscountError(null) }}
+                    onKeyDown={e => e.key === 'Enter' && handleApplyDiscount()}
+                    placeholder="DISCOUNT CODE"
+                    className="flex-1 h-9 px-3 text-xs font-mono border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) uppercase placeholder:normal-case placeholder:font-sans"
+                  />
+                  <Button size="sm" variant="secondary" loading={discountApplying} onClick={handleApplyDiscount} disabled={!discountCode.trim()}>
+                    Apply
+                  </Button>
+                </div>
+              )}
+              {discountError && <p className="text-xs text-red-600 mt-1">{discountError}</p>}
+            </div>
+
             {purchaseError && (
               <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                 {purchaseError}
@@ -206,7 +284,7 @@ export default function MembershipPlans() {
             <div className="flex gap-3 pt-1">
               <Button variant="secondary" onClick={() => setSelectedPlan(null)}>Cancel</Button>
               <Button fullWidth loading={purchasing} onClick={handlePurchase}>
-                Confirm Purchase — {formatCurrency(selectedPlan.price)}
+                Confirm Purchase — {formatCurrency(selectedPlan.price - (discountInfo?.amount ?? 0))}
               </Button>
             </div>
           </div>
