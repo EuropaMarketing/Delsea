@@ -15,7 +15,7 @@ import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Input, Textarea } from '@/components/ui/Input'
 import { cn } from '@/lib/cn'
 import { formatCurrency } from '@/lib/currency'
-import type { Booking, Staff, Service, Customer } from '@/types'
+import type { Booking, Staff, Service, Customer, Resource } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 const HOUR_HEIGHT = 60
@@ -31,6 +31,7 @@ type RichBooking = Booking & {
   service: { name: string; category: string; price: number }
   staff: { name: string } | null
   customer: { name: string; email: string; phone: string | null }
+  resource: { name: string } | null
 }
 
 type BlockedTime = {
@@ -54,6 +55,7 @@ export default function AdminCalendar() {
   const [blockedTimes, setBlockedTimes] = useState<BlockedTime[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
   const [services, setServices] = useState<Service[]>([])
+  const [resources, setResources] = useState<Resource[]>([])
   const [loading, setLoading] = useState(true)
   const [ratings, setRatings] = useState<Record<string, { avg: number; count: number }>>({})
 
@@ -94,6 +96,9 @@ export default function AdminCalendar() {
   const [editTokenInfo, setEditTokenInfo] = useState<{ membershipId: string; planName: string; tokens: number } | null>(null)
   const [editTokenApplied, setEditTokenApplied] = useState(false)
   const [editTokenLoading, setEditTokenLoading] = useState(false)
+  // Resource state in edit mode
+  const [editResourceId, setEditResourceId] = useState<string | null>(null)
+
   // Discount state in edit mode
   const [editDiscountCode, setEditDiscountCode] = useState('')
   const [editDiscountApplying, setEditDiscountApplying] = useState(false)
@@ -152,11 +157,11 @@ export default function AdminCalendar() {
       const dayStart = startOfDay(selectedDay).toISOString()
       const dayEnd = endOfDay(selectedDay).toISOString()
 
-      const [staffRes, bookRes, svcRes, blockRes] = await Promise.all([
+      const [staffRes, bookRes, svcRes, blockRes, resRes] = await Promise.all([
         supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name'),
         supabase
           .from('bookings')
-          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone)')
+          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone), resource:resources(name)')
           .eq('business_id', BUSINESS_ID)
           .gte('starts_at', dayStart)
           .lte('starts_at', dayEnd)
@@ -167,11 +172,13 @@ export default function AdminCalendar() {
           .select('id, staff_id, starts_at, ends_at, reason')
           .lt('starts_at', dayEnd)
           .gt('ends_at', dayStart),
+        supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).order('name'),
       ])
       if (staffRes.data) setStaff(staffRes.data as Staff[])
       if (bookRes.data) setBookings(bookRes.data as RichBooking[])
       if (svcRes.data) setServices(svcRes.data as Service[])
       if (blockRes.data) setBlockedTimes(blockRes.data as BlockedTime[])
+      if (resRes.data) setResources(resRes.data as Resource[])
       setLoading(false)
     }
     load()
@@ -321,6 +328,7 @@ export default function AdminCalendar() {
     if (!selectedBooking) return
     setEditMode(true)
     setEditNotes(selectedBooking.notes ?? '')
+    setEditResourceId(selectedBooking.resource_id ?? null)
     setEditDiscountCode('')
     setEditDiscountError('')
     setEditDiscountApplied((selectedBooking.discount_amount ?? 0) > 0)
@@ -362,15 +370,23 @@ export default function AdminCalendar() {
     if (!selectedBooking) return
     setEditSaving(true)
     setEditError('')
+    const matchedResource = resources.find((r) => r.id === editResourceId) ?? null
     const { error } = await supabase
       .from('bookings')
-      .update({ notes: editNotes.trim() || null })
+      .update({ notes: editNotes.trim() || null, resource_id: editResourceId })
       .eq('id', selectedBooking.id)
     if (error) {
       setEditError(error.message)
     } else {
-      setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, notes: editNotes.trim() || null } : b))
-      setSelectedBooking(prev => prev ? { ...prev, notes: editNotes.trim() || null } : null)
+      const resourceObj = matchedResource ? { name: matchedResource.name } : null
+      setBookings(prev => prev.map(b => b.id === selectedBooking.id
+        ? { ...b, notes: editNotes.trim() || null, resource_id: editResourceId, resource: resourceObj }
+        : b,
+      ))
+      setSelectedBooking(prev => prev
+        ? { ...prev, notes: editNotes.trim() || null, resource_id: editResourceId, resource: resourceObj }
+        : null,
+      )
       setEditMode(false)
     }
     setEditSaving(false)
@@ -865,6 +881,12 @@ export default function AdminCalendar() {
                   <dd className="font-semibold text-green-700">−{formatCurrency(selectedBooking.discount_amount ?? 0)}</dd>
                 </div>
               )}
+              {selectedBooking.resource && (
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-500">Resource</dt>
+                  <dd className="font-medium text-gray-900">{selectedBooking.resource.name}</dd>
+                </div>
+              )}
               <div className="flex justify-between items-center">
                 <dt className="text-gray-500">Status</dt>
                 <dd><Badge variant={statusBadgeVariant(selectedBooking.status)} className="capitalize">{selectedBooking.status}</Badge></dd>
@@ -895,6 +917,23 @@ export default function AdminCalendar() {
           <div className="space-y-4">
             {/* Notes */}
             <Textarea label="Notes" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Add notes…" />
+
+            {/* Resource */}
+            {resources.length > 0 && (
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Resource</label>
+                <select
+                  value={editResourceId ?? ''}
+                  onChange={e => setEditResourceId(e.target.value || null)}
+                  className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                >
+                  <option value="">No resource assigned</option>
+                  {resources.map(r => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Membership token */}
             <div className="border border-gray-100 rounded-lg p-3 space-y-2">
