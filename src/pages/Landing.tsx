@@ -56,6 +56,8 @@ export default function Landing() {
 
       const staffIds = new Set((staffRes.data ?? []).map((s) => s.id))
       const todayAvail = ((availRes.data ?? []) as Availability[]).filter((a) => staffIds.has(a.staff_id))
+      // Only pass blocks belonging to non-holiday staff — leave entries must not suppress other staff's slots
+      const todayBlocked = ((blockRes.data ?? []) as BlockedTime[]).filter((bt) => staffIds.has(bt.staff_id))
 
       if (!todayAvail.length) { setSlotsToday('none'); return }
 
@@ -64,7 +66,7 @@ export default function Landing() {
         todayAvail,
         30,
         (bookRes.data ?? []) as Booking[],
-        (blockRes.data ?? []) as BlockedTime[],
+        todayBlocked,
       )
       setSlotsToday(slots.length > 0 ? 'available' : 'none')
     }
