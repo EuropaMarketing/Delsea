@@ -167,27 +167,59 @@ export default function DateTimePicker() {
     }
 
     if (!availability.length) return map
+
+    const duration = draft.variantDuration ?? service.duration_minutes
+    const preBuffer = service.pre_buffer_minutes
+    const postBuffer = service.post_buffer_minutes
+
     for (const day of eachDayOfInterval({ start: startOfMonth(calMonth), end: endOfMonth(calMonth) })) {
       if (isBefore(day, todayStart)) continue
       if (!availableDays.has(getDay(day))) continue
       const dayKey = format(day, 'yyyy-MM-dd')
       const dStart = startOfDay(day)
       const dEnd = endOfDay(day)
-      const bks = monthBookings
-        .filter((b) => b.starts_at.startsWith(dayKey))
-        .filter((b) => service.is_self_service
-          ? b.service_id === service.id || (service.resource_id != null && b.resource_id === service.resource_id)
-          : true)
-      // Only include blocks for non-holiday staff — leave blocks must not suppress other staff's slots
-      const blk = monthBlocked.filter((bt) => {
-        if (activeStaffIds.size > 0 && !activeStaffIds.has(bt.staff_id)) return false
-        const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
-        return isBefore(s, dEnd) && isAfter(e, dStart)
-      })
-      map.set(dayKey, generateTimeSlots(day, availability, draft.variantDuration ?? service.duration_minutes, bks, blk, service.pre_buffer_minutes, service.post_buffer_minutes))
+
+      if (service.is_self_service) {
+        const bks = monthBookings
+          .filter(b => b.starts_at.startsWith(dayKey))
+          .filter(b => b.service_id === service.id || (service.resource_id != null && b.resource_id === service.resource_id))
+        const blk = monthBlocked.filter(bt => {
+          if (activeStaffIds.size > 0 && !activeStaffIds.has(bt.staff_id)) return false
+          const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
+          return isBefore(s, dEnd) && isAfter(e, dStart)
+        })
+        map.set(dayKey, generateTimeSlots(day, availability, duration, bks, blk, preBuffer, postBuffer))
+      } else if (draft.staffId) {
+        // Specific staff selected — only their availability, bookings and blocks matter
+        const staffAvail = availability.filter(a => a.staff_id === draft.staffId)
+        const bks = monthBookings.filter(b => b.starts_at.startsWith(dayKey) && b.staff_id === draft.staffId)
+        const blk = monthBlocked.filter(bt => {
+          if (bt.staff_id !== draft.staffId) return false
+          const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
+          return isBefore(s, dEnd) && isAfter(e, dStart)
+        })
+        map.set(dayKey, generateTimeSlots(day, staffAvail, duration, bks, blk, preBuffer, postBuffer))
+      } else {
+        // Any staff — generate slots per-staff and union them so one member's
+        // leave block doesn't suppress the availability of other team members
+        const slotSet = new Set<string>()
+        for (const staffId of activeStaffIds) {
+          const staffAvail = availability.filter(a => a.staff_id === staffId)
+          const staffBks = monthBookings.filter(b => b.starts_at.startsWith(dayKey) && b.staff_id === staffId)
+          const staffBlk = monthBlocked.filter(bt => {
+            if (bt.staff_id !== staffId) return false
+            const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
+            return isBefore(s, dEnd) && isAfter(e, dStart)
+          })
+          for (const slot of generateTimeSlots(day, staffAvail, duration, staffBks, staffBlk, preBuffer, postBuffer)) {
+            slotSet.add(slot)
+          }
+        }
+        map.set(dayKey, [...slotSet].sort())
+      }
     }
     return map
-  }, [calMonth, service, groupSessions, availability, availableDays, activeStaffIds, monthBookings, monthBlocked, todayStart])
+  }, [calMonth, service, groupSessions, availability, availableDays, activeStaffIds, monthBookings, monthBlocked, todayStart, draft.staffId, draft.variantDuration])
 
   // Auto-select the first available day once data is ready (runs once)
   useEffect(() => {
@@ -283,17 +315,43 @@ export default function DateTimePicker() {
           if (!availableDays.has(getDay(day))) continue
           const dStart = startOfDay(day)
           const dEnd = endOfDay(day)
-          const dayBks = bks
-            .filter((b) => b.starts_at.startsWith(dayKey))
-            .filter((b) => service.is_self_service
-              ? b.service_id === service.id || (service.resource_id != null && b.resource_id === service.resource_id)
-              : true)
-          const dayBlk = blk.filter((bt) => {
-            if (activeStaffIds.size > 0 && !activeStaffIds.has(bt.staff_id)) return false
-            const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
-            return isBefore(s, dEnd) && isAfter(e, dStart)
-          })
-          daySlots = generateTimeSlots(day, availability, draft.variantDuration ?? service.duration_minutes, dayBks, dayBlk, service.pre_buffer_minutes, service.post_buffer_minutes)
+          const dur = draft.variantDuration ?? service.duration_minutes
+
+          if (service.is_self_service) {
+            const dayBks = bks
+              .filter(b => b.starts_at.startsWith(dayKey))
+              .filter(b => b.service_id === service.id || (service.resource_id != null && b.resource_id === service.resource_id))
+            const dayBlk = blk.filter(bt => {
+              if (activeStaffIds.size > 0 && !activeStaffIds.has(bt.staff_id)) return false
+              const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
+              return isBefore(s, dEnd) && isAfter(e, dStart)
+            })
+            daySlots = generateTimeSlots(day, availability, dur, dayBks, dayBlk, service.pre_buffer_minutes, service.post_buffer_minutes)
+          } else if (draft.staffId) {
+            const staffAvail = availability.filter(a => a.staff_id === draft.staffId)
+            const dayBks = bks.filter(b => b.starts_at.startsWith(dayKey) && b.staff_id === draft.staffId)
+            const dayBlk = blk.filter(bt => {
+              if (bt.staff_id !== draft.staffId) return false
+              const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
+              return isBefore(s, dEnd) && isAfter(e, dStart)
+            })
+            daySlots = generateTimeSlots(day, staffAvail, dur, dayBks, dayBlk, service.pre_buffer_minutes, service.post_buffer_minutes)
+          } else {
+            const slotSet = new Set<string>()
+            for (const staffId of activeStaffIds) {
+              const staffAvail = availability.filter(a => a.staff_id === staffId)
+              const staffBks = bks.filter(b => b.starts_at.startsWith(dayKey) && b.staff_id === staffId)
+              const staffBlk = blk.filter(bt => {
+                if (bt.staff_id !== staffId) return false
+                const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
+                return isBefore(s, dEnd) && isAfter(e, dStart)
+              })
+              for (const slot of generateTimeSlots(day, staffAvail, dur, staffBks, staffBlk, service.pre_buffer_minutes, service.post_buffer_minutes)) {
+                slotSet.add(slot)
+              }
+            }
+            daySlots = [...slotSet].sort()
+          }
         }
 
         if (daySlots.length > 0) {

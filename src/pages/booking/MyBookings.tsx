@@ -202,15 +202,10 @@ export default function MyBookings() {
         }))
         setBookings(mapped)
 
-        // Load gift vouchers linked to this customer's bookings
-        const voucherIds = [...new Set(mapped.map((b) => b.gift_voucher_id).filter(Boolean) as string[])]
-        if (voucherIds.length) {
-          const { data: voucherData } = await supabase
-            .from('gift_vouchers')
-            .select('*')
-            .in('id', voucherIds)
-          if (voucherData) setVouchers(voucherData as GiftVoucher[])
-        }
+        // Load gift vouchers redeemed by this customer
+        const { data: voucherData } = await supabase
+          .rpc('get_my_gift_vouchers', { p_business_id: BUSINESS_ID })
+        if (voucherData) setVouchers(voucherData as GiftVoucher[])
 
         // Check which past bookings have already been reviewed
         const ids = mapped.map((b) => b.id)

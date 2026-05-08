@@ -111,6 +111,22 @@ BEGIN
 END;
 $$;
 
+-- Fetch all gift vouchers redeemed by the authenticated user
+CREATE OR REPLACE FUNCTION get_my_gift_vouchers(p_business_id UUID)
+RETURNS SETOF gift_vouchers
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  RETURN QUERY
+  SELECT DISTINCT gv.*
+  FROM gift_vouchers gv
+  JOIN bookings b ON b.gift_voucher_id = gv.id
+  JOIN customers c ON c.id = b.customer_id
+  WHERE c.user_id = auth.uid()
+    AND gv.business_id = p_business_id
+  ORDER BY gv.created_at DESC;
+END;
+$$;
+
 -- Remove a gift voucher from a booking and restore the balance
 CREATE OR REPLACE FUNCTION remove_gift_voucher_from_booking(
   p_booking_id UUID
