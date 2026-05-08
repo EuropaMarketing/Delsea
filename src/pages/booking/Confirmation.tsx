@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format, addMinutes } from 'date-fns'
-import { ShieldCheck, Ticket, AlertCircle, Info, Tag, CheckCircle2, X } from 'lucide-react'
+import { ShieldCheck, Ticket, AlertCircle, Info, Tag, Gift, CheckCircle2, X } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
 import { useAuthStore } from '@/store/authStore'
@@ -28,6 +28,12 @@ export default function Confirmation() {
   const [discountError, setDiscountError] = useState<string | null>(null)
   const [discountInfo, setDiscountInfo] = useState<{ amount: number; code: string; type: string; value: number } | null>(null)
 
+  // Gift voucher state
+  const [voucherCode, setVoucherCode] = useState('')
+  const [voucherApplying, setVoucherApplying] = useState(false)
+  const [voucherError, setVoucherError] = useState<string | null>(null)
+  const [voucherInfo, setVoucherInfo] = useState<{ code: string; remaining_value: number } | null>(null)
+
   const service = services.find((s) => s.id === draft.serviceId)
   const staffMember = staff.find((s) => s.id === draft.staffId)
 
@@ -42,7 +48,10 @@ export default function Confirmation() {
   const effectiveDuration = draft.variantDuration ?? service?.duration_minutes ?? 60
   const effectiveUnitPrice = draft.variantPrice ?? service?.price ?? 0
   const effectivePrice = effectiveUnitPrice * (draft.spotsBooked ?? 1)
-  const discountedPrice = effectivePrice - (discountInfo?.amount ?? 0)
+  const voucherAmount = voucherInfo
+    ? Math.min(voucherInfo.remaining_value, Math.max(0, effectivePrice - (discountInfo?.amount ?? 0)))
+    : 0
+  const discountedPrice = effectivePrice - (discountInfo?.amount ?? 0) - voucherAmount
   // endsAt includes post-buffer so the calendar blocks clean-down time;
   // the client-visible end time uses effectiveDuration only.
   const postBuffer = service?.post_buffer_minutes ?? 0
@@ -75,6 +84,25 @@ export default function Confirmation() {
       setDiscountError(null)
     }
     setDiscountApplying(false)
+  }
+
+  async function handleApplyVoucher() {
+    if (!voucherCode.trim()) return
+    setVoucherApplying(true)
+    setVoucherError(null)
+    const { data, error: rpcErr } = await supabase.rpc('validate_gift_voucher', {
+      p_code: voucherCode.trim(),
+      p_business_id: BUSINESS_ID,
+    })
+    if (rpcErr) {
+      setVoucherError(rpcErr.message)
+      setVoucherInfo(null)
+    } else if (data) {
+      const d = data as { remaining_value: number }
+      setVoucherInfo({ code: voucherCode.trim().toUpperCase(), remaining_value: d.remaining_value })
+      setVoucherError(null)
+    }
+    setVoucherApplying(false)
   }
 
   async function handleConfirm() {
@@ -116,6 +144,15 @@ export default function Confirmation() {
         await supabase.rpc('apply_discount_to_booking', {
           p_booking_id: bookingId as string,
           p_code: discountCode.trim(),
+          p_business_id: BUSINESS_ID,
+        })
+      }
+
+      // Apply gift voucher if entered
+      if (voucherInfo && voucherCode.trim()) {
+        await supabase.rpc('apply_gift_voucher_to_booking', {
+          p_booking_id: bookingId as string,
+          p_code: voucherCode.trim(),
           p_business_id: BUSINESS_ID,
         })
       }
@@ -265,9 +302,15 @@ export default function Confirmation() {
                     <span className="font-semibold">−{formatCurrency(discountInfo.amount)}</span>
                   </div>
                 )}
-                {discountInfo && (
+                {voucherInfo && voucherAmount > 0 && (
+                  <div className="flex justify-between text-sm text-green-700">
+                    <span className="flex items-center gap-1"><Gift className="h-3.5 w-3.5" />{voucherInfo.code}</span>
+                    <span className="font-semibold">−{formatCurrency(voucherAmount)}</span>
+                  </div>
+                )}
+                {(discountInfo || (voucherInfo && voucherAmount > 0)) && (
                   <div className="flex justify-between font-bold text-gray-900 border-t border-gray-100 pt-2 mt-1">
-                    <span>Discounted total</span>
+                    <span>Total after savings</span>
                     <span>{formatCurrency(discountedPrice)}</span>
                   </div>
                 )}
@@ -324,6 +367,36 @@ export default function Confirmation() {
                   </div>
                 )}
                 {discountError && <p className="text-xs text-red-600 mt-1">{discountError}</p>}
+              </div>
+
+              {/* Gift voucher entry */}
+              <div className="pt-2 border-t border-gray-100">
+                {voucherInfo ? (
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5 text-green-700 font-medium">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Voucher <span className="font-mono">{voucherInfo.code}</span> applied
+                    </div>
+                    <button onClick={() => { setVoucherInfo(null); setVoucherCode('') }} className="text-gray-400 hover:text-gray-600">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={voucherCode}
+                      onChange={(e) => { setVoucherCode(e.target.value.toUpperCase()); setVoucherError(null) }}
+                      onKeyDown={(e) => e.key === 'Enter' && handleApplyVoucher()}
+                      placeholder="GIFT VOUCHER"
+                      className="flex-1 h-9 px-3 text-xs font-mono border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) uppercase placeholder:normal-case placeholder:font-sans"
+                    />
+                    <Button size="sm" variant="secondary" loading={voucherApplying} onClick={handleApplyVoucher} disabled={!voucherCode.trim()}>
+                      Apply
+                    </Button>
+                  </div>
+                )}
+                {voucherError && <p className="text-xs text-red-600 mt-1">{voucherError}</p>}
               </div>
             )}
 

@@ -5,7 +5,7 @@ import {
 } from 'date-fns'
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, X,
+  Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { FullPageSpinner } from '@/components/ui/Spinner'
@@ -98,6 +98,14 @@ export default function AdminCalendar() {
   const [editTokenLoading, setEditTokenLoading] = useState(false)
   // Resource state in edit mode
   const [editResourceId, setEditResourceId] = useState<string | null>(null)
+
+  // Gift voucher state in edit mode
+  const [editVoucherCode, setEditVoucherCode] = useState('')
+  const [editVoucherApplying, setEditVoucherApplying] = useState(false)
+  const [editVoucherRemoving, setEditVoucherRemoving] = useState(false)
+  const [editVoucherApplied, setEditVoucherApplied] = useState(false)
+  const [editVoucherAmount, setEditVoucherAmount] = useState(0)
+  const [editVoucherError, setEditVoucherError] = useState('')
 
   // Discount state in edit mode
   const [editDiscountCode, setEditDiscountCode] = useState('')
@@ -329,6 +337,10 @@ export default function AdminCalendar() {
     setEditMode(true)
     setEditNotes(selectedBooking.notes ?? '')
     setEditResourceId(selectedBooking.resource_id ?? null)
+    setEditVoucherCode('')
+    setEditVoucherError('')
+    setEditVoucherApplied((selectedBooking.gift_voucher_amount ?? 0) > 0)
+    setEditVoucherAmount(selectedBooking.gift_voucher_amount ?? 0)
     setEditDiscountCode('')
     setEditDiscountError('')
     setEditDiscountApplied((selectedBooking.discount_amount ?? 0) > 0)
@@ -432,6 +444,43 @@ export default function AdminCalendar() {
       setSelectedBooking(prev => prev ? { ...prev, discount_amount: result.discount_amount } : null)
     }
     setEditDiscountApplying(false)
+  }
+
+  async function handleEditApplyVoucher() {
+    if (!selectedBooking || !editVoucherCode.trim()) return
+    setEditVoucherApplying(true)
+    setEditVoucherError('')
+    const { data, error } = await supabase.rpc('apply_gift_voucher_to_booking', {
+      p_booking_id: selectedBooking.id,
+      p_code: editVoucherCode.trim(),
+      p_business_id: BUSINESS_ID,
+    })
+    if (error) {
+      setEditVoucherError(error.message)
+    } else {
+      const result = data as { voucher_amount: number }
+      setEditVoucherApplied(true)
+      setEditVoucherAmount(result.voucher_amount)
+      setBookings((prev) => prev.map((b) =>
+        b.id === selectedBooking.id ? { ...b, gift_voucher_amount: result.voucher_amount } : b,
+      ))
+      setSelectedBooking((prev) => prev ? { ...prev, gift_voucher_amount: result.voucher_amount } : null)
+    }
+    setEditVoucherApplying(false)
+  }
+
+  async function handleEditRemoveVoucher() {
+    if (!selectedBooking) return
+    setEditVoucherRemoving(true)
+    await supabase.rpc('remove_gift_voucher_from_booking', { p_booking_id: selectedBooking.id })
+    setEditVoucherApplied(false)
+    setEditVoucherAmount(0)
+    setEditVoucherCode('')
+    setBookings((prev) => prev.map((b) =>
+      b.id === selectedBooking.id ? { ...b, gift_voucher_amount: 0, gift_voucher_id: null } : b,
+    ))
+    setSelectedBooking((prev) => prev ? { ...prev, gift_voucher_amount: 0, gift_voucher_id: null } : null)
+    setEditVoucherRemoving(false)
   }
 
   async function searchCustomers(query: string) {
@@ -887,6 +936,12 @@ export default function AdminCalendar() {
                   <dd className="font-medium text-gray-900">{selectedBooking.resource.name}</dd>
                 </div>
               )}
+              {(selectedBooking.gift_voucher_amount ?? 0) > 0 && (
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-500">Gift Voucher</dt>
+                  <dd className="font-semibold text-green-700">−{formatCurrency(selectedBooking.gift_voucher_amount ?? 0)}</dd>
+                </div>
+              )}
               <div className="flex justify-between items-center">
                 <dt className="text-gray-500">Status</dt>
                 <dd><Badge variant={statusBadgeVariant(selectedBooking.status)} className="capitalize">{selectedBooking.status}</Badge></dd>
@@ -984,6 +1039,35 @@ export default function AdminCalendar() {
                 </div>
               )}
               {editDiscountError && <p className="text-xs text-red-600">{editDiscountError}</p>}
+            </div>
+
+            {/* Gift voucher */}
+            <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+                <Gift className="h-3.5 w-3.5" /> Gift Voucher
+              </p>
+              {editVoucherApplied ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-green-700 font-medium">Voucher applied: −{formatCurrency(editVoucherAmount)}</span>
+                  <button onClick={handleEditRemoveVoucher} disabled={editVoucherRemoving} className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50">
+                    {editVoucherRemoving ? 'Removing…' : 'Remove'}
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={editVoucherCode}
+                    onChange={(e) => { setEditVoucherCode(e.target.value.toUpperCase()); setEditVoucherError('') }}
+                    placeholder="VOUCHER CODE"
+                    className="flex-1 h-9 px-3 text-sm font-mono border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) uppercase"
+                  />
+                  <Button size="sm" loading={editVoucherApplying} onClick={handleEditApplyVoucher} disabled={!editVoucherCode.trim()}>
+                    Apply
+                  </Button>
+                </div>
+              )}
+              {editVoucherError && <p className="text-xs text-red-600">{editVoucherError}</p>}
             </div>
 
             {editError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{editError}</p>}

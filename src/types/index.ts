@@ -82,6 +82,8 @@ export interface Booking {
   resource_id?: string | null
   discount_code_id?: string | null
   discount_amount?: number
+  gift_voucher_id?: string | null
+  gift_voucher_amount?: number
   created_at: string
   staff?: Staff
   service?: Service
@@ -134,6 +136,18 @@ export interface Resource {
   business_id: string
   name: string
   description: string | null
+  is_active: boolean
+  created_at: string
+}
+
+export interface GiftVoucher {
+  id: string
+  business_id: string
+  code: string
+  initial_value: number
+  remaining_value: number
+  issued_to: string | null
+  expires_at: string | null
   is_active: boolean
   created_at: string
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { format, parseISO } from 'date-fns'
-import { Download } from 'lucide-react'
+import { Download, Gift, CheckCircle2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
@@ -29,6 +29,10 @@ export default function AdminBookings() {
   const [hasMore, setHasMore] = useState(true)
   const [resources, setResources] = useState<Resource[]>([])
   const [assigningResource, setAssigningResource] = useState(false)
+  const [voucherCode, setVoucherCode] = useState('')
+  const [voucherApplying, setVoucherApplying] = useState(false)
+  const [voucherRemoving, setVoucherRemoving] = useState(false)
+  const [voucherError, setVoucherError] = useState('')
 
   useEffect(() => {
     setPage(0)
@@ -81,6 +85,34 @@ export default function AdminBookings() {
     setBookings((prev) => prev.map((b) => b.id === bookingId ? { ...b, resource_id: resourceId, resource: resourceObj } : b))
     if (selectedBooking?.id === bookingId) setSelectedBooking((b) => b ? { ...b, resource_id: resourceId, resource: resourceObj } : b)
     setAssigningResource(false)
+  }
+
+  async function applyVoucher(bookingId: string) {
+    if (!voucherCode.trim()) return
+    setVoucherApplying(true)
+    setVoucherError('')
+    const { data, error } = await supabase.rpc('apply_gift_voucher_to_booking', {
+      p_booking_id: bookingId,
+      p_code: voucherCode.trim(),
+      p_business_id: BUSINESS_ID,
+    })
+    if (error) {
+      setVoucherError(error.message)
+    } else {
+      const result = data as { voucher_amount: number }
+      setBookings((prev) => prev.map((b) => b.id === bookingId ? { ...b, gift_voucher_amount: result.voucher_amount } : b))
+      setSelectedBooking((b) => b ? { ...b, gift_voucher_amount: result.voucher_amount } : b)
+      setVoucherCode('')
+    }
+    setVoucherApplying(false)
+  }
+
+  async function removeVoucher(bookingId: string) {
+    setVoucherRemoving(true)
+    await supabase.rpc('remove_gift_voucher_from_booking', { p_booking_id: bookingId })
+    setBookings((prev) => prev.map((b) => b.id === bookingId ? { ...b, gift_voucher_amount: 0, gift_voucher_id: null } : b))
+    setSelectedBooking((b) => b ? { ...b, gift_voucher_amount: 0, gift_voucher_id: null } : b)
+    setVoucherRemoving(false)
   }
 
   function exportCSV() {
@@ -171,7 +203,7 @@ export default function AdminBookings() {
                     </Badge>
                   </td>
                   <td className="px-4 py-3 font-bold text-gray-900 whitespace-nowrap">
-                    {b.service ? formatCurrency(b.service.price - (b.discount_amount ?? 0)) : '—'}
+                    {b.service ? formatCurrency(b.service.price - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0)) : '—'}
                   </td>
                   <td className="px-4 py-3">
                     <button
@@ -219,7 +251,7 @@ export default function AdminBookings() {
                 { label: 'Staff', value: selectedBooking.staff?.name ?? '—' },
                 { label: 'Date', value: format(parseISO(selectedBooking.starts_at), 'EEE d MMM yyyy') },
                 { label: 'Time', value: `${format(parseISO(selectedBooking.starts_at), 'HH:mm')} – ${format(parseISO(selectedBooking.ends_at), 'HH:mm')}` },
-                { label: 'Price', value: selectedBooking.service ? formatCurrency(selectedBooking.service.price - (selectedBooking.discount_amount ?? 0)) : '—' },
+                { label: 'Price', value: selectedBooking.service ? formatCurrency(selectedBooking.service.price - (selectedBooking.discount_amount ?? 0) - (selectedBooking.gift_voucher_amount ?? 0)) : '—' },
               ].map(({ label, value }) => (
                 <div key={label}>
                   <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</dt>
@@ -249,6 +281,42 @@ export default function AdminBookings() {
                 </select>
               </div>
             )}
+            {/* Gift voucher */}
+            <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+                <Gift className="h-3.5 w-3.5" /> Gift Voucher
+              </p>
+              {(selectedBooking.gift_voucher_amount ?? 0) > 0 ? (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-green-700">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    <span className="text-xs font-medium">Applied: −{formatCurrency(selectedBooking.gift_voucher_amount ?? 0)}</span>
+                  </div>
+                  <button
+                    onClick={() => removeVoucher(selectedBooking.id)}
+                    disabled={voucherRemoving}
+                    className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50"
+                  >
+                    {voucherRemoving ? 'Removing…' : 'Remove'}
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={voucherCode}
+                    onChange={(e) => { setVoucherCode(e.target.value.toUpperCase()); setVoucherError('') }}
+                    placeholder="VOUCHER CODE"
+                    className="flex-1 h-9 px-3 text-sm font-mono border border-gray-200 rounded-lg outline-none focus:ring-(--color-primary) focus:ring-2 uppercase"
+                  />
+                  <Button size="sm" loading={voucherApplying} onClick={() => applyVoucher(selectedBooking.id)} disabled={!voucherCode.trim()}>
+                    Apply
+                  </Button>
+                </div>
+              )}
+              {voucherError && <p className="text-xs text-red-600">{voucherError}</p>}
+            </div>
+
             <div className="flex gap-2 pt-2 border-t border-gray-100 flex-wrap">
               {(['confirmed', 'completed', 'cancelled'] as BookingStatus[]).map((s) => (
                 <Button

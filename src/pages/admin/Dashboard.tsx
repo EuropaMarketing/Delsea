@@ -19,7 +19,7 @@ interface Stats {
 }
 
 export default function Dashboard() {
-  type TodayBooking = Booking & { service: { name: string; price: number }; staff: { name: string } | null; customer: { name: string } | null; discount_amount: number }
+  type TodayBooking = Booking & { service: { name: string; price: number }; staff: { name: string } | null; customer: { name: string } | null; discount_amount: number; gift_voucher_amount: number }
   const [todayBookings, setTodayBookings] = useState<TodayBooking[]>([])
   const [stats, setStats] = useState<Stats>({ todayCount: 0, todayCompleted: 0, weekCount: 0, weekRevenue: 0, weekCancellations: 0 })
   const [loading, setLoading] = useState(true)
@@ -44,7 +44,7 @@ export default function Dashboard() {
           .order('starts_at'),
         supabase
           .from('bookings')
-          .select('status, discount_amount, service:services(price)')
+          .select('status, discount_amount, gift_voucher_amount, service:services(price)')
           .eq('business_id', BUSINESS_ID)
           .gte('starts_at', weekStart)
           .lte('starts_at', weekEnd),
@@ -55,14 +55,14 @@ export default function Dashboard() {
         setTodayBookings(all.filter((b) => b.status === 'confirmed' || b.status === 'pending'))
         const todayCompleted = all.filter((b) => b.status === 'completed').length
         if (weekRes.data) {
-          const week = weekRes.data as unknown as Array<{ status: string; discount_amount: number; service: { price: number } | null }>
+          const week = weekRes.data as unknown as Array<{ status: string; discount_amount: number; gift_voucher_amount: number; service: { price: number } | null }>
           setStats({
             todayCount: all.filter((b) => b.status !== 'cancelled').length - todayCompleted,
             todayCompleted,
             weekCount: week.filter((b) => b.status !== 'cancelled').length,
             weekRevenue: week
               .filter((b) => b.status === 'confirmed' || b.status === 'completed')
-              .reduce((sum, b) => sum + (b.service?.price ?? 0) - (b.discount_amount ?? 0), 0),
+              .reduce((sum, b) => sum + (b.service?.price ?? 0) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0), 0),
             weekCancellations: week.filter((b) => b.status === 'cancelled').length,
           })
         }
@@ -146,7 +146,7 @@ export default function Dashboard() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-sm font-bold text-gray-900 hidden sm:block">
-                      {b.service ? formatCurrency(b.service.price - (b.discount_amount ?? 0)) : '—'}
+                      {b.service ? formatCurrency(b.service.price - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0)) : '—'}
                     </span>
                     <Badge variant={statusBadgeVariant(b.status)} className="capitalize">
                       {b.status}

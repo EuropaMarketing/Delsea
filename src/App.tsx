@@ -43,6 +43,7 @@ import AdminPayroll from '@/pages/admin/Payroll'
 import AdminPortfolio from '@/pages/admin/Portfolio'
 import AdminReviews from '@/pages/admin/Reviews'
 import AdminDiscounts from '@/pages/admin/Discounts'
+import AdminGiftVouchers from '@/pages/admin/GiftVouchers'
 import AdminResources from '@/pages/admin/Resources'
 
 function AppRoutes() {
@@ -256,6 +257,16 @@ function AppRoutes() {
           <ProtectedRoute adminOnly>
             <AdminLayout>
               <AdminDiscounts />
+            </AdminLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/gift-vouchers"
+        element={
+          <ProtectedRoute adminOnly>
+            <AdminLayout>
+              <AdminGiftVouchers />
             </AdminLayout>
           </ProtectedRoute>
         }
