@@ -12,6 +12,14 @@ CREATE TABLE IF NOT EXISTS gift_vouchers (
   UNIQUE(business_id, code)
 );
 
+ALTER TABLE gift_vouchers ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "gift_vouchers_select" ON gift_vouchers
+  FOR SELECT USING (is_active = TRUE OR is_business_admin(business_id));
+
+CREATE POLICY "gift_vouchers_admin" ON gift_vouchers
+  FOR ALL USING (is_business_admin(business_id));
+
 -- Add gift voucher columns to bookings
 ALTER TABLE bookings
   ADD COLUMN IF NOT EXISTS gift_voucher_id     UUID    REFERENCES gift_vouchers(id),

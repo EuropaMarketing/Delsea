@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { format, parseISO, isBefore, addHours } from 'date-fns'
-import { CalendarClock, AlertTriangle, LogIn, CalendarRange, Phone, Ticket, Star, CheckCircle2, ExternalLink } from 'lucide-react'
+import { CalendarClock, AlertTriangle, LogIn, CalendarRange, Phone, Ticket, Gift, Star, CheckCircle2, ExternalLink } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { useBookingStore } from '@/store/bookingStore'
@@ -13,7 +13,7 @@ import { Card } from '@/components/ui/Card'
 import { Input, PasswordInput } from '@/components/ui/Input'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { Modal } from '@/components/ui/Modal'
-import type { Service } from '@/types'
+import type { Service, GiftVoucher } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
@@ -35,6 +35,7 @@ type MyBooking = {
   status: string
   notes: string | null
   created_at: string
+  gift_voucher_id: string | null
   service: { name: string; price: number }
   staff: { name: string } | null
 }
@@ -140,9 +141,10 @@ export default function MyBookings() {
   const { state: locationState } = useLocation()
   const justRescheduled = (locationState as { rescheduled?: boolean } | null)?.rescheduled ?? false
 
-  const [tab, setTab] = useState<'bookings' | 'memberships'>('bookings')
+  const [tab, setTab] = useState<'bookings' | 'memberships' | 'vouchers'>('bookings')
   const [bookings, setBookings] = useState<MyBooking[]>([])
   const [memberships, setMemberships] = useState<MyMembership[]>([])
+  const [vouchers, setVouchers] = useState<GiftVoucher[]>([])
   const [loading, setLoading] = useState(true)
   const [rpcError, setRpcError] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState<string | null>(null)
@@ -199,6 +201,16 @@ export default function MyBookings() {
           staff: b.staff_name ? { name: b.staff_name } : null,
         }))
         setBookings(mapped)
+
+        // Load gift vouchers linked to this customer's bookings
+        const voucherIds = [...new Set(mapped.map((b) => b.gift_voucher_id).filter(Boolean) as string[])]
+        if (voucherIds.length) {
+          const { data: voucherData } = await supabase
+            .from('gift_vouchers')
+            .select('*')
+            .in('id', voucherIds)
+          if (voucherData) setVouchers(voucherData as GiftVoucher[])
+        }
 
         // Check which past bookings have already been reviewed
         const ids = mapped.map((b) => b.id)
@@ -387,18 +399,21 @@ export default function MyBookings() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-gray-200">
-        {(['bookings', 'memberships'] as const).map((t) => (
+        {(['bookings', 'memberships', 'vouchers'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-4 py-2.5 text-sm font-medium capitalize border-b-2 transition-colors -mb-px flex items-center gap-1.5 ${
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px flex items-center gap-1.5 ${
               tab === t
                 ? 'border-(--color-primary) text-(--color-primary)'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
             {t === 'memberships' && <Ticket className="h-3.5 w-3.5" />}
-            {t === 'bookings' ? 'My Bookings' : `Memberships${memberships.length ? ` (${memberships.length})` : ''}`}
+            {t === 'vouchers' && <Gift className="h-3.5 w-3.5" />}
+            {t === 'bookings' ? 'My Bookings'
+              : t === 'memberships' ? `Memberships${memberships.length ? ` (${memberships.length})` : ''}`
+              : `Gift Vouchers${vouchers.length ? ` (${vouchers.length})` : ''}`}
           </button>
         ))}
       </div>
@@ -523,6 +538,71 @@ export default function MyBookings() {
                   Browse membership plans →
                 </Link>
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Gift Vouchers tab */}
+      {tab === 'vouchers' && (
+        <div>
+          {vouchers.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <Gift className="h-10 w-10 text-gray-300 mb-3" />
+              <p className="font-medium text-gray-500">No gift vouchers used yet.</p>
+              <p className="text-sm text-gray-400 mt-1">When you redeem a gift voucher, it will appear here.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {vouchers.map((v) => {
+                const pct = v.initial_value > 0 ? Math.round((v.remaining_value / v.initial_value) * 100) : 0
+                const isExhausted = v.remaining_value === 0
+                const isExpired = v.expires_at && new Date(v.expires_at) < new Date()
+                return (
+                  <Card key={v.id} padding="md" className="flex flex-col gap-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Gift className="h-4 w-4 text-gray-400" />
+                          <span className="font-mono font-bold text-gray-900 tracking-wider">{v.code}</span>
+                        </div>
+                        {v.issued_to && (
+                          <p className="text-xs text-gray-400 mt-0.5 ml-6">Issued to {v.issued_to}</p>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span
+                          className={`text-2xl font-extrabold ${isExhausted ? 'text-gray-300' : ''}`}
+                          style={!isExhausted ? { color: 'var(--color-primary)' } : undefined}
+                        >
+                          {formatCurrency(v.remaining_value)}
+                        </span>
+                        <p className="text-xs text-gray-400">of {formatCurrency(v.initial_value)} remaining</p>
+                      </div>
+                    </div>
+
+                    {/* Progress bar */}
+                    <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="h-1.5 rounded-full transition-all"
+                        style={{
+                          width: `${pct}%`,
+                          backgroundColor: pct > 50 ? 'var(--color-primary)' : pct > 20 ? '#f59e0b' : '#ef4444',
+                        }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs text-gray-400">
+                      <span>{isExhausted ? 'Fully redeemed' : isExpired ? 'Expired' : 'Active'}</span>
+                      {v.expires_at ? (
+                        <span>{isExpired ? 'Expired' : 'Expires'} {format(parseISO(v.expires_at), 'd MMM yyyy')}</span>
+                      ) : (
+                        <span>No expiry</span>
+                      )}
+                    </div>
+                  </Card>
+                )
+              })}
             </div>
           )}
         </div>
