@@ -18,10 +18,10 @@ function generateCode() {
   return Array.from({ length: 10 }, () => CHARS[Math.floor(Math.random() * CHARS.length)]).join('')
 }
 
-function voucherStatus(v: GiftVoucher): { label: string; variant: 'success' | 'default' | 'error' } {
+function voucherStatus(v: GiftVoucher): { label: string; variant: 'success' | 'default' | 'danger' } {
   if (!v.is_active) return { label: 'Inactive', variant: 'default' }
   if (v.remaining_value === 0) return { label: 'Used', variant: 'default' }
-  if (v.expires_at && new Date(v.expires_at) < new Date()) return { label: 'Expired', variant: 'error' }
+  if (v.expires_at && new Date(v.expires_at) < new Date()) return { label: 'Expired', variant: 'danger' }
   return { label: 'Active', variant: 'success' }
 }
 
