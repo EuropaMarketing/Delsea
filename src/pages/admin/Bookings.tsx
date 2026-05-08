@@ -7,7 +7,7 @@ import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { Booking, BookingStatus } from '@/types'
+import type { Booking, BookingStatus, Resource } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 const PAGE_SIZE = 20
@@ -16,6 +16,7 @@ type ExtBooking = Booking & {
   service: { name: string; price: number }
   staff: { name: string } | null
   customer: { name: string; email: string }
+  resource: { name: string } | null
 }
 
 export default function AdminBookings() {
@@ -26,6 +27,8 @@ export default function AdminBookings() {
   const [updating, setUpdating] = useState(false)
   const [page, setPage] = useState(0)
   const [hasMore, setHasMore] = useState(true)
+  const [resources, setResources] = useState<Resource[]>([])
+  const [assigningResource, setAssigningResource] = useState(false)
 
   useEffect(() => {
     setPage(0)
@@ -33,11 +36,21 @@ export default function AdminBookings() {
     fetchBookings(0, true)
   }, [statusFilter])
 
+  useEffect(() => {
+    supabase
+      .from('resources')
+      .select('*')
+      .eq('business_id', BUSINESS_ID)
+      .eq('is_active', true)
+      .order('name')
+      .then(({ data }) => { if (data) setResources(data as Resource[]) })
+  }, [])
+
   async function fetchBookings(pageNum: number, reset = false) {
     setLoading(true)
     let query = supabase
       .from('bookings')
-      .select('*, service:services(name,price), staff:staff(name), customer:customers(name,email)')
+      .select('*, service:services(name,price), staff:staff(name), customer:customers(name,email), resource:resources(name)')
       .eq('business_id', BUSINESS_ID)
       .order('starts_at', { ascending: false })
       .range(pageNum * PAGE_SIZE, (pageNum + 1) * PAGE_SIZE - 1)
@@ -58,6 +71,16 @@ export default function AdminBookings() {
     setBookings((prev) => prev.map((b) => (b.id === bookingId ? { ...b, status } : b)))
     if (selectedBooking?.id === bookingId) setSelectedBooking((b) => b ? { ...b, status } : b)
     setUpdating(false)
+  }
+
+  async function assignResource(bookingId: string, resourceId: string | null) {
+    setAssigningResource(true)
+    await supabase.from('bookings').update({ resource_id: resourceId }).eq('id', bookingId)
+    const matchedResource = resources.find((r) => r.id === resourceId) ?? null
+    const resourceObj = matchedResource ? { name: matchedResource.name } : null
+    setBookings((prev) => prev.map((b) => b.id === bookingId ? { ...b, resource_id: resourceId, resource: resourceObj } : b))
+    if (selectedBooking?.id === bookingId) setSelectedBooking((b) => b ? { ...b, resource_id: resourceId, resource: resourceObj } : b)
+    setAssigningResource(false)
   }
 
   function exportCSV() {
@@ -208,6 +231,22 @@ export default function AdminBookings() {
               <div>
                 <p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-1">Notes</p>
                 <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3">{selectedBooking.notes}</p>
+              </div>
+            )}
+            {resources.length > 0 && (
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-1">Resource</p>
+                <select
+                  value={selectedBooking.resource_id ?? ''}
+                  disabled={assigningResource}
+                  onChange={(e) => assignResource(selectedBooking.id, e.target.value || null)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-(--color-primary) disabled:opacity-50"
+                >
+                  <option value="">No resource assigned</option>
+                  {resources.map((r) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
               </div>
             )}
             <div className="flex gap-2 pt-2 border-t border-gray-100 flex-wrap">
