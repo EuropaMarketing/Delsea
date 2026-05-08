@@ -148,7 +148,7 @@ export default function AdminBookings() {
                     </Badge>
                   </td>
                   <td className="px-4 py-3 font-bold text-gray-900 whitespace-nowrap">
-                    {b.service ? formatCurrency(b.service.price) : '—'}
+                    {b.service ? formatCurrency(b.service.price - (b.discount_amount ?? 0)) : '—'}
                   </td>
                   <td className="px-4 py-3">
                     <button
@@ -196,7 +196,7 @@ export default function AdminBookings() {
                 { label: 'Staff', value: selectedBooking.staff?.name ?? '—' },
                 { label: 'Date', value: format(parseISO(selectedBooking.starts_at), 'EEE d MMM yyyy') },
                 { label: 'Time', value: `${format(parseISO(selectedBooking.starts_at), 'HH:mm')} – ${format(parseISO(selectedBooking.ends_at), 'HH:mm')}` },
-                { label: 'Price', value: selectedBooking.service ? formatCurrency(selectedBooking.service.price) : '—' },
+                { label: 'Price', value: selectedBooking.service ? formatCurrency(selectedBooking.service.price - (selectedBooking.discount_amount ?? 0)) : '—' },
               ].map(({ label, value }) => (
                 <div key={label}>
                   <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</dt>

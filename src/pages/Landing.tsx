@@ -42,7 +42,7 @@ export default function Landing() {
       const dayEnd = endOfDay(today).toISOString()
 
       const [staffRes, availRes, bookRes, blockRes] = await Promise.all([
-        supabase.from('staff').select('id').eq('business_id', BUSINESS_ID).not('on_holiday', 'is', true),
+        supabase.from('staff').select('id, on_holiday').eq('business_id', BUSINESS_ID),
         supabase.from('availability').select('*').eq('day_of_week', dow),
         supabase.from('bookings').select('*')
           .eq('business_id', BUSINESS_ID)
@@ -54,7 +54,10 @@ export default function Landing() {
           .gt('ends_at', dayStart),
       ])
 
-      const staffIds = new Set((staffRes.data ?? []).map((s) => s.id))
+      // Filter client-side: !on_holiday handles both false and null correctly
+      const staffIds = new Set(
+        (staffRes.data ?? []).filter((s) => !s.on_holiday).map((s) => s.id)
+      )
       const todayAvail = ((availRes.data ?? []) as Availability[]).filter((a) => staffIds.has(a.staff_id))
       // Only pass blocks belonging to non-holiday staff — leave entries must not suppress other staff's slots
       const todayBlocked = ((blockRes.data ?? []) as BlockedTime[]).filter((bt) => staffIds.has(bt.staff_id))

@@ -16,6 +16,7 @@ type CompletedBooking = {
   ends_at: string
   service: { name: string; price: number } | null
   staff_id: string | null
+  discount_amount: number
 }
 
 type StaffSummary = Staff & {
@@ -48,7 +49,7 @@ export default function AdminPayroll() {
     const monthEnd = endOfMonth(month)
     supabase
       .from('bookings')
-      .select('id, staff_id, starts_at, ends_at, service:services(name, price)')
+      .select('id, staff_id, starts_at, ends_at, discount_amount, service:services(name, price)')
       .eq('business_id', BUSINESS_ID)
       .eq('status', 'completed')
       .gte('starts_at', monthStart.toISOString())
@@ -63,7 +64,7 @@ export default function AdminPayroll() {
   const summaries = useMemo<StaffSummary[]>(() => {
     return staffList.map((s) => {
       const bks = bookings.filter((b) => b.staff_id === s.id)
-      const totalValue = bks.reduce((sum, b) => sum + (b.service?.price ?? 0), 0)
+      const totalValue = bks.reduce((sum, b) => sum + (b.service?.price ?? 0) - (b.discount_amount ?? 0), 0)
       return { ...s, bookings: bks, totalValue, expanded: expandedIds.has(s.id) }
     })
   }, [staffList, bookings, expandedIds])
@@ -190,7 +191,7 @@ export default function AdminPayroll() {
                             {b.service?.name ?? '—'}
                           </td>
                           <td className="px-4 py-2.5 text-gray-900 font-semibold text-right">
-                            {formatCurrency(b.service?.price ?? 0)}
+                            {formatCurrency((b.service?.price ?? 0) - (b.discount_amount ?? 0))}
                           </td>
                         </tr>
                       ))}
