@@ -25,6 +25,8 @@ export default function DateTimePicker() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(draft.date ?? null)
   const [selectedSlot, setSelectedSlot] = useState<string | null>(draft.timeSlot || null)
   const [availability, setAvailability] = useState<Availability[]>([])
+  // IDs of staff who are NOT on holiday — used to filter leave blocks out of slot generation
+  const [activeStaffIds, setActiveStaffIds] = useState<Set<string>>(new Set())
   const [groupSessions, setGroupSessions] = useState<ServiceSession[]>([])
   const [monthBookings, setMonthBookings] = useState<Booking[]>([])
   const [monthBlocked, setMonthBlocked] = useState<BlockedTime[]>([])
@@ -48,11 +50,14 @@ export default function DateTimePicker() {
     setLoadingAvail(true)
     async function load() {
       let staffIds: string[]
+      let nonHolidayIds: string[]
+
       if (draft.staffId) {
         staffIds = [draft.staffId]
+        nonHolidayIds = [draft.staffId]
       } else if (staff.length) {
-        // Exclude staff on holiday — their leave blocks must not prevent other staff's slots
-        staffIds = staff.filter((s) => !s.on_holiday).map((s) => s.id)
+        staffIds = staff.map((s) => s.id)
+        nonHolidayIds = staff.filter((s) => !s.on_holiday).map((s) => s.id)
       } else {
         const { data: staffData } = await supabase
           .from('staff')
@@ -61,11 +66,16 @@ export default function DateTimePicker() {
           .order('name')
         if (staffData) {
           setStaffList(staffData as Staff[])
-          staffIds = (staffData as Staff[]).filter((s) => !s.on_holiday).map((s) => s.id)
+          staffIds = (staffData as Staff[]).map((s) => s.id)
+          nonHolidayIds = (staffData as Staff[]).filter((s) => !s.on_holiday).map((s) => s.id)
         } else {
           staffIds = []
+          nonHolidayIds = []
         }
       }
+
+      // Track which staff are active so leave blocks for holiday staff don't suppress other slots
+      setActiveStaffIds(new Set(nonHolidayIds))
 
       let query = supabase.from('availability').select('*')
       if (staffIds.length) query = query.in('staff_id', staffIds)
@@ -168,18 +178,16 @@ export default function DateTimePicker() {
         .filter((b) => service.is_self_service
           ? b.service_id === service.id || (service.resource_id != null && b.resource_id === service.resource_id)
           : true)
-      // Only include blocks for active (non-holiday) staff — holiday leave blocks must not
-      // suppress slots that other available staff could fill.
-      const activeStaffIds = new Set(availability.map((a) => a.staff_id))
+      // Only include blocks for non-holiday staff — leave blocks must not suppress other staff's slots
       const blk = monthBlocked.filter((bt) => {
-        if (!activeStaffIds.has(bt.staff_id)) return false
+        if (activeStaffIds.size > 0 && !activeStaffIds.has(bt.staff_id)) return false
         const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
         return isBefore(s, dEnd) && isAfter(e, dStart)
       })
       map.set(dayKey, generateTimeSlots(day, availability, draft.variantDuration ?? service.duration_minutes, bks, blk, service.pre_buffer_minutes, service.post_buffer_minutes))
     }
     return map
-  }, [calMonth, service, groupSessions, availability, availableDays, monthBookings, monthBlocked, todayStart])
+  }, [calMonth, service, groupSessions, availability, availableDays, activeStaffIds, monthBookings, monthBlocked, todayStart])
 
   // Auto-select the first available day once data is ready (runs once)
   useEffect(() => {
@@ -280,9 +288,8 @@ export default function DateTimePicker() {
             .filter((b) => service.is_self_service
               ? b.service_id === service.id || (service.resource_id != null && b.resource_id === service.resource_id)
               : true)
-          const activeStaffIds = new Set(availability.map((a) => a.staff_id))
           const dayBlk = blk.filter((bt) => {
-            if (!activeStaffIds.has(bt.staff_id)) return false
+            if (activeStaffIds.size > 0 && !activeStaffIds.has(bt.staff_id)) return false
             const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
             return isBefore(s, dEnd) && isAfter(e, dStart)
           })
