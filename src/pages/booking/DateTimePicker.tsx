@@ -51,7 +51,8 @@ export default function DateTimePicker() {
       if (draft.staffId) {
         staffIds = [draft.staffId]
       } else if (staff.length) {
-        staffIds = staff.map((s) => s.id)
+        // Exclude staff on holiday — their leave blocks must not prevent other staff's slots
+        staffIds = staff.filter((s) => !s.on_holiday).map((s) => s.id)
       } else {
         const { data: staffData } = await supabase
           .from('staff')
@@ -60,7 +61,7 @@ export default function DateTimePicker() {
           .order('name')
         if (staffData) {
           setStaffList(staffData as Staff[])
-          staffIds = (staffData as Staff[]).map((s) => s.id)
+          staffIds = (staffData as Staff[]).filter((s) => !s.on_holiday).map((s) => s.id)
         } else {
           staffIds = []
         }
@@ -167,7 +168,11 @@ export default function DateTimePicker() {
         .filter((b) => service.is_self_service
           ? b.service_id === service.id || (service.resource_id != null && b.resource_id === service.resource_id)
           : true)
+      // Only include blocks for active (non-holiday) staff — holiday leave blocks must not
+      // suppress slots that other available staff could fill.
+      const activeStaffIds = new Set(availability.map((a) => a.staff_id))
       const blk = monthBlocked.filter((bt) => {
+        if (!activeStaffIds.has(bt.staff_id)) return false
         const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
         return isBefore(s, dEnd) && isAfter(e, dStart)
       })
@@ -275,7 +280,9 @@ export default function DateTimePicker() {
             .filter((b) => service.is_self_service
               ? b.service_id === service.id || (service.resource_id != null && b.resource_id === service.resource_id)
               : true)
+          const activeStaffIds = new Set(availability.map((a) => a.staff_id))
           const dayBlk = blk.filter((bt) => {
+            if (!activeStaffIds.has(bt.staff_id)) return false
             const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
             return isBefore(s, dEnd) && isAfter(e, dStart)
           })
