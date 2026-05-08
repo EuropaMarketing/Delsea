@@ -338,66 +338,67 @@ export default function Confirmation() {
               </div>
             )}
 
-            {/* Discount code entry */}
+            {/* Discount code + gift voucher entry */}
             {!useToken && (
-              <div className="border-t border-gray-100 pt-3 mb-3">
-                {discountInfo ? (
-                  <div className="flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-1.5 text-green-700 font-medium">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      Code <span className="font-mono">{discountInfo.code}</span> applied
+              <>
+                <div className="border-t border-gray-100 pt-3 mb-3">
+                  {discountInfo ? (
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1.5 text-green-700 font-medium">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Code <span className="font-mono">{discountInfo.code}</span> applied
+                      </div>
+                      <button onClick={() => { setDiscountInfo(null); setDiscountCode('') }} className="text-gray-400 hover:text-gray-600">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
                     </div>
-                    <button onClick={() => { setDiscountInfo(null); setDiscountCode('') }} className="text-gray-400 hover:text-gray-600">
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={discountCode}
-                      onChange={e => { setDiscountCode(e.target.value.toUpperCase()); setDiscountError(null) }}
-                      onKeyDown={e => e.key === 'Enter' && handleApplyDiscount()}
-                      placeholder="DISCOUNT CODE"
-                      className="flex-1 h-9 px-3 text-xs font-mono border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) uppercase placeholder:normal-case placeholder:font-sans"
-                    />
-                    <Button size="sm" variant="secondary" loading={discountApplying} onClick={handleApplyDiscount} disabled={!discountCode.trim()}>
-                      Apply
-                    </Button>
-                  </div>
-                )}
-                {discountError && <p className="text-xs text-red-600 mt-1">{discountError}</p>}
-              </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={discountCode}
+                        onChange={e => { setDiscountCode(e.target.value.toUpperCase()); setDiscountError(null) }}
+                        onKeyDown={e => e.key === 'Enter' && handleApplyDiscount()}
+                        placeholder="DISCOUNT CODE"
+                        className="flex-1 h-9 px-3 text-xs font-mono border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) uppercase placeholder:normal-case placeholder:font-sans"
+                      />
+                      <Button size="sm" variant="secondary" loading={discountApplying} onClick={handleApplyDiscount} disabled={!discountCode.trim()}>
+                        Apply
+                      </Button>
+                    </div>
+                  )}
+                  {discountError && <p className="text-xs text-red-600 mt-1">{discountError}</p>}
+                </div>
 
-              {/* Gift voucher entry */}
-              <div className="pt-2 border-t border-gray-100">
-                {voucherInfo ? (
-                  <div className="flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-1.5 text-green-700 font-medium">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      Voucher <span className="font-mono">{voucherInfo.code}</span> applied
+                <div className="pt-2 border-t border-gray-100 mb-3">
+                  {voucherInfo ? (
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1.5 text-green-700 font-medium">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Voucher <span className="font-mono">{voucherInfo.code}</span> applied
+                      </div>
+                      <button onClick={() => { setVoucherInfo(null); setVoucherCode('') }} className="text-gray-400 hover:text-gray-600">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
                     </div>
-                    <button onClick={() => { setVoucherInfo(null); setVoucherCode('') }} className="text-gray-400 hover:text-gray-600">
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={voucherCode}
-                      onChange={(e) => { setVoucherCode(e.target.value.toUpperCase()); setVoucherError(null) }}
-                      onKeyDown={(e) => e.key === 'Enter' && handleApplyVoucher()}
-                      placeholder="GIFT VOUCHER"
-                      className="flex-1 h-9 px-3 text-xs font-mono border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) uppercase placeholder:normal-case placeholder:font-sans"
-                    />
-                    <Button size="sm" variant="secondary" loading={voucherApplying} onClick={handleApplyVoucher} disabled={!voucherCode.trim()}>
-                      Apply
-                    </Button>
-                  </div>
-                )}
-                {voucherError && <p className="text-xs text-red-600 mt-1">{voucherError}</p>}
-              </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={voucherCode}
+                        onChange={(e) => { setVoucherCode(e.target.value.toUpperCase()); setVoucherError(null) }}
+                        onKeyDown={(e) => e.key === 'Enter' && handleApplyVoucher()}
+                        placeholder="GIFT VOUCHER"
+                        className="flex-1 h-9 px-3 text-xs font-mono border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) uppercase placeholder:normal-case placeholder:font-sans"
+                      />
+                      <Button size="sm" variant="secondary" loading={voucherApplying} onClick={handleApplyVoucher} disabled={!voucherCode.trim()}>
+                        Apply
+                      </Button>
+                    </div>
+                  )}
+                  {voucherError && <p className="text-xs text-red-600 mt-1">{voucherError}</p>}
+                </div>
+              </>
             )}
 
             {error && (
