@@ -54,24 +54,28 @@ export default function Landing() {
           .gt('ends_at', dayStart),
       ])
 
-      // Filter client-side: !on_holiday handles both false and null correctly
-      const staffIds = new Set(
+      // Build per-staff availability — !on_holiday handles both false and null
+      const activeStaffIds = new Set(
         (staffRes.data ?? []).filter((s) => !s.on_holiday).map((s) => s.id)
       )
-      const todayAvail = ((availRes.data ?? []) as Availability[]).filter((a) => staffIds.has(a.staff_id))
-      // Only pass blocks belonging to non-holiday staff — leave entries must not suppress other staff's slots
-      const todayBlocked = ((blockRes.data ?? []) as BlockedTime[]).filter((bt) => staffIds.has(bt.staff_id))
+      const allAvail = (availRes.data ?? []) as Availability[]
+      const allBookings = (bookRes.data ?? []) as Booking[]
+      const allBlocked = (blockRes.data ?? []) as BlockedTime[]
 
-      if (!todayAvail.length) { setSlotsToday('none'); return }
+      if (!allAvail.some(a => activeStaffIds.has(a.staff_id))) { setSlotsToday('none'); return }
 
-      const slots = generateTimeSlots(
-        today,
-        todayAvail,
-        30,
-        (bookRes.data ?? []) as Booking[],
-        todayBlocked,
-      )
-      setSlotsToday(slots.length > 0 ? 'available' : 'none')
+      // Generate slots per-staff and union them so one staff member's leave block
+      // doesn't suppress the availability of the rest of the team
+      const slotSet = new Set<string>()
+      for (const staffId of activeStaffIds) {
+        const staffAvail = allAvail.filter(a => a.staff_id === staffId)
+        const staffBks = allBookings.filter(b => b.staff_id === staffId)
+        const staffBlk = allBlocked.filter(bt => bt.staff_id === staffId)
+        for (const slot of generateTimeSlots(today, staffAvail, 30, staffBks, staffBlk)) {
+          slotSet.add(slot)
+        }
+      }
+      setSlotsToday(slotSet.size > 0 ? 'available' : 'none')
     }
 
     checkSlots()
