@@ -1,5 +1,18 @@
 import { useEffect, useState, useMemo } from 'react'
-import { format, parseISO, startOfMonth, endOfMonth, addMonths, subMonths, isSameMonth } from 'date-fns'
+import { format, parseISO, startOfMonth, addMonths, subMonths, startOfDay, endOfDay, setDate, getDate } from 'date-fns'
+
+// Pay period: 26th of previous month → 25th of current "label" month
+function getPayPeriod(month: Date) {
+  const periodStart = startOfDay(setDate(subMonths(startOfMonth(month), 1), 26))
+  const periodEnd   = endOfDay(setDate(startOfMonth(month), 25))
+  return { periodStart, periodEnd }
+}
+
+function currentPayPeriodMonth() {
+  const today = new Date()
+  // On or after the 26th we've rolled into the next period
+  return getDate(today) >= 26 ? startOfMonth(addMonths(today, 1)) : startOfMonth(today)
+}
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
@@ -44,7 +57,7 @@ function calcStaffPayment(b: CompletedBooking, member: Staff): number {
 }
 
 export default function AdminPayroll() {
-  const [month, setMonth] = useState(() => startOfMonth(new Date()))
+  const [month, setMonth] = useState(() => currentPayPeriodMonth())
   const [staffList, setStaffList] = useState<Staff[]>([])
   const [bookings, setBookings] = useState<CompletedBooking[]>([])
   const [loading, setLoading] = useState(true)
@@ -61,15 +74,14 @@ export default function AdminPayroll() {
 
   useEffect(() => {
     setLoading(true)
-    const monthStart = startOfMonth(month)
-    const monthEnd = endOfMonth(month)
+    const { periodStart, periodEnd } = getPayPeriod(month)
     supabase
       .from('bookings')
       .select('id, staff_id, starts_at, ends_at, discount_amount, gift_voucher_amount, service:services(name, price, duration_minutes)')
       .eq('business_id', BUSINESS_ID)
       .eq('status', 'completed')
-      .gte('starts_at', monthStart.toISOString())
-      .lte('starts_at', monthEnd.toISOString())
+      .gte('starts_at', periodStart.toISOString())
+      .lte('starts_at', periodEnd.toISOString())
       .order('starts_at')
       .then(({ data }) => {
         if (data) setBookings(data as unknown as CompletedBooking[])
@@ -100,7 +112,7 @@ export default function AdminPayroll() {
     })
   }
 
-  const isCurrentMonth = isSameMonth(month, new Date())
+  const isCurrentPeriod = month.getTime() === currentPayPeriodMonth().getTime()
 
   return (
     <div>
@@ -115,12 +127,15 @@ export default function AdminPayroll() {
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <span className="text-sm font-semibold text-gray-900 min-w-30 text-center">
-            {format(month, 'MMMM yyyy')}
+          <span className="text-sm font-semibold text-gray-900 text-center min-w-48">
+            {(() => {
+              const { periodStart, periodEnd } = getPayPeriod(month)
+              return `${format(periodStart, 'd MMM')} – ${format(periodEnd, 'd MMM yyyy')}`
+            })()}
           </span>
           <button
             onClick={() => setMonth((m) => addMonths(m, 1))}
-            disabled={isCurrentMonth}
+            disabled={isCurrentPeriod}
             className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             aria-label="Next month"
           >
