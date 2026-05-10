@@ -9,12 +9,13 @@ import { FullPageSpinner } from '@/components/ui/Spinner'
 import type { Staff } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
+const VAT_DIVISOR = 1.2
 
 type CompletedBooking = {
   id: string
   starts_at: string
   ends_at: string
-  service: { name: string; price: number } | null
+  service: { name: string; price: number; duration_minutes: number } | null
   staff_id: string | null
   discount_amount: number
   gift_voucher_amount: number
@@ -23,7 +24,23 @@ type CompletedBooking = {
 type StaffSummary = Staff & {
   bookings: CompletedBooking[]
   totalValue: number
+  totalExclVAT: number
+  staffPayment: number
   expanded: boolean
+}
+
+function bookingTotal(b: CompletedBooking) {
+  return (b.service?.price ?? 0) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0)
+}
+
+function calcStaffPayment(b: CompletedBooking, member: Staff): number {
+  const total = bookingTotal(b)
+  const exclVAT = Math.round(total / VAT_DIVISOR)
+  if (member.commission_type === 'hourly') {
+    const durationHrs = (b.service?.duration_minutes ?? 60) / 60
+    return Math.round(durationHrs * member.commission_rate * 100)
+  }
+  return Math.round(exclVAT * (member.commission_rate / 100))
 }
 
 export default function AdminPayroll() {
@@ -33,7 +50,6 @@ export default function AdminPayroll() {
   const [loading, setLoading] = useState(true)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
 
-  // Load staff once
   useEffect(() => {
     supabase
       .from('staff')
@@ -43,14 +59,13 @@ export default function AdminPayroll() {
       .then(({ data }) => { if (data) setStaffList(data as Staff[]) })
   }, [])
 
-  // Load completed bookings for the selected month
   useEffect(() => {
     setLoading(true)
     const monthStart = startOfMonth(month)
     const monthEnd = endOfMonth(month)
     supabase
       .from('bookings')
-      .select('id, staff_id, starts_at, ends_at, discount_amount, gift_voucher_amount, service:services(name, price)')
+      .select('id, staff_id, starts_at, ends_at, discount_amount, gift_voucher_amount, service:services(name, price, duration_minutes)')
       .eq('business_id', BUSINESS_ID)
       .eq('status', 'completed')
       .gte('starts_at', monthStart.toISOString())
@@ -65,19 +80,17 @@ export default function AdminPayroll() {
   const summaries = useMemo<StaffSummary[]>(() => {
     return staffList.map((s) => {
       const bks = bookings.filter((b) => b.staff_id === s.id)
-      const totalValue = bks.reduce((sum, b) => sum + (b.service?.price ?? 0) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0), 0)
-      return { ...s, bookings: bks, totalValue, expanded: expandedIds.has(s.id) }
+      const totalValue = bks.reduce((sum, b) => sum + bookingTotal(b), 0)
+      const totalExclVAT = Math.round(totalValue / VAT_DIVISOR)
+      const staffPayment = bks.reduce((sum, b) => sum + calcStaffPayment(b, s), 0)
+      return { ...s, bookings: bks, totalValue, totalExclVAT, staffPayment, expanded: expandedIds.has(s.id) }
     })
   }, [staffList, bookings, expandedIds])
 
-  const grandTotal = useMemo(
-    () => summaries.reduce((sum, s) => sum + s.totalValue, 0),
-    [summaries]
-  )
-  const grandCount = useMemo(
-    () => summaries.reduce((sum, s) => sum + s.bookings.length, 0),
-    [summaries]
-  )
+  const grandTotal    = useMemo(() => summaries.reduce((s, m) => s + m.totalValue,   0), [summaries])
+  const grandExclVAT  = useMemo(() => summaries.reduce((s, m) => s + m.totalExclVAT, 0), [summaries])
+  const grandPayment  = useMemo(() => summaries.reduce((s, m) => s + m.staffPayment, 0), [summaries])
+  const grandCount    = useMemo(() => summaries.reduce((s, m) => s + m.bookings.length, 0), [summaries])
 
   function toggleExpand(id: string) {
     setExpandedIds((prev) => {
@@ -117,14 +130,22 @@ export default function AdminPayroll() {
       </div>
 
       {/* Monthly totals bar */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <Card padding="md" className="text-center">
-          <p className="text-xs text-gray-400 mb-1">Completed Appointments</p>
-          <p className="text-3xl font-extrabold text-gray-900">{grandCount}</p>
+          <p className="text-xs text-gray-400 mb-1">Appointments</p>
+          <p className="text-2xl font-extrabold text-gray-900">{grandCount}</p>
         </Card>
         <Card padding="md" className="text-center">
           <p className="text-xs text-gray-400 mb-1">Total Revenue</p>
-          <p className="text-3xl font-extrabold text-gray-900">{formatCurrency(grandTotal)}</p>
+          <p className="text-2xl font-extrabold text-gray-900">{formatCurrency(grandTotal)}</p>
+        </Card>
+        <Card padding="md" className="text-center">
+          <p className="text-xs text-gray-400 mb-1">Total Excl VAT</p>
+          <p className="text-2xl font-extrabold text-gray-900">{formatCurrency(grandExclVAT)}</p>
+        </Card>
+        <Card padding="md" className="text-center">
+          <p className="text-xs text-gray-400 mb-1">Total Staff Payment</p>
+          <p className="text-2xl font-extrabold text-gray-900">{formatCurrency(grandPayment)}</p>
         </Card>
       </div>
 
@@ -150,22 +171,26 @@ export default function AdminPayroll() {
                   <p className="text-xs text-gray-400 capitalize">{s.role}</p>
                 </div>
 
-                {/* Stats */}
-                <div className="flex items-center gap-6 shrink-0">
+                <div className="flex items-center gap-4 sm:gap-6 shrink-0">
                   <div className="text-right hidden sm:block">
-                    <p className="text-xs text-gray-400">Appointments</p>
+                    <p className="text-xs text-gray-400">Appts</p>
                     <p className="text-lg font-bold text-gray-900">{s.bookings.length}</p>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right hidden md:block">
                     <p className="text-xs text-gray-400">Revenue</p>
                     <p className="text-lg font-bold text-gray-900">{formatCurrency(s.totalValue)}</p>
                   </div>
+                  <div className="text-right hidden md:block">
+                    <p className="text-xs text-gray-400">Excl VAT</p>
+                    <p className="text-lg font-bold text-gray-900">{formatCurrency(s.totalExclVAT)}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-gray-400">Staff Payment</p>
+                    <p className="text-lg font-bold text-gray-900">{formatCurrency(s.staffPayment)}</p>
+                  </div>
                   {s.bookings.length > 0 && (
                     <span className="text-gray-400">
-                      {expandedIds.has(s.id)
-                        ? <ChevronUp className="h-4 w-4" />
-                        : <ChevronDown className="h-4 w-4" />
-                      }
+                      {expandedIds.has(s.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                     </span>
                   )}
                 </div>
@@ -173,45 +198,53 @@ export default function AdminPayroll() {
 
               {/* Expandable booking list */}
               {expandedIds.has(s.id) && s.bookings.length > 0 && (
-                <div className="border-t border-gray-100">
-                  <table className="w-full text-sm">
+                <div className="border-t border-gray-100 overflow-x-auto">
+                  <table className="w-full text-sm min-w-[600px]">
                     <thead>
                       <tr className="bg-gray-50 text-left">
                         <th className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Date & Time</th>
                         <th className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Service</th>
-                        <th className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide text-right">Value</th>
+                        <th className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide text-right">Total</th>
+                        <th className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide text-right">Excl VAT</th>
+                        <th className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide text-right">
+                          Staff ({s.commission_type === 'hourly' ? '£/hr' : `${s.commission_rate}%`})
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {s.bookings.map((b) => (
-                        <tr key={b.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-2.5 text-gray-600">
-                            {format(parseISO(b.starts_at), 'EEE d MMM, HH:mm')}
-                          </td>
-                          <td className="px-4 py-2.5 text-gray-900 font-medium">
-                            {b.service?.name ?? '—'}
-                          </td>
-                          <td className="px-4 py-2.5 text-gray-900 font-semibold text-right">
-                            {formatCurrency((b.service?.price ?? 0) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0))}
-                          </td>
-                        </tr>
-                      ))}
+                      {s.bookings.map((b) => {
+                        const total = bookingTotal(b)
+                        const exclVAT = Math.round(total / VAT_DIVISOR)
+                        const payment = calcStaffPayment(b, s)
+                        return (
+                          <tr key={b.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">
+                              {format(parseISO(b.starts_at), 'EEE d MMM, HH:mm')}
+                            </td>
+                            <td className="px-4 py-2.5 text-gray-900 font-medium">
+                              {b.service?.name ?? '—'}
+                            </td>
+                            <td className="px-4 py-2.5 text-gray-900 text-right">{formatCurrency(total)}</td>
+                            <td className="px-4 py-2.5 text-gray-600 text-right">{formatCurrency(exclVAT)}</td>
+                            <td className="px-4 py-2.5 text-green-700 font-semibold text-right">{formatCurrency(payment)}</td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                     <tfoot>
                       <tr className="bg-gray-50 border-t border-gray-200">
                         <td className="px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide" colSpan={2}>
                           {s.bookings.length} appointment{s.bookings.length !== 1 ? 's' : ''}
                         </td>
-                        <td className="px-4 py-2.5 font-bold text-gray-900 text-right">
-                          {formatCurrency(s.totalValue)}
-                        </td>
+                        <td className="px-4 py-2.5 font-bold text-gray-900 text-right">{formatCurrency(s.totalValue)}</td>
+                        <td className="px-4 py-2.5 font-bold text-gray-600 text-right">{formatCurrency(s.totalExclVAT)}</td>
+                        <td className="px-4 py-2.5 font-bold text-green-700 text-right">{formatCurrency(s.staffPayment)}</td>
                       </tr>
                     </tfoot>
                   </table>
                 </div>
               )}
 
-              {/* No activity message */}
               {expandedIds.has(s.id) && s.bookings.length === 0 && (
                 <div className="border-t border-gray-100 px-4 py-3 text-sm text-gray-400">
                   No completed appointments this month.

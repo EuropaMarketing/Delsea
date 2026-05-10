@@ -7,6 +7,8 @@ export interface Business {
   created_at: string
 }
 
+export type CommissionType = 'percentage' | 'hourly'
+
 export interface Staff {
   id: string
   business_id: string
@@ -15,6 +17,8 @@ export interface Staff {
   avatar_url: string | null
   bio: string | null
   on_holiday: boolean
+  commission_type: CommissionType
+  commission_rate: number
 }
 
 export type DepositType = 'none' | 'fixed' | 'percentage'
@@ -47,6 +51,17 @@ export interface Service {
   pre_buffer_minutes: number
   post_buffer_minutes: number
   variants?: ServiceVariant[]
+  addons?: ServiceAddon[]
+}
+
+export interface ServiceAddon {
+  id: string
+  service_id: string
+  name: string
+  duration_minutes: number
+  price: number
+  is_active: boolean
+  created_at: string
 }
 
 export interface ServiceSession {

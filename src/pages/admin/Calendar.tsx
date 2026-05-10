@@ -5,7 +5,7 @@ import {
 } from 'date-fns'
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X,
+  Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { FullPageSpinner } from '@/components/ui/Spinner'
@@ -113,6 +113,9 @@ export default function AdminCalendar() {
   const [editDiscountError, setEditDiscountError] = useState('')
   const [editDiscountApplied, setEditDiscountApplied] = useState(false)
   const [editDiscountAmount, setEditDiscountAmount] = useState(0)
+
+  // Cell click popover (new booking vs block time)
+  const [cellPopover, setCellPopover] = useState<{ staffId: string; time: string; pageX: number; pageY: number } | null>(null)
 
   // Resize drag
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -250,25 +253,43 @@ export default function AdminCalendar() {
     return { top, height }
   }
 
-  function openNewBooking(e: React.MouseEvent<HTMLDivElement>, staffId: string) {
+  function handleCellClick(e: React.MouseEvent<HTMLDivElement>, staffId: string) {
     if ((e.target as HTMLElement).closest('[data-booking]')) return
     if (drag) return
     const member = staff.find(s => s.id === staffId)
     if (member?.on_holiday) return
     const rect = e.currentTarget.getBoundingClientRect()
     const y = e.clientY - rect.top
-    const minutesFromStart = (y / HOUR_HEIGHT) * 60
-    const totalMinutes = START_HOUR * 60 + minutesFromStart
-    const snapped = Math.round(totalMinutes / 60) * 60
+    const totalMinutes = START_HOUR * 60 + (y / HOUR_HEIGHT) * 60
+    const snapped = Math.round(totalMinutes / 15) * 15
     const h = Math.min(Math.floor(snapped / 60), END_HOUR - 1)
     const m = snapped % 60
-    const startTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-    setNewBookingStaffId(staffId)
+    const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    setCellPopover({ staffId, time, pageX: e.clientX, pageY: e.clientY })
+  }
+
+  function openNewBookingFromPopover() {
+    if (!cellPopover) return
+    setNewBookingStaffId(cellPopover.staffId)
     setNbDate(format(selectedDay, 'yyyy-MM-dd'))
-    setNbTime(startTime)
+    setNbTime(cellPopover.time)
     setNbServiceId(services[0]?.id ?? '')
     setNbName(''); setNbEmail(''); setNbPhone(''); setNbNotes('')
     setNbError(''); setNbSuggestions([]); setNbShowSuggestions(false); setNbSelectedCustomerId(null)
+    setCellPopover(null)
+  }
+
+  function openBlockTimeFromPopover() {
+    if (!cellPopover) return
+    const endTime = format(addMinutes(new Date(`2000-01-01T${cellPopover.time}:00`), 60), 'HH:mm')
+    setBtStaffId(cellPopover.staffId)
+    setBtDate(format(selectedDay, 'yyyy-MM-dd'))
+    setBtStart(cellPopover.time)
+    setBtEnd(endTime)
+    setBtReason('Booked Time')
+    setBtError('')
+    setBtOpen(true)
+    setCellPopover(null)
   }
 
   function closeNewBooking() {
@@ -673,7 +694,7 @@ export default function AdminCalendar() {
                   key={member.id}
                   className={cn('relative border-r border-gray-100', member.on_holiday ? 'cursor-not-allowed' : 'cursor-crosshair')}
                   style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
-                  onClick={e => openNewBooking(e, member.id)}
+                  onClick={e => handleCellClick(e, member.id)}
                 >
                   {hours.map(h => (
                     <div key={h} className="absolute w-full border-t border-gray-100" style={{ top: (h - START_HOUR) * HOUR_HEIGHT }} />
@@ -788,6 +809,35 @@ export default function AdminCalendar() {
           </div>
         </div>
       </div>
+
+      {/* ── Cell click popover: New Booking or Block Time ── */}
+      {cellPopover && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setCellPopover(null)} />
+          <div
+            className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 min-w-44"
+            style={{ top: cellPopover.pageY + 6, left: cellPopover.pageX }}
+          >
+            <div className="px-3 py-1.5 text-xs font-semibold text-gray-400 border-b border-gray-100 mb-1">
+              {cellPopover.time} · {staff.find(s => s.id === cellPopover.staffId)?.name}
+            </div>
+            <button
+              onClick={openNewBookingFromPopover}
+              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors"
+            >
+              <CalendarPlus className="h-4 w-4 text-gray-400" />
+              New Booking
+            </button>
+            <button
+              onClick={openBlockTimeFromPopover}
+              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors"
+            >
+              <Lock className="h-4 w-4 text-gray-400" />
+              Block Time
+            </button>
+          </div>
+        </>
+      )}
 
       {/* ── New Booking Modal ── */}
       <Modal open={!!newBookingStaffId} onClose={closeNewBooking} title="New Booking" size="md">

@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { Service, ServiceSession, ServiceVariant, DepositType, Resource } from '@/types'
+import type { Service, ServiceSession, ServiceVariant, ServiceAddon, DepositType, Resource, Staff, CommissionType } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
@@ -37,6 +37,19 @@ export default function AdminServices() {
   const [sessionForm, setSessionForm] = useState({ day_of_week: 1, start_time: '09:00' })
   const [addingSession, setAddingSession] = useState(false)
   const [savingSession, setSavingSession] = useState(false)
+
+  // Staff assignments
+  const [allStaff, setAllStaff] = useState<Staff[]>([])
+  // Map of staff_id → override or null (null = assigned with no override)
+  type Assignment = { commission_type: CommissionType | null; commission_rate: string | null }
+  const [staffAssignments, setStaffAssignments] = useState<Map<string, Assignment>>(new Map())
+  const [togglingStaffId, setTogglingStaffId] = useState<string | null>(null)
+
+  // Add-ons
+  const [addonsList, setAddonsList] = useState<ServiceAddon[]>([])
+  const [addingAddon, setAddingAddon] = useState(false)
+  const [addonForm, setAddonForm] = useState({ name: '', duration_minutes: 15, price: '' })
+  const [savingAddon, setSavingAddon] = useState(false)
 
   useEffect(() => { load() }, [])
 
@@ -69,12 +82,27 @@ export default function AdminServices() {
     setAddingVariant(false)
     setAddingSession(false)
     setSessionForm({ day_of_week: 1, start_time: '09:00' })
-    const [variantsRes, sessionsRes] = await Promise.all([
+    const [variantsRes, sessionsRes, staffRes, assignRes, addonsRes] = await Promise.all([
       supabase.from('service_variants').select('*').eq('service_id', service.id).eq('is_active', true).order('sort_order'),
       supabase.from('service_sessions').select('*').eq('service_id', service.id).eq('is_active', true).order('day_of_week').order('start_time'),
+      supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name'),
+      supabase.from('staff_services').select('*').eq('service_id', service.id),
+      supabase.from('service_addons').select('*').eq('service_id', service.id).eq('is_active', true).order('name'),
     ])
     setVariantsList((variantsRes.data as ServiceVariant[]) ?? [])
     setSessionsList((sessionsRes.data as ServiceSession[]) ?? [])
+    setAllStaff((staffRes.data as Staff[]) ?? [])
+    const aMap = new Map<string, Assignment>()
+    for (const row of (assignRes.data ?? [])) {
+      aMap.set(row.staff_id, {
+        commission_type: row.commission_type ?? null,
+        commission_rate: row.commission_rate != null ? String(row.commission_rate) : null,
+      })
+    }
+    setStaffAssignments(aMap)
+    setAddonsList((addonsRes.data as ServiceAddon[]) ?? [])
+    setAddingAddon(false)
+    setAddonForm({ name: '', duration_minutes: 15, price: '' })
     setModalOpen(true)
   }
 
@@ -166,6 +194,53 @@ export default function AdminServices() {
   async function handleDeleteSession(id: string) {
     await supabase.from('service_sessions').update({ is_active: false }).eq('id', id)
     setSessionsList((prev) => prev.filter((s) => s.id !== id))
+  }
+
+  async function handleToggleAssignment(staffId: string) {
+    if (!editTarget) return
+    setTogglingStaffId(staffId)
+    const isAssigned = staffAssignments.has(staffId)
+    if (isAssigned) {
+      await supabase.from('staff_services').delete().eq('service_id', editTarget.id).eq('staff_id', staffId)
+      setStaffAssignments(prev => { const n = new Map(prev); n.delete(staffId); return n })
+    } else {
+      await supabase.from('staff_services').insert({ service_id: editTarget.id, staff_id: staffId })
+      setStaffAssignments(prev => new Map(prev).set(staffId, { commission_type: null, commission_rate: null }))
+    }
+    setTogglingStaffId(null)
+  }
+
+  async function handleSaveOverride(staffId: string, type: CommissionType | null, rate: string | null) {
+    if (!editTarget || !staffAssignments.has(staffId)) return
+    const commission_type = type || null
+    const commission_rate = rate ? parseFloat(rate) : null
+    await supabase.from('staff_services')
+      .update({ commission_type, commission_rate })
+      .eq('service_id', editTarget.id).eq('staff_id', staffId)
+    setStaffAssignments(prev => new Map(prev).set(staffId, { commission_type, commission_rate: rate }))
+  }
+
+  async function handleAddAddon() {
+    if (!editTarget || !addonForm.name.trim()) return
+    setSavingAddon(true)
+    const priceInPence = Math.round(parseFloat(addonForm.price) * 100) || 0
+    const { data } = await supabase.from('service_addons').insert({
+      service_id: editTarget.id,
+      name: addonForm.name.trim(),
+      duration_minutes: addonForm.duration_minutes,
+      price: priceInPence,
+    }).select().single()
+    if (data) {
+      setAddonsList(prev => [...prev, data as ServiceAddon].sort((a, b) => a.name.localeCompare(b.name)))
+      setAddonForm({ name: '', duration_minutes: 15, price: '' })
+      setAddingAddon(false)
+    }
+    setSavingAddon(false)
+  }
+
+  async function handleDeleteAddon(id: string) {
+    await supabase.from('service_addons').update({ is_active: false }).eq('id', id)
+    setAddonsList(prev => prev.filter(a => a.id !== id))
   }
 
   if (loading) return <FullPageSpinner />
@@ -498,6 +573,161 @@ export default function AdminServices() {
                   <div className="flex gap-2">
                     <Button size="sm" loading={savingSession} onClick={handleAddSession}>Add</Button>
                     <Button size="sm" variant="secondary" onClick={() => setAddingSession(false)}>Cancel</Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Staff Assignments — only for staff-led services when editing */}
+          {editTarget && !form.is_self_service && !form.is_group_session && (
+            <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
+              <div>
+                <p className="text-sm font-semibold text-gray-700">Staff Assignments</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  If none are selected, all staff can perform this service.
+                  Checked staff can optionally have a commission override for this service.
+                </p>
+              </div>
+              {allStaff.map(member => {
+                const isAssigned = staffAssignments.has(member.id)
+                const override = staffAssignments.get(member.id)
+                const hasOverride = isAssigned && (override?.commission_type || override?.commission_rate)
+                return (
+                  <div key={member.id} className="bg-white border border-gray-200 rounded-lg px-3 py-2.5 space-y-2">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={isAssigned}
+                        disabled={togglingStaffId === member.id}
+                        onChange={() => handleToggleAssignment(member.id)}
+                        className="accent-(--color-primary)"
+                      />
+                      <span className="text-sm font-medium text-gray-900 flex-1">{member.name}</span>
+                      {isAssigned && (
+                        <span className="text-xs text-gray-400">
+                          {hasOverride
+                            ? override?.commission_type === 'hourly'
+                              ? `£${parseFloat(override.commission_rate ?? '0').toFixed(2)}/hr override`
+                              : `${override?.commission_rate ?? member.commission_rate}% override`
+                            : `Default (${member.commission_type === 'hourly' ? `£${(member.commission_rate / 100).toFixed(2)}/hr` : `${member.commission_rate}%`})`
+                          }
+                        </span>
+                      )}
+                    </div>
+                    {isAssigned && (
+                      <div className="flex items-center gap-2 pl-6">
+                        <span className="text-xs text-gray-500 w-20">Override:</span>
+                        <select
+                          value={override?.commission_type ?? ''}
+                          onChange={e => handleSaveOverride(member.id, (e.target.value as CommissionType) || null, override?.commission_rate ?? null)}
+                          className="text-xs h-8 px-2 border border-gray-200 rounded bg-white outline-none focus:ring-1 focus:ring-(--color-primary)"
+                        >
+                          <option value="">Use default</option>
+                          <option value="percentage">% of excl. VAT</option>
+                          <option value="hourly">Hourly (£/hr)</option>
+                        </select>
+                        {override?.commission_type && (
+                          <input
+                            type="number"
+                            min="0"
+                            step={override.commission_type === 'percentage' ? '0.5' : '0.01'}
+                            value={override.commission_rate ?? ''}
+                            onChange={e => setStaffAssignments(prev =>
+                              new Map(prev).set(member.id, { ...override, commission_rate: e.target.value })
+                            )}
+                            onBlur={e => handleSaveOverride(member.id, override.commission_type, e.target.value || null)}
+                            placeholder={override.commission_type === 'percentage' ? '50' : '15.00'}
+                            className="text-xs h-8 w-20 px-2 border border-gray-200 rounded outline-none focus:ring-1 focus:ring-(--color-primary)"
+                          />
+                        )}
+                        {override?.commission_type && (
+                          <span className="text-xs text-gray-400">
+                            {override.commission_type === 'percentage' ? '%' : '£/hr'}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Add-ons — only for staff-led services when editing */}
+          {editTarget && !form.is_self_service && !form.is_group_session && (
+            <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-gray-700">Add-ons</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Extra treatments customers can add at booking — e.g. cupping, dry needling.
+                  </p>
+                </div>
+                {!addingAddon && (
+                  <button
+                    type="button"
+                    onClick={() => setAddingAddon(true)}
+                    className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-full border transition-colors"
+                    style={{ borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add
+                  </button>
+                )}
+              </div>
+
+              {addonsList.length === 0 && !addingAddon && (
+                <p className="text-xs text-gray-400 text-center py-2">No add-ons yet.</p>
+              )}
+
+              {addonsList.map(addon => (
+                <div key={addon.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-2">
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-gray-900">{addon.name}</span>
+                    <span className="text-xs text-gray-500 ml-2">
+                      +{addon.duration_minutes} min · +{formatCurrency(addon.price)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteAddon(addon.id)}
+                    className="text-gray-400 hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+
+              {addingAddon && (
+                <div className="bg-white border border-gray-200 rounded-lg p-3 space-y-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <Input
+                      label="Name"
+                      value={addonForm.name}
+                      onChange={e => setAddonForm(f => ({ ...f, name: e.target.value }))}
+                      placeholder="e.g. Cupping"
+                    />
+                    <Input
+                      label="Extra duration (min)"
+                      type="number"
+                      min={5}
+                      value={addonForm.duration_minutes}
+                      onChange={e => setAddonForm(f => ({ ...f, duration_minutes: parseInt(e.target.value) || 0 }))}
+                    />
+                    <Input
+                      label="Extra price (£)"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={addonForm.price}
+                      onChange={e => setAddonForm(f => ({ ...f, price: e.target.value }))}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" loading={savingAddon} onClick={handleAddAddon}>Add</Button>
+                    <Button size="sm" variant="secondary" onClick={() => setAddingAddon(false)}>Cancel</Button>
                   </div>
                 </div>
               )}

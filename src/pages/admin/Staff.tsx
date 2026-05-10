@@ -9,7 +9,7 @@ import { Card } from '@/components/ui/Card'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { Staff, Availability, BlockedTime } from '@/types'
+import type { Staff, Availability, BlockedTime, CommissionType } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -18,9 +18,11 @@ interface StaffForm {
   name: string
   role: string
   bio: string
+  commission_type: CommissionType
+  commission_rate: string
 }
 
-const emptyForm: StaffForm = { name: '', role: 'staff', bio: '' }
+const emptyForm: StaffForm = { name: '', role: 'staff', bio: '', commission_type: 'percentage', commission_rate: '50' }
 
 interface DaySchedule {
   enabled: boolean
@@ -74,7 +76,13 @@ export default function AdminStaff() {
 
   async function openEdit(member: Staff) {
     setEditTarget(member)
-    setForm({ name: member.name, role: member.role, bio: member.bio ?? '' })
+    setForm({
+      name: member.name,
+      role: member.role,
+      bio: member.bio ?? '',
+      commission_type: member.commission_type ?? 'percentage',
+      commission_rate: String(member.commission_rate ?? 50),
+    })
     setCurrentAvatarUrl(member.avatar_url ?? null)
     setAvatarFile(null)
     setAvatarPreview(null)
@@ -149,7 +157,11 @@ export default function AdminStaff() {
       const avatarUrl = await uploadAvatar(staffId)
       const { data, error } = await supabase
         .from('staff')
-        .update({ name: form.name, role: form.role, bio: form.bio || null, avatar_url: avatarUrl })
+        .update({
+          name: form.name, role: form.role, bio: form.bio || null, avatar_url: avatarUrl,
+          commission_type: form.commission_type,
+          commission_rate: parseFloat(form.commission_rate) || 50,
+        })
         .eq('id', staffId)
         .select().single()
       if (error) { setSaveError(error.message); setSaving(false); return }
@@ -159,7 +171,12 @@ export default function AdminStaff() {
       const avatarUrl = await uploadAvatar(staffId)
       const { data, error } = await supabase
         .from('staff')
-        .insert({ id: staffId, name: form.name, role: form.role, bio: form.bio || null, avatar_url: avatarUrl, business_id: BUSINESS_ID })
+        .insert({
+          id: staffId, name: form.name, role: form.role, bio: form.bio || null,
+          avatar_url: avatarUrl, business_id: BUSINESS_ID,
+          commission_type: form.commission_type,
+          commission_rate: parseFloat(form.commission_rate) || 50,
+        })
         .select().single()
       if (error) { setSaveError(error.message); setSaving(false); return }
       if (!data) { setSaving(false); return }
@@ -375,6 +392,43 @@ export default function AdminStaff() {
             value={form.bio}
             onChange={(e) => setForm((f) => ({ ...f, bio: e.target.value }))}
           />
+
+          {/* Payroll commission */}
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-2">Payroll</p>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="text-xs text-gray-500 mb-1 block">Payment type</label>
+                <select
+                  value={form.commission_type}
+                  onChange={(e) => setForm((f) => ({ ...f, commission_type: e.target.value as CommissionType }))}
+                  className="w-full h-10 px-3 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) bg-white"
+                >
+                  <option value="percentage">% of service (excl. VAT)</option>
+                  <option value="hourly">Hourly rate (£/hr)</option>
+                </select>
+              </div>
+              <div className="w-32">
+                <label className="text-xs text-gray-500 mb-1 block">
+                  {form.commission_type === 'percentage' ? 'Percentage (%)' : 'Rate (£/hr)'}
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step={form.commission_type === 'percentage' ? '0.5' : '0.01'}
+                  max={form.commission_type === 'percentage' ? '100' : undefined}
+                  value={form.commission_rate}
+                  onChange={(e) => setForm((f) => ({ ...f, commission_rate: e.target.value }))}
+                  className="w-full h-10 px-3 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5">
+              {form.commission_type === 'percentage'
+                ? `Staff receives ${form.commission_rate || 0}% of the service price excl. VAT.`
+                : `Staff receives £${parseFloat(form.commission_rate || '0').toFixed(2)}/hr based on service duration.`}
+            </p>
+          </div>
 
           {/* Working hours */}
           <div>
