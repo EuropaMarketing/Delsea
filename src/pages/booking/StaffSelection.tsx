@@ -41,31 +41,19 @@ export default function StaffSelection() {
 
   useEffect(() => {
     async function load() {
-      const reviewsPromise = supabase
-        .from('staff_reviews')
-        .select('staff_id, rating')
-        .eq('business_id', BUSINESS_ID)
-        .eq('is_approved', true)
-        .not('staff_id', 'is', null)
-
-      if (staff.length) {
-        const { data } = await reviewsPromise
-        if (data) computeRatings(data)
-        setLoading(false)
-        return
-      }
-
-      const [staffRes, reviewsRes] = await Promise.all([
+      const [staffRes, reviewsRes, ssRes] = await Promise.all([
         supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name'),
-        reviewsPromise,
+        supabase.from('staff_reviews').select('staff_id, rating').eq('business_id', BUSINESS_ID).eq('is_approved', true).not('staff_id', 'is', null),
+        supabase.from('staff_services').select('staff_id').eq('service_id', draft.serviceId!),
       ])
-      // Filter out on_holiday staff client-side — handles both false and null correctly
-      if (staffRes.data) setStaffList((staffRes.data as Staff[]).filter((s) => !s.on_holiday))
+      const allActive = ((staffRes.data as Staff[]) ?? []).filter((s) => !s.on_holiday)
       if (reviewsRes.data) computeRatings(reviewsRes.data)
+      const assigned = (ssRes.data ?? []).map((r: { staff_id: string }) => r.staff_id)
+      setStaffList(assigned.length ? allActive.filter((s) => assigned.includes(s.id)) : allActive)
       setLoading(false)
     }
     load()
-  }, [setStaffList, staff.length])
+  }, [draft.serviceId, setStaffList])
 
   if (!draft.serviceId) {
     navigate('/book')
@@ -83,7 +71,7 @@ export default function StaffSelection() {
   }
 
   function handleNext() {
-    navigate('/datetime')
+    navigate('/addons')
   }
 
   if (loading) return <FullPageSpinner />
@@ -105,7 +93,7 @@ export default function StaffSelection() {
           onClick={() => handleSelect(null)}
           className="flex items-center gap-4"
         >
-          <div className="h-14 w-14 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+          <div className="h-14 w-14 rounded-full bg-gray-100 flex items-center justify-center shrink-0">
             <Users className="h-6 w-6 text-gray-400" />
           </div>
           <div>

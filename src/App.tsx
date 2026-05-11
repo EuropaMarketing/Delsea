@@ -18,6 +18,7 @@ import Landing from '@/pages/Landing'
 // Booking flow pages
 import ServiceSelection from '@/pages/booking/ServiceSelection'
 import StaffSelection from '@/pages/booking/StaffSelection'
+import AddonsSelection from '@/pages/booking/AddonsSelection'
 import DateTimePicker from '@/pages/booking/DateTimePicker'
 import CustomerDetails from '@/pages/booking/CustomerDetails'
 import Confirmation from '@/pages/booking/Confirmation'
@@ -68,6 +69,14 @@ function AppRoutes() {
         element={
           <BookingLayout>
             <StaffSelection />
+          </BookingLayout>
+        }
+      />
+      <Route
+        path="/addons"
+        element={
+          <BookingLayout>
+            <AddonsSelection />
           </BookingLayout>
         }
       />

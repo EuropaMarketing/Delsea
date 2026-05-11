@@ -1,10 +1,13 @@
 import { create } from 'zustand'
 import type { BookingDraft, Service, ServiceVariant, Staff } from '@/types'
 
+export type AddonSelection = { id: string; name: string; duration_minutes: number; price: number }
+
 interface BookingStore {
   draft: BookingDraft
   services: Service[]
   staff: Staff[]
+  selectedAddons: AddonSelection[]
   rescheduleBookingId: string | null
   rescheduleOriginalTime: string | null
   useToken: boolean
@@ -16,6 +19,7 @@ interface BookingStore {
   setDate: (date: Date) => void
   setTimeSlot: (slot: string) => void
   setCustomer: (fields: Partial<Pick<BookingDraft, 'customerName' | 'customerEmail' | 'customerPhone' | 'notes'>>) => void
+  setAddons: (addons: AddonSelection[]) => void
   setServices: (services: Service[]) => void
   setStaffList: (staff: Staff[]) => void
   setReschedule: (bookingId: string, originalTime: string, serviceId: string, staffId: string | null) => void
@@ -45,14 +49,17 @@ export const useBookingStore = create<BookingStore>((set) => ({
   draft: { ...emptyDraft },
   services: [],
   staff: [],
+  selectedAddons: [],
   rescheduleBookingId: null,
   rescheduleOriginalTime: null,
   useToken: false,
   tokenMembershipId: null,
   tokenPlanName: null,
 
+  setAddons: (addons) => set({ selectedAddons: addons }),
+
   setService: (serviceId) =>
-    set((s) => ({ draft: { ...s.draft, serviceId, variantId: null, variantName: null, variantDuration: null, variantPrice: null, staffId: null, date: null, timeSlot: null } })),
+    set((s) => ({ draft: { ...s.draft, serviceId, variantId: null, variantName: null, variantDuration: null, variantPrice: null, staffId: null, date: null, timeSlot: null }, selectedAddons: [] })),
 
   setVariant: (variant) =>
     set((s) => ({
@@ -99,6 +106,7 @@ export const useBookingStore = create<BookingStore>((set) => ({
 
   reset: () => set({
     draft: { ...emptyDraft },
+    selectedAddons: [],
     rescheduleBookingId: null,
     rescheduleOriginalTime: null,
     useToken: false,

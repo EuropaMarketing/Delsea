@@ -14,7 +14,7 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function Confirmation() {
   const navigate = useNavigate()
-  const { draft, services, staff, reset, useToken, tokenMembershipId, tokenPlanName } = useBookingStore()
+  const { draft, services, staff, selectedAddons, reset, useToken, tokenMembershipId, tokenPlanName } = useBookingStore()
   const { user } = useAuthStore()
   const { config: brandConfig } = useBrandStore()
 
@@ -45,9 +45,11 @@ export default function Confirmation() {
   const [slotH, slotM] = draft.timeSlot.split(':').map(Number)
   const startsAt = new Date(draft.date)
   startsAt.setHours(slotH, slotM, 0, 0)
-  const effectiveDuration = draft.variantDuration ?? service?.duration_minutes ?? 60
+  const addonExtraDuration = selectedAddons.reduce((s, a) => s + a.duration_minutes, 0)
+  const addonExtraPrice = selectedAddons.reduce((s, a) => s + a.price, 0)
+  const effectiveDuration = (draft.variantDuration ?? service?.duration_minutes ?? 60) + addonExtraDuration
   const effectiveUnitPrice = draft.variantPrice ?? service?.price ?? 0
-  const effectivePrice = effectiveUnitPrice * (draft.spotsBooked ?? 1)
+  const effectivePrice = effectiveUnitPrice * (draft.spotsBooked ?? 1) + addonExtraPrice
   const voucherAmount = voucherInfo
     ? Math.min(voucherInfo.remaining_value, Math.max(0, effectivePrice - (discountInfo?.amount ?? 0)))
     : 0
@@ -131,6 +133,17 @@ export default function Confirmation() {
 
       if (bErr) throw bErr
 
+      // Save selected add-ons
+      if (selectedAddons.length > 0) {
+        await supabase.from('booking_addons').insert(
+          selectedAddons.map((a) => ({
+            booking_id: bookingId as string,
+            addon_id: a.id,
+            price: a.price,
+          }))
+        )
+      }
+
       // Redeem membership token if selected
       if (useToken && tokenMembershipId) {
         await supabase.rpc('redeem_token', {
@@ -213,6 +226,12 @@ export default function Confirmation() {
                   {draft.variantName && <span className="text-gray-400 ml-1">({formatDuration(effectiveDuration)})</span>}
                 </dd>
               </div>
+              {selectedAddons.length > 0 && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Add-ons</dt>
+                  <dd className="text-gray-700 text-right">{selectedAddons.map((a) => a.name).join(', ')}</dd>
+                </div>
+              )}
               <div className="flex justify-between">
                 <dt className="text-gray-500">Date</dt>
                 <dd className="font-medium text-gray-900">{format(startsAt, 'EEEE d MMMM yyyy')}</dd>
@@ -293,7 +312,17 @@ export default function Confirmation() {
                   </div>
                 )}
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Total</span>
+                  <span className="text-gray-500">Service</span>
+                  <span className="text-gray-700">{formatCurrency(effectiveUnitPrice * (draft.spotsBooked ?? 1))}</span>
+                </div>
+                {selectedAddons.map((a) => (
+                  <div key={a.id} className="flex justify-between text-sm">
+                    <span className="text-gray-500">{a.name}</span>
+                    <span className="text-gray-700">+{formatCurrency(a.price)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between border-t border-gray-100 pt-2 mt-1">
+                  <span className="text-gray-500 font-medium">Total</span>
                   <span className="font-semibold text-gray-900">{formatCurrency(effectivePrice)}</span>
                 </div>
                 {discountInfo && (
