@@ -50,6 +50,8 @@ export interface Service {
   resource_id: string | null
   pre_buffer_minutes: number
   post_buffer_minutes: number
+  commission_type: CommissionType | null
+  commission_rate: number | null
   variants?: ServiceVariant[]
   addons?: ServiceAddon[]
 }

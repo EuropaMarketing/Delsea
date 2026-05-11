@@ -28,7 +28,7 @@ type CompletedBooking = {
   id: string
   starts_at: string
   ends_at: string
-  service: { name: string; price: number; duration_minutes: number } | null
+  service: { name: string; price: number; duration_minutes: number; commission_type: string | null; commission_rate: number | null } | null
   staff_id: string | null
   discount_amount: number
   gift_voucher_amount: number
@@ -47,13 +47,15 @@ function bookingTotal(b: CompletedBooking) {
 }
 
 function calcStaffPayment(b: CompletedBooking, member: Staff): number {
+  const type = (b.service?.commission_type ?? member.commission_type) as Staff['commission_type']
+  const rate = b.service?.commission_rate ?? member.commission_rate
   const total = bookingTotal(b)
   const exclVAT = Math.round(total / VAT_DIVISOR)
-  if (member.commission_type === 'hourly') {
+  if (type === 'hourly') {
     const durationHrs = (b.service?.duration_minutes ?? 60) / 60
-    return Math.round(durationHrs * member.commission_rate * 100)
+    return Math.round(durationHrs * rate * 100)
   }
-  return Math.round(exclVAT * (member.commission_rate / 100))
+  return Math.round(exclVAT * (rate / 100))
 }
 
 export default function AdminPayroll() {
@@ -77,7 +79,7 @@ export default function AdminPayroll() {
     const { periodStart, periodEnd } = getPayPeriod(month)
     supabase
       .from('bookings')
-      .select('id, staff_id, starts_at, ends_at, discount_amount, gift_voucher_amount, service:services(name, price, duration_minutes)')
+      .select('id, staff_id, starts_at, ends_at, discount_amount, gift_voucher_amount, service:services(name, price, duration_minutes, commission_type, commission_rate)')
       .eq('business_id', BUSINESS_ID)
       .eq('status', 'completed')
       .gte('starts_at', periodStart.toISOString())

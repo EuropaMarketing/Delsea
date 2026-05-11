@@ -18,6 +18,7 @@ const empty: Omit<Service, 'id' | 'business_id'> = {
   name: '', description: null, duration_minutes: 60, price: 0, category: 'General', is_active: true,
   is_self_service: false, is_group_session: false, max_capacity: null, deposit_type: 'none', deposit_value: 0,
   resource_id: null, pre_buffer_minutes: 0, post_buffer_minutes: 0,
+  commission_type: null, commission_rate: null,
 }
 
 export default function AdminServices() {
@@ -76,7 +77,7 @@ export default function AdminServices() {
 
   async function openEdit(service: Service) {
     setEditTarget(service)
-    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, is_self_service: service.is_self_service, is_group_session: service.is_group_session, max_capacity: service.max_capacity, deposit_type: service.deposit_type, deposit_value: service.deposit_value, resource_id: service.resource_id ?? null, pre_buffer_minutes: service.pre_buffer_minutes ?? 0, post_buffer_minutes: service.post_buffer_minutes ?? 0 })
+    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, is_self_service: service.is_self_service, is_group_session: service.is_group_session, max_capacity: service.max_capacity, deposit_type: service.deposit_type, deposit_value: service.deposit_value, resource_id: service.resource_id ?? null, pre_buffer_minutes: service.pre_buffer_minutes ?? 0, post_buffer_minutes: service.post_buffer_minutes ?? 0, commission_type: service.commission_type ?? null, commission_rate: service.commission_rate ?? null })
     setErrors({})
     setVariantForm({ name: '', duration_minutes: 60, price: '' })
     setAddingVariant(false)
@@ -790,6 +791,60 @@ export default function AdminServices() {
               </p>
             )}
           </div>
+
+          {/* Staff commission for this service */}
+          {!form.is_self_service && !form.is_group_session && (
+            <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
+              <div>
+                <p className="text-sm font-semibold text-gray-700">Staff Commission</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Override the default commission for this service. Leave as "Use staff default" to apply each team member's own rate.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="text-xs text-gray-500 mb-1 block">Payment type</label>
+                  <select
+                    value={form.commission_type ?? ''}
+                    onChange={e => setForm(f => ({
+                      ...f,
+                      commission_type: (e.target.value as CommissionType) || null,
+                      commission_rate: e.target.value ? (f.commission_rate ?? null) : null,
+                    }))}
+                    className="w-full h-10 px-3 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) bg-white"
+                  >
+                    <option value="">Use staff default</option>
+                    <option value="percentage">% of service (excl. VAT)</option>
+                    <option value="hourly">Hourly rate (£/hr)</option>
+                  </select>
+                </div>
+                {form.commission_type && (
+                  <div className="w-32">
+                    <label className="text-xs text-gray-500 mb-1 block">
+                      {form.commission_type === 'percentage' ? 'Percentage (%)' : 'Rate (£/hr)'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step={form.commission_type === 'percentage' ? '0.5' : '0.01'}
+                      max={form.commission_type === 'percentage' ? '100' : undefined}
+                      value={form.commission_rate ?? ''}
+                      onChange={e => setForm(f => ({ ...f, commission_rate: parseFloat(e.target.value) || null }))}
+                      placeholder={form.commission_type === 'percentage' ? '50' : '15.00'}
+                      className="w-full h-10 px-3 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                    />
+                  </div>
+                )}
+              </div>
+              {form.commission_type && form.commission_rate != null && (
+                <p className="text-xs text-gray-400">
+                  {form.commission_type === 'percentage'
+                    ? `All staff receive ${form.commission_rate}% of the service price excl. VAT for this service.`
+                    : `All staff receive £${Number(form.commission_rate).toFixed(2)}/hr for this service.`}
+                </p>
+              )}
+            </div>
+          )}
 
           {resources.length > 0 && (
             <div>
