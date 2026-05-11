@@ -51,6 +51,8 @@ export default function AdminServices() {
   const [addingAddon, setAddingAddon] = useState(false)
   const [addonForm, setAddonForm] = useState({ name: '', duration_minutes: 15, price: '' })
   const [savingAddon, setSavingAddon] = useState(false)
+  // Map of addon_id → Set of qualified staff_ids (empty set = all staff)
+  const [staffAddonAssignments, setStaffAddonAssignments] = useState<Map<string, Set<string>>>(new Map())
 
   useEffect(() => { load() }, [])
 
@@ -101,9 +103,26 @@ export default function AdminServices() {
       })
     }
     setStaffAssignments(aMap)
-    setAddonsList((addonsRes.data as ServiceAddon[]) ?? [])
+    const addons = (addonsRes.data as ServiceAddon[]) ?? []
+    setAddonsList(addons)
     setAddingAddon(false)
     setAddonForm({ name: '', duration_minutes: 15, price: '' })
+
+    // Fetch staff qualifications per add-on
+    const addonIds = addons.map(a => a.id)
+    const saMap = new Map<string, Set<string>>()
+    if (addonIds.length > 0) {
+      const { data: saData } = await supabase
+        .from('staff_addons')
+        .select('addon_id, staff_id')
+        .in('addon_id', addonIds)
+      for (const row of (saData ?? [])) {
+        const s = saMap.get(row.addon_id) ?? new Set<string>()
+        s.add(row.staff_id)
+        saMap.set(row.addon_id, s)
+      }
+    }
+    setStaffAddonAssignments(saMap)
     setModalOpen(true)
   }
 
@@ -233,6 +252,7 @@ export default function AdminServices() {
     }).select().single()
     if (data) {
       setAddonsList(prev => [...prev, data as ServiceAddon].sort((a, b) => a.name.localeCompare(b.name)))
+      setStaffAddonAssignments(prev => new Map(prev).set((data as ServiceAddon).id, new Set()))
       setAddonForm({ name: '', duration_minutes: 15, price: '' })
       setAddingAddon(false)
     }
@@ -242,6 +262,21 @@ export default function AdminServices() {
   async function handleDeleteAddon(id: string) {
     await supabase.from('service_addons').update({ is_active: false }).eq('id', id)
     setAddonsList(prev => prev.filter(a => a.id !== id))
+    setStaffAddonAssignments(prev => { const n = new Map(prev); n.delete(id); return n })
+  }
+
+  async function handleToggleAddonStaff(addonId: string, staffId: string) {
+    const current = staffAddonAssignments.get(addonId) ?? new Set<string>()
+    const isQualified = current.has(staffId)
+    if (isQualified) {
+      await supabase.from('staff_addons').delete().eq('addon_id', addonId).eq('staff_id', staffId)
+      const next = new Set(current); next.delete(staffId)
+      setStaffAddonAssignments(prev => new Map(prev).set(addonId, next))
+    } else {
+      await supabase.from('staff_addons').insert({ addon_id: addonId, staff_id: staffId })
+      const next = new Set(current); next.add(staffId)
+      setStaffAddonAssignments(prev => new Map(prev).set(addonId, next))
+    }
   }
 
   if (loading) return <FullPageSpinner />
@@ -682,23 +717,49 @@ export default function AdminServices() {
                 <p className="text-xs text-gray-400 text-center py-2">No add-ons yet.</p>
               )}
 
-              {addonsList.map(addon => (
-                <div key={addon.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-2">
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-gray-900">{addon.name}</span>
-                    <span className="text-xs text-gray-500 ml-2">
-                      +{addon.duration_minutes} min · +{formatCurrency(addon.price)}
-                    </span>
+              {addonsList.map(addon => {
+                const qualifiedIds = staffAddonAssignments.get(addon.id) ?? new Set<string>()
+                return (
+                  <div key={addon.id} className="bg-white border border-gray-200 rounded-lg px-3 py-2.5 space-y-2">
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium text-gray-900">{addon.name}</span>
+                        <span className="text-xs text-gray-500 ml-2">
+                          +{addon.duration_minutes} min · +{formatCurrency(addon.price)}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteAddon(addon.id)}
+                        className="text-gray-400 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    {allStaff.length > 0 && (
+                      <div className="border-t border-gray-100 pt-2">
+                        <p className="text-xs text-gray-400 mb-1.5">
+                          Qualified staff — {qualifiedIds.size === 0 ? 'all staff' : `${qualifiedIds.size} selected`}
+                          {qualifiedIds.size === 0 && <span className="ml-1 italic">(tick to restrict)</span>}
+                        </p>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          {allStaff.map(member => (
+                            <label key={member.id} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={qualifiedIds.has(member.id)}
+                                onChange={() => handleToggleAddonStaff(addon.id, member.id)}
+                                className="accent-(--color-primary)"
+                              />
+                              <span className="text-gray-700">{member.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteAddon(addon.id)}
-                    className="text-gray-400 hover:text-red-500 transition-colors"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
+                )
+              })}
 
               {addingAddon && (
                 <div className="bg-white border border-gray-200 rounded-lg p-3 space-y-2">
