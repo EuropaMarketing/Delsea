@@ -54,6 +54,7 @@ export default function AdminBookings() {
   const [cancelReasonOpen, setCancelReasonOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([])
+  const [activityLogOpen, setActivityLogOpen] = useState(false)
 
   useEffect(() => {
     setPage(0)
@@ -95,6 +96,7 @@ export default function AdminBookings() {
     await supabase.from('bookings').update({ status }).eq('id', bookingId)
     setBookings((prev) => prev.map((b) => (b.id === bookingId ? { ...b, status } : b)))
     if (selectedBooking?.id === bookingId) setSelectedBooking((b) => b ? { ...b, status } : b)
+    await refreshActivityLog(bookingId)
     setUpdating(false)
   }
 
@@ -106,6 +108,7 @@ export default function AdminBookings() {
     setSelectedBooking((b) => (b ? { ...b, status: 'cancelled' } : b))
     setCancelReasonOpen(false)
     setCancelReason('')
+    await refreshActivityLog(bookingId)
     setUpdating(false)
   }
 
@@ -116,6 +119,7 @@ export default function AdminBookings() {
     const resourceObj = matchedResource ? { name: matchedResource.name } : null
     setBookings((prev) => prev.map((b) => b.id === bookingId ? { ...b, resource_id: resourceId, resource: resourceObj } : b))
     if (selectedBooking?.id === bookingId) setSelectedBooking((b) => b ? { ...b, resource_id: resourceId, resource: resourceObj } : b)
+    await refreshActivityLog(bookingId)
     setAssigningResource(false)
   }
 
@@ -135,6 +139,7 @@ export default function AdminBookings() {
       setBookings((prev) => prev.map((b) => b.id === bookingId ? { ...b, gift_voucher_amount: result.voucher_amount } : b))
       setSelectedBooking((b) => b ? { ...b, gift_voucher_amount: result.voucher_amount } : b)
       setVoucherCode('')
+      await refreshActivityLog(bookingId)
     }
     setVoucherApplying(false)
   }
@@ -144,7 +149,17 @@ export default function AdminBookings() {
     await supabase.rpc('remove_gift_voucher_from_booking', { p_booking_id: bookingId })
     setBookings((prev) => prev.map((b) => b.id === bookingId ? { ...b, gift_voucher_amount: 0, gift_voucher_id: null } : b))
     setSelectedBooking((b) => b ? { ...b, gift_voucher_amount: 0, gift_voucher_id: null } : b)
+    await refreshActivityLog(bookingId)
     setVoucherRemoving(false)
+  }
+
+  async function refreshActivityLog(bookingId: string) {
+    const { data } = await supabase
+      .from('booking_activity_log')
+      .select('id, actor_type, actor_name, action, summary, reason, created_at')
+      .eq('booking_id', bookingId)
+      .order('created_at', { ascending: false })
+    if (data) setActivityLog(data as ActivityLogEntry[])
   }
 
   function openBooking(b: ExtBooking) {
@@ -157,12 +172,8 @@ export default function AdminBookings() {
     setCancelReasonOpen(false)
     setCancelReason('')
     setActivityLog([])
-    supabase
-      .from('booking_activity_log')
-      .select('id, actor_type, actor_name, action, summary, reason, created_at')
-      .eq('booking_id', b.id)
-      .order('created_at', { ascending: false })
-      .then(({ data }) => { if (data) setActivityLog(data as ActivityLogEntry[]) })
+    setActivityLogOpen(false)
+    refreshActivityLog(b.id)
   }
 
   async function handleChargeBalance(bookingId: string) {
@@ -180,6 +191,7 @@ export default function AdminBookings() {
       setChargeSuccess(true)
       setBookings((prev) => prev.map((b) => (b.id === bookingId ? { ...b, payment_status: 'paid_in_full' } : b)))
       setSelectedBooking((b) => (b ? { ...b, payment_status: 'paid_in_full' } : b))
+      await refreshActivityLog(bookingId)
     }
     setCharging(false)
   }
@@ -435,22 +447,16 @@ export default function AdminBookings() {
 
             {/* Activity log */}
             {activityLog.length > 0 && (
-              <div className="border border-gray-100 rounded-lg p-3 space-y-2">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
-                  <History className="h-3.5 w-3.5" /> Activity
-                </p>
-                <ul className="space-y-2 max-h-48 overflow-y-auto">
-                  {activityLog.map((entry) => (
-                    <li key={entry.id} className="text-xs border-l-2 border-gray-200 pl-2.5">
-                      <p className="text-gray-700">{entry.summary}</p>
-                      {entry.reason && <p className="text-gray-500 italic mt-0.5">"{entry.reason}"</p>}
-                      <p className="text-gray-400 mt-0.5">
-                        {entry.actor_name} · {format(parseISO(entry.created_at), 'd MMM HH:mm')}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              <button
+                type="button"
+                onClick={() => setActivityLogOpen(true)}
+                className="w-full flex items-center justify-between border border-gray-100 rounded-lg px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hover:bg-gray-50 transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  <History className="h-3.5 w-3.5" /> Activity ({activityLog.length})
+                </span>
+                <span className="text-gray-400 normal-case font-normal">View →</span>
+              </button>
             )}
 
             {cancelReasonOpen ? (
@@ -495,6 +501,21 @@ export default function AdminBookings() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* Activity log */}
+      <Modal open={activityLogOpen} onClose={() => setActivityLogOpen(false)} title="Activity Log" size="sm">
+        <ul className="space-y-3">
+          {activityLog.map((entry) => (
+            <li key={entry.id} className="text-sm border-l-2 border-gray-200 pl-3">
+              <p className="text-gray-800">{entry.summary}</p>
+              {entry.reason && <p className="text-gray-500 italic mt-0.5">"{entry.reason}"</p>}
+              <p className="text-xs text-gray-400 mt-0.5">
+                {entry.actor_name} · {format(parseISO(entry.created_at), 'd MMM yyyy, HH:mm')}
+              </p>
+            </li>
+          ))}
+        </ul>
       </Modal>
     </div>
   )

@@ -103,6 +103,7 @@ export default function AdminCalendar() {
   const [cancelReasonOpen, setCancelReasonOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([])
+  const [activityLogOpen, setActivityLogOpen] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const [editNotes, setEditNotes] = useState('')
   const [editSaving, setEditSaving] = useState(false)
@@ -416,6 +417,15 @@ export default function AdminCalendar() {
     setEditDiscountError('')
   }
 
+  async function refreshActivityLog(bookingId: string) {
+    const { data } = await supabase
+      .from('booking_activity_log')
+      .select('id, actor_type, actor_name, action, summary, reason, created_at')
+      .eq('booking_id', bookingId)
+      .order('created_at', { ascending: false })
+    if (data) setActivityLog(data as ActivityLogEntry[])
+  }
+
   function openBookingDetail(b: RichBooking) {
     setSelectedBooking(b)
     const remaining = (b.service?.price ?? 0) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0) - (b.deposit_charged ?? 0)
@@ -426,12 +436,8 @@ export default function AdminCalendar() {
     setCancelReasonOpen(false)
     setCancelReason('')
     setActivityLog([])
-    supabase
-      .from('booking_activity_log')
-      .select('id, actor_type, actor_name, action, summary, reason, created_at')
-      .eq('booking_id', b.id)
-      .order('created_at', { ascending: false })
-      .then(({ data }) => { if (data) setActivityLog(data as ActivityLogEntry[]) })
+    setActivityLogOpen(false)
+    refreshActivityLog(b.id)
   }
 
   async function handleCancelWithReason(bookingId: string) {
@@ -460,6 +466,7 @@ export default function AdminCalendar() {
       setChargeSuccess(true)
       setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, payment_status: 'paid_in_full' } : b))
       setSelectedBooking(prev => prev ? { ...prev, payment_status: 'paid_in_full' } : prev)
+      await refreshActivityLog(bookingId)
     }
     setCharging(false)
   }
@@ -485,6 +492,7 @@ export default function AdminCalendar() {
         ? { ...prev, notes: editNotes.trim() || null, resource_id: editResourceId, resource: resourceObj }
         : null,
       )
+      await refreshActivityLog(selectedBooking.id)
       setEditMode(false)
     }
     setEditSaving(false)
@@ -1112,22 +1120,16 @@ export default function AdminCalendar() {
 
             {/* Activity log */}
             {activityLog.length > 0 && (
-              <div className="border border-gray-100 rounded-lg p-3 space-y-2">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
-                  <History className="h-3.5 w-3.5" /> Activity
-                </p>
-                <ul className="space-y-2 max-h-48 overflow-y-auto">
-                  {activityLog.map(entry => (
-                    <li key={entry.id} className="text-xs border-l-2 border-gray-200 pl-2.5">
-                      <p className="text-gray-700">{entry.summary}</p>
-                      {entry.reason && <p className="text-gray-500 italic mt-0.5">"{entry.reason}"</p>}
-                      <p className="text-gray-400 mt-0.5">
-                        {entry.actor_name} · {format(parseISO(entry.created_at), 'd MMM HH:mm')}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              <button
+                type="button"
+                onClick={() => setActivityLogOpen(true)}
+                className="w-full flex items-center justify-between border border-gray-100 rounded-lg px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hover:bg-gray-50 transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  <History className="h-3.5 w-3.5" /> Activity ({activityLog.length})
+                </span>
+                <span className="text-gray-400 normal-case font-normal">View →</span>
+              </button>
             )}
 
             {cancelReasonOpen ? (
@@ -1275,13 +1277,28 @@ export default function AdminCalendar() {
 
             {editError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{editError}</p>}
             <div className="flex gap-2 pt-1">
-              <Button variant="secondary" onClick={() => setEditMode(false)} className="shrink-0">
+              <Button variant="secondary" onClick={() => { setEditMode(false); if (selectedBooking) refreshActivityLog(selectedBooking.id) }} className="shrink-0">
                 <X className="h-3.5 w-3.5" />
               </Button>
               <Button fullWidth onClick={handleSaveEdit} loading={editSaving}>Save Changes</Button>
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* ── Activity Log Modal ── */}
+      <Modal open={activityLogOpen} onClose={() => setActivityLogOpen(false)} title="Activity Log" size="sm">
+        <ul className="space-y-3">
+          {activityLog.map(entry => (
+            <li key={entry.id} className="text-sm border-l-2 border-gray-200 pl-3">
+              <p className="text-gray-800">{entry.summary}</p>
+              {entry.reason && <p className="text-gray-500 italic mt-0.5">"{entry.reason}"</p>}
+              <p className="text-xs text-gray-400 mt-0.5">
+                {entry.actor_name} · {format(parseISO(entry.created_at), 'd MMM yyyy, HH:mm')}
+              </p>
+            </li>
+          ))}
+        </ul>
       </Modal>
     </div>
   )
