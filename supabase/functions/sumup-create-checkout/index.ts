@@ -44,19 +44,12 @@ Deno.serve(async (req) => {
       service.deposit_type === 'percentage' ? Math.round(total * service.deposit_value / 100) :
       0
 
-    let amountPence: number
-    let paymentType: 'tokenization' | 'deposit' | 'full'
-    let purpose: 'CHECKOUT' | 'SETUP_RECURRING_PAYMENT'
-
-    if (mode === 'tokenize') {
-      amountPence = TOKENIZE_AMOUNT_PENCE
-      paymentType = 'tokenization'
-      purpose = 'SETUP_RECURRING_PAYMENT'
-    } else {
-      amountPence = depositAmount > 0 ? depositAmount : total
-      paymentType = depositAmount > 0 ? 'deposit' : 'full'
-      purpose = 'CHECKOUT'
-    }
+    // SumUp only ever saves a card during a SETUP_RECURRING_PAYMENT checkout — a normal
+    // CHECKOUT with customer_id attached does NOT save it, even mid-payment. So both modes
+    // mount the same £1 tokenize-and-refund widget; "payment" mode additionally records the
+    // real amount due so the webhook can charge it server-side the moment the token lands.
+    const targetAmount = mode === 'payment' ? (depositAmount > 0 ? depositAmount : total) : null
+    const targetType = mode === 'payment' ? (depositAmount > 0 ? 'deposit' : 'full') : null
 
     await ensureSumupCustomer(customer)
 
@@ -64,11 +57,11 @@ Deno.serve(async (req) => {
       method: 'POST',
       body: JSON.stringify({
         checkout_reference: `${booking_id}-${Date.now()}`,
-        amount: penceToMajor(amountPence),
+        amount: penceToMajor(TOKENIZE_AMOUNT_PENCE),
         currency: 'GBP',
         merchant_code: SUMUP_MERCHANT_CODE,
         customer_id: customer.id,
-        purpose,
+        purpose: 'SETUP_RECURRING_PAYMENT',
         description: `Booking ${booking_id}`,
         return_url: `${SUPABASE_URL}/functions/v1/sumup-webhook`,
       }),
@@ -83,11 +76,13 @@ Deno.serve(async (req) => {
 
     await supabase.from('payments').insert({
       booking_id,
-      type: paymentType,
-      amount: amountPence,
+      type: 'tokenization',
+      amount: TOKENIZE_AMOUNT_PENCE,
       currency: 'GBP',
       sumup_checkout_id: checkout.id,
       status: 'pending',
+      target_amount: targetAmount,
+      target_type: targetType,
     })
 
     return json({ checkout_id: checkout.id })

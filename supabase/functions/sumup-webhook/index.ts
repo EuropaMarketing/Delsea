@@ -1,7 +1,9 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
-import { corsHeaders, sumupFetch, type SumupCheckout } from '../_shared/sumup.ts'
+import { chargeWithToken, corsHeaders, sumupFetch, type SumupCheckout } from '../_shared/sumup.ts'
 
-const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+const SUMUP_MERCHANT_CODE = Deno.env.get('SUMUP_MERCHANT_CODE')!
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+const supabase = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -17,7 +19,7 @@ Deno.serve(async (req) => {
 
     const { data: payment } = await supabase
       .from('payments')
-      .select('id, booking_id, type, status')
+      .select('id, booking_id, type, status, amount, target_amount, target_type')
       .eq('sumup_checkout_id', checkoutId)
       .single()
 
@@ -36,21 +38,47 @@ Deno.serve(async (req) => {
         .single()
       if (!booking) return new Response('ok', { status: 200 })
 
-      if (checkout.payment_instrument?.token) {
-        await supabase
-          .from('customers')
-          .update({ sumup_card_token: checkout.payment_instrument.token })
-          .eq('id', booking.customer_id)
+      const token = checkout.payment_instrument?.token
+      if (token) {
+        await supabase.from('customers').update({ sumup_card_token: token }).eq('id', booking.customer_id)
       }
 
       const bookingUpdate: Record<string, unknown> = {}
+
       if (payment.type === 'tokenization') {
-        // Don't downgrade a booking that's already paid via deposit/full
-        if (booking.payment_status === 'unpaid') bookingUpdate.payment_status = 'card_saved'
+        if (token && payment.target_amount && payment.target_type) {
+          // Card just got saved — immediately charge the real amount it was tokenized for.
+          const charge = await chargeWithToken({
+            merchantCode: SUMUP_MERCHANT_CODE,
+            customerId: booking.customer_id,
+            token,
+            amountPence: payment.target_amount,
+            description: `${payment.target_type === 'deposit' ? 'Deposit' : 'Payment'} for booking ${booking.id}`,
+            returnUrl: `${SUPABASE_URL}/functions/v1/sumup-webhook`,
+            checkoutReference: `${booking.id}-${payment.target_type}-${Date.now()}`,
+          })
+          await supabase.from('payments').insert({
+            booking_id: booking.id,
+            type: payment.target_type,
+            amount: payment.target_amount,
+            currency: 'GBP',
+            sumup_checkout_id: charge.checkoutId,
+            status: charge.status === 'PAID' ? 'paid' : charge.status === 'FAILED' || charge.status === 'EXPIRED' ? 'failed' : 'pending',
+          })
+          if (charge.status === 'PAID') {
+            bookingUpdate.payment_status = payment.target_type === 'deposit' ? 'deposit_paid' : 'paid_in_full'
+            if (payment.target_type === 'deposit') bookingUpdate.deposit_charged = payment.target_amount
+          } else if (booking.payment_status === 'unpaid') {
+            // Card is saved even though the immediate charge didn't land — staff can retry via Charge Balance.
+            bookingUpdate.payment_status = 'card_saved'
+          }
+        } else if (booking.payment_status === 'unpaid') {
+          // Pure Pay-at-Venue tokenization — don't downgrade a booking already paid via deposit/full.
+          bookingUpdate.payment_status = 'card_saved'
+        }
       } else if (payment.type === 'deposit') {
         bookingUpdate.payment_status = 'deposit_paid'
-        const { data: p } = await supabase.from('payments').select('amount').eq('id', payment.id).single()
-        bookingUpdate.deposit_charged = p?.amount ?? booking.deposit_charged
+        bookingUpdate.deposit_charged = payment.amount
       } else if (payment.type === 'full') {
         bookingUpdate.payment_status = 'paid_in_full'
       } else if (payment.type === 'balance' || payment.type === 'noshow') {

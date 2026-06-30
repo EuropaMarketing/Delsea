@@ -545,6 +545,12 @@ export default function Confirmation() {
               </p>
             )}
 
+            {!useToken && paymentMethod === 'card' && paymentStep === 'review' && (hasDeposit || discountedPrice > 0) && (
+              <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-3">
+                You'll first see a temporary £1 card verification hold (refunded instantly), then your {hasDeposit ? 'deposit' : 'payment'} of {formatCurrency(hasDeposit ? depositAmount : discountedPrice)} will be taken automatically.
+              </p>
+            )}
+
             {(useToken || paymentStep === 'review') && (
               <Button fullWidth size="lg" loading={loading} onClick={handleConfirm}>
                 {useToken
