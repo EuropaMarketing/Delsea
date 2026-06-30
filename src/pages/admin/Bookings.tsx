@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { format, parseISO } from 'date-fns'
-import { Download, Gift, CheckCircle2, CreditCard } from 'lucide-react'
+import { Download, Gift, CheckCircle2, CreditCard, History } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { Textarea } from '@/components/ui/Input'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import type { Booking, BookingStatus, Resource } from '@/types'
 
@@ -19,6 +20,16 @@ type ExtBooking = Booking & {
   resource: { name: string } | null
   payment_status: string
   deposit_charged: number
+}
+
+type ActivityLogEntry = {
+  id: string
+  actor_type: string
+  actor_name: string
+  action: string
+  summary: string
+  reason: string | null
+  created_at: string
 }
 
 export default function AdminBookings() {
@@ -40,6 +51,9 @@ export default function AdminBookings() {
   const [charging, setCharging] = useState(false)
   const [chargeError, setChargeError] = useState('')
   const [chargeSuccess, setChargeSuccess] = useState(false)
+  const [cancelReasonOpen, setCancelReasonOpen] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([])
 
   useEffect(() => {
     setPage(0)
@@ -81,6 +95,17 @@ export default function AdminBookings() {
     await supabase.from('bookings').update({ status }).eq('id', bookingId)
     setBookings((prev) => prev.map((b) => (b.id === bookingId ? { ...b, status } : b)))
     if (selectedBooking?.id === bookingId) setSelectedBooking((b) => b ? { ...b, status } : b)
+    setUpdating(false)
+  }
+
+  async function handleCancelWithReason(bookingId: string) {
+    if (!cancelReason.trim()) return
+    setUpdating(true)
+    await supabase.from('bookings').update({ status: 'cancelled', cancellation_reason: cancelReason.trim() }).eq('id', bookingId)
+    setBookings((prev) => prev.map((b) => (b.id === bookingId ? { ...b, status: 'cancelled' } : b)))
+    setSelectedBooking((b) => (b ? { ...b, status: 'cancelled' } : b))
+    setCancelReasonOpen(false)
+    setCancelReason('')
     setUpdating(false)
   }
 
@@ -129,6 +154,15 @@ export default function AdminBookings() {
     setChargeType('balance')
     setChargeError('')
     setChargeSuccess(false)
+    setCancelReasonOpen(false)
+    setCancelReason('')
+    setActivityLog([])
+    supabase
+      .from('booking_activity_log')
+      .select('id, actor_type, actor_name, action, summary, reason, created_at')
+      .eq('booking_id', b.id)
+      .order('created_at', { ascending: false })
+      .then(({ data }) => { if (data) setActivityLog(data as ActivityLogEntry[]) })
   }
 
   async function handleChargeBalance(bookingId: string) {
@@ -375,7 +409,7 @@ export default function AdminBookings() {
                         <option value="noshow">No-show fee</option>
                       </select>
                       <div className="relative w-28 shrink-0">
-                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">£</span>
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-500">£</span>
                         <input
                           type="number"
                           min="0"
@@ -399,21 +433,66 @@ export default function AdminBookings() {
               )}
             </div>
 
-            <div className="flex gap-2 pt-2 border-t border-gray-100 flex-wrap">
-              {(['confirmed', 'completed', 'cancelled'] as BookingStatus[]).map((s) => (
-                <Button
-                  key={s}
-                  variant={s === 'cancelled' ? 'danger' : s === 'completed' ? 'secondary' : 'primary'}
-                  size="sm"
-                  loading={updating}
-                  disabled={selectedBooking.status === s}
-                  onClick={() => updateStatus(selectedBooking.id, s)}
-                  className="capitalize"
-                >
-                  Mark {s}
-                </Button>
-              ))}
-            </div>
+            {/* Activity log */}
+            {activityLog.length > 0 && (
+              <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+                  <History className="h-3.5 w-3.5" /> Activity
+                </p>
+                <ul className="space-y-2 max-h-48 overflow-y-auto">
+                  {activityLog.map((entry) => (
+                    <li key={entry.id} className="text-xs border-l-2 border-gray-200 pl-2.5">
+                      <p className="text-gray-700">{entry.summary}</p>
+                      {entry.reason && <p className="text-gray-500 italic mt-0.5">"{entry.reason}"</p>}
+                      <p className="text-gray-400 mt-0.5">
+                        {entry.actor_name} · {format(parseISO(entry.created_at), 'd MMM HH:mm')}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {cancelReasonOpen ? (
+              <div className="border border-red-200 bg-red-50 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-semibold text-red-800">Reason for cancellation (required)</p>
+                <Textarea
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  placeholder="e.g. Customer requested, double-booked, staff unavailable…"
+                  rows={2}
+                />
+                <div className="flex gap-2">
+                  <Button variant="secondary" size="sm" onClick={() => { setCancelReasonOpen(false); setCancelReason('') }} className="shrink-0">
+                    Back
+                  </Button>
+                  <Button fullWidth variant="danger" size="sm" loading={updating} disabled={!cancelReason.trim()} onClick={() => handleCancelWithReason(selectedBooking.id)}>
+                    Confirm Cancellation
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-2 pt-2 border-t border-gray-100 flex-wrap">
+                {(['confirmed', 'completed'] as BookingStatus[]).map((s) => (
+                  <Button
+                    key={s}
+                    variant={s === 'completed' ? 'secondary' : 'primary'}
+                    size="sm"
+                    loading={updating}
+                    disabled={selectedBooking.status === s}
+                    onClick={() => updateStatus(selectedBooking.id, s)}
+                    className="capitalize"
+                  >
+                    Mark {s}
+                  </Button>
+                ))}
+                {selectedBooking.status !== 'cancelled' && (
+                  <Button variant="danger" size="sm" onClick={() => setCancelReasonOpen(true)}>
+                    Mark cancelled
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Modal>

@@ -5,7 +5,7 @@ import {
 } from 'date-fns'
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard,
+  Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { FullPageSpinner } from '@/components/ui/Spinner'
@@ -42,6 +42,16 @@ type BlockedTime = {
   starts_at: string
   ends_at: string
   reason: string | null
+}
+
+type ActivityLogEntry = {
+  id: string
+  actor_type: string
+  actor_name: string
+  action: string
+  summary: string
+  reason: string | null
+  created_at: string
 }
 
 interface DragState {
@@ -90,6 +100,9 @@ export default function AdminCalendar() {
   // Booking detail / edit
   const [selectedBooking, setSelectedBooking] = useState<RichBooking | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
+  const [cancelReasonOpen, setCancelReasonOpen] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([])
   const [editMode, setEditMode] = useState(false)
   const [editNotes, setEditNotes] = useState('')
   const [editSaving, setEditSaving] = useState(false)
@@ -349,15 +362,10 @@ export default function AdminCalendar() {
     setSelectedBlock(null)
   }
 
-  async function handleBookingAction(bookingId: string, status: 'completed' | 'cancelled') {
-    if (status === 'cancelled' && !confirm('Cancel this booking?')) return
+  async function handleBookingAction(bookingId: string, status: 'completed') {
     setActionLoading(true)
     await supabase.from('bookings').update({ status }).eq('id', bookingId)
-    if (status === 'cancelled') {
-      setBookings(prev => prev.filter(b => b.id !== bookingId))
-    } else {
-      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status } as RichBooking : b))
-    }
+    setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status } as RichBooking : b))
     setSelectedBooking(null)
     setActionLoading(false)
   }
@@ -415,6 +423,26 @@ export default function AdminCalendar() {
     setChargeType('balance')
     setChargeError('')
     setChargeSuccess(false)
+    setCancelReasonOpen(false)
+    setCancelReason('')
+    setActivityLog([])
+    supabase
+      .from('booking_activity_log')
+      .select('id, actor_type, actor_name, action, summary, reason, created_at')
+      .eq('booking_id', b.id)
+      .order('created_at', { ascending: false })
+      .then(({ data }) => { if (data) setActivityLog(data as ActivityLogEntry[]) })
+  }
+
+  async function handleCancelWithReason(bookingId: string) {
+    if (!cancelReason.trim()) return
+    setActionLoading(true)
+    await supabase.from('bookings').update({ status: 'cancelled', cancellation_reason: cancelReason.trim() }).eq('id', bookingId)
+    setBookings(prev => prev.filter(b => b.id !== bookingId))
+    setSelectedBooking(null)
+    setCancelReasonOpen(false)
+    setCancelReason('')
+    setActionLoading(false)
   }
 
   async function handleChargeBalance(bookingId: string) {
@@ -1058,7 +1086,7 @@ export default function AdminCalendar() {
                         <option value="noshow">No-show fee</option>
                       </select>
                       <div className="relative w-24 shrink-0">
-                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">£</span>
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-500">£</span>
                         <input
                           type="number"
                           min="0"
@@ -1082,24 +1110,64 @@ export default function AdminCalendar() {
               )}
             </div>
 
-            <div className="flex gap-2 pt-2 border-t border-gray-100">
-              <Button variant="secondary" size="sm" onClick={openEditMode} className="shrink-0">
-                <Pencil className="h-3.5 w-3.5" />
-                Edit
-              </Button>
-              {(selectedBooking.status === 'confirmed' || selectedBooking.status === 'pending') && (
-                <>
-                  <Button fullWidth variant="secondary" size="sm" loading={actionLoading} onClick={() => handleBookingAction(selectedBooking.id, 'completed')} className="text-green-700! border-green-200! hover:bg-green-50!">
-                    <CheckCircle2 className="h-4 w-4" />
-                    Complete
+            {/* Activity log */}
+            {activityLog.length > 0 && (
+              <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+                  <History className="h-3.5 w-3.5" /> Activity
+                </p>
+                <ul className="space-y-2 max-h-48 overflow-y-auto">
+                  {activityLog.map(entry => (
+                    <li key={entry.id} className="text-xs border-l-2 border-gray-200 pl-2.5">
+                      <p className="text-gray-700">{entry.summary}</p>
+                      {entry.reason && <p className="text-gray-500 italic mt-0.5">"{entry.reason}"</p>}
+                      <p className="text-gray-400 mt-0.5">
+                        {entry.actor_name} · {format(parseISO(entry.created_at), 'd MMM HH:mm')}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {cancelReasonOpen ? (
+              <div className="border border-red-200 bg-red-50 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-semibold text-red-800">Reason for cancellation (required)</p>
+                <Textarea
+                  value={cancelReason}
+                  onChange={e => setCancelReason(e.target.value)}
+                  placeholder="e.g. Customer requested, double-booked, staff unavailable…"
+                  rows={2}
+                />
+                <div className="flex gap-2">
+                  <Button variant="secondary" size="sm" onClick={() => { setCancelReasonOpen(false); setCancelReason('') }} className="shrink-0">
+                    Back
                   </Button>
-                  <Button fullWidth variant="danger" size="sm" loading={actionLoading} onClick={() => handleBookingAction(selectedBooking.id, 'cancelled')}>
-                    <XCircle className="h-4 w-4" />
-                    Cancel
+                  <Button fullWidth variant="danger" size="sm" loading={actionLoading} disabled={!cancelReason.trim()} onClick={() => handleCancelWithReason(selectedBooking.id)}>
+                    Confirm Cancellation
                   </Button>
-                </>
-              )}
-            </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-2 pt-2 border-t border-gray-100">
+                <Button variant="secondary" size="sm" onClick={openEditMode} className="shrink-0">
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit
+                </Button>
+                {(selectedBooking.status === 'confirmed' || selectedBooking.status === 'pending') && (
+                  <>
+                    <Button fullWidth variant="secondary" size="sm" loading={actionLoading} onClick={() => handleBookingAction(selectedBooking.id, 'completed')} className="text-green-700! border-green-200! hover:bg-green-50!">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Complete
+                    </Button>
+                    <Button fullWidth variant="danger" size="sm" onClick={() => setCancelReasonOpen(true)}>
+                      <XCircle className="h-4 w-4" />
+                      Cancel
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
 
