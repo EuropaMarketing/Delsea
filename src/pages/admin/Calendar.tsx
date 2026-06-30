@@ -5,7 +5,7 @@ import {
 } from 'date-fns'
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus,
+  Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { FullPageSpinner } from '@/components/ui/Spinner'
@@ -28,9 +28,11 @@ const SERVICE_COLORS = [
 
 type RichBooking = Booking & {
   discount_amount: number
+  payment_status: string
+  deposit_charged: number
   service: { name: string; category: string; price: number }
   staff: { name: string } | null
-  customer: { name: string; email: string; phone: string | null }
+  customer: { name: string; email: string; phone: string | null; sumup_card_token: string | null }
   resource: { name: string } | null
 }
 
@@ -114,6 +116,13 @@ export default function AdminCalendar() {
   const [editDiscountApplied, setEditDiscountApplied] = useState(false)
   const [editDiscountAmount, setEditDiscountAmount] = useState(0)
 
+  // Charge balance (saved card)
+  const [chargeAmount, setChargeAmount] = useState('')
+  const [chargeType, setChargeType] = useState<'balance' | 'noshow'>('balance')
+  const [charging, setCharging] = useState(false)
+  const [chargeError, setChargeError] = useState('')
+  const [chargeSuccess, setChargeSuccess] = useState(false)
+
   // Cell click popover (new booking vs block time)
   const [cellPopover, setCellPopover] = useState<{ staffId: string; time: string; pageX: number; pageY: number } | null>(null)
 
@@ -172,7 +181,7 @@ export default function AdminCalendar() {
         supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name'),
         supabase
           .from('bookings')
-          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone), resource:resources(name)')
+          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token), resource:resources(name)')
           .eq('business_id', BUSINESS_ID)
           .gte('starts_at', dayStart)
           .lte('starts_at', dayEnd)
@@ -399,6 +408,34 @@ export default function AdminCalendar() {
     setEditDiscountError('')
   }
 
+  function openBookingDetail(b: RichBooking) {
+    setSelectedBooking(b)
+    const remaining = (b.service?.price ?? 0) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0) - (b.deposit_charged ?? 0)
+    setChargeAmount(remaining > 0 ? (remaining / 100).toFixed(2) : '')
+    setChargeType('balance')
+    setChargeError('')
+    setChargeSuccess(false)
+  }
+
+  async function handleChargeBalance(bookingId: string) {
+    const amountPence = Math.round(parseFloat(chargeAmount) * 100)
+    if (!amountPence || amountPence <= 0) { setChargeError('Enter a valid amount'); return }
+    setCharging(true)
+    setChargeError('')
+    setChargeSuccess(false)
+    const { data, error } = await supabase.functions.invoke('sumup-charge-balance', {
+      body: { booking_id: bookingId, amount: amountPence, type: chargeType },
+    })
+    if (error || !data?.success) {
+      setChargeError((data as { error?: string } | null)?.error ?? error?.message ?? 'Charge failed')
+    } else {
+      setChargeSuccess(true)
+      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, payment_status: 'paid_in_full' } : b))
+      setSelectedBooking(prev => prev ? { ...prev, payment_status: 'paid_in_full' } : prev)
+    }
+    setCharging(false)
+  }
+
   async function handleSaveEdit() {
     if (!selectedBooking) return
     setEditSaving(true)
@@ -554,7 +591,7 @@ export default function AdminCalendar() {
           status: 'confirmed',
           notes: nbNotes.trim() || null,
         })
-        .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone)')
+        .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token)')
         .single()
       if (bookErr) throw bookErr
       setBookings(prev => [...prev, booking as RichBooking])
@@ -743,7 +780,7 @@ export default function AdminCalendar() {
                       <div
                         key={booking.id}
                         data-booking="true"
-                        onClick={() => !isDragging && setSelectedBooking(booking)}
+                        onClick={() => !isDragging && openBookingDetail(booking)}
                         className={cn('absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden transition-shadow z-20 cursor-pointer', isDragging ? 'shadow-lg' : 'hover:brightness-95', booking.status === 'completed' && 'opacity-50')}
                         style={{ top, height, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
                         title={`${booking.customer?.name} — ${booking.service?.name}`}
@@ -782,7 +819,7 @@ export default function AdminCalendar() {
                   <div
                     key={booking.id}
                     data-booking="true"
-                    onClick={() => setSelectedBooking(booking)}
+                    onClick={() => openBookingDetail(booking)}
                     className={cn('absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden cursor-pointer z-20', booking.status === 'completed' ? 'opacity-50' : 'hover:brightness-95')}
                     style={{ top, height, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
                     title={`${booking.customer?.name} — ${booking.service?.name}`}
@@ -997,6 +1034,51 @@ export default function AdminCalendar() {
                 <dd><Badge variant={statusBadgeVariant(selectedBooking.status)} className="capitalize">{selectedBooking.status}</Badge></dd>
               </div>
             </dl>
+
+            {/* Saved card / charge balance */}
+            <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+                <CreditCard className="h-3.5 w-3.5" /> Payment
+              </p>
+              <p className="text-xs text-gray-500 capitalize">
+                Status: <span className="font-medium text-gray-700">{(selectedBooking.payment_status ?? 'unpaid').replace('_', ' ')}</span>
+              </p>
+              {selectedBooking.customer?.sumup_card_token ? (
+                selectedBooking.payment_status === 'paid_in_full' ? (
+                  <p className="text-xs text-green-700 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Paid in full</p>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <select
+                        value={chargeType}
+                        onChange={e => setChargeType(e.target.value as 'balance' | 'noshow')}
+                        className="h-9 px-2 text-xs border border-gray-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-(--color-primary)"
+                      >
+                        <option value="balance">Balance</option>
+                        <option value="noshow">No-show fee</option>
+                      </select>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={chargeAmount}
+                        onChange={e => setChargeAmount(e.target.value)}
+                        placeholder="0.00"
+                        className="flex-1 h-9 px-3 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                      />
+                      <Button size="sm" loading={charging} onClick={() => handleChargeBalance(selectedBooking.id)} disabled={!chargeAmount}>
+                        Charge
+                      </Button>
+                    </div>
+                    {chargeError && <p className="text-xs text-red-600">{chargeError}</p>}
+                    {chargeSuccess && <p className="text-xs text-green-700 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Charge successful</p>}
+                  </div>
+                )
+              ) : (
+                <p className="text-xs text-gray-400">No card on file for this customer.</p>
+              )}
+            </div>
+
             <div className="flex gap-2 pt-2 border-t border-gray-100">
               <Button variant="secondary" size="sm" onClick={openEditMode} className="shrink-0">
                 <Pencil className="h-3.5 w-3.5" />

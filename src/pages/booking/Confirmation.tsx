@@ -1,16 +1,18 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format, addMinutes } from 'date-fns'
-import { ShieldCheck, Ticket, AlertCircle, Info, Tag, Gift, CheckCircle2, X } from 'lucide-react'
+import { ShieldCheck, Ticket, AlertCircle, Info, Tag, Gift, CheckCircle2, X, CreditCard, Building2, Loader2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
 import { useAuthStore } from '@/store/authStore'
 import { useBrandStore } from '@/store/brandStore'
 import { formatCurrency, formatDuration } from '@/lib/currency'
+import { loadSumUpSdk, type SumUpCardInstance, type SumUpWidgetResponseType } from '@/lib/sumup'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
+const SUMUP_WIDGET_ID = 'sumup-card-widget'
 
 export default function Confirmation() {
   const navigate = useNavigate()
@@ -21,6 +23,14 @@ export default function Confirmation() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const confirmed = useRef(false)
+
+  // Payment
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'venue'>('card')
+  const [paymentStep, setPaymentStep] = useState<'review' | 'widget' | 'verifying'>('review')
+  const [widgetError, setWidgetError] = useState<string | null>(null)
+  const bookingIdRef = useRef<string | null>(null)
+  const navStateRef = useRef<Record<string, unknown> | null>(null)
+  const widgetInstanceRef = useRef<SumUpCardInstance | null>(null)
 
   // Discount code state
   const [discountCode, setDiscountCode] = useState('')
@@ -107,6 +117,59 @@ export default function Confirmation() {
     setVoucherApplying(false)
   }
 
+  function finishBooking() {
+    confirmed.current = true
+    const state = navStateRef.current
+    reset()
+    navigate('/booking-confirmed', { replace: true, state: state ?? undefined })
+  }
+
+  async function verifyPayment() {
+    setPaymentStep('verifying')
+    const bookingId = bookingIdRef.current
+    if (bookingId) {
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => setTimeout(r, 1000))
+        const { data } = await supabase.from('bookings').select('payment_status').eq('id', bookingId).single()
+        if (data && data.payment_status !== 'unpaid') break
+      }
+    }
+    finishBooking()
+  }
+
+  function handleWidgetResponse(type: SumUpWidgetResponseType, body: unknown) {
+    if (type === 'success') {
+      verifyPayment()
+    } else if (type === 'fail' || type === 'error') {
+      const msg = (body as { message?: string } | undefined)?.message
+      setWidgetError(msg || 'Payment failed. Please check your card details and try again.')
+    }
+  }
+
+  async function startPayment(bookingId: string, method: 'card' | 'venue') {
+    setWidgetError(null)
+    const { data, error: fnErr } = await supabase.functions.invoke('sumup-create-checkout', {
+      body: { booking_id: bookingId, mode: method === 'card' ? 'payment' : 'tokenize' },
+    })
+    if (fnErr || !data?.checkout_id) {
+      setError('Could not start payment. Please try again.')
+      setPaymentStep('review')
+      return
+    }
+    setPaymentStep('widget')
+    await loadSumUpSdk()
+    widgetInstanceRef.current?.unmount()
+    widgetInstanceRef.current = window.SumUpCard!.mount({
+      id: SUMUP_WIDGET_ID,
+      checkoutId: data.checkout_id,
+      onResponse: handleWidgetResponse,
+    })
+  }
+
+  function handleRetryPayment() {
+    if (bookingIdRef.current) startPayment(bookingIdRef.current, paymentMethod)
+  }
+
   async function handleConfirm() {
     setLoading(true)
     setError(null)
@@ -132,6 +195,7 @@ export default function Confirmation() {
         })
 
       if (bErr) throw bErr
+      bookingIdRef.current = bookingId as string
 
       // Save selected add-ons
       if (selectedAddons.length > 0) {
@@ -173,24 +237,34 @@ export default function Confirmation() {
       const ref = (bookingId as string).slice(0, 8).toUpperCase()
       const customerEmail = draft.customerEmail
       const wasGuest = !user
-      confirmed.current = true
-      reset()
-      navigate('/booking-confirmed', {
-        replace: true,
-        state: {
-          bookingRef: ref,
-          serviceName: service?.name ?? '',
-          variantName: draft.variantName ?? null,
-          serviceDuration: effectiveDuration,
-          servicePrice: discountedPrice,
-          staffName: staffMember?.name ?? null,
-          startsAt: startsAt.toISOString(),
-          endsAt: clientEndsAt.toISOString(),
-          customerEmail,
-          isNewUser: wasGuest,
-          depositAmount,
-        },
-      })
+      navStateRef.current = {
+        bookingRef: ref,
+        serviceName: service?.name ?? '',
+        variantName: draft.variantName ?? null,
+        serviceDuration: effectiveDuration,
+        servicePrice: discountedPrice,
+        staffName: staffMember?.name ?? null,
+        startsAt: startsAt.toISOString(),
+        endsAt: clientEndsAt.toISOString(),
+        customerEmail,
+        isNewUser: wasGuest,
+        depositAmount,
+        paymentMethod: useToken ? 'membership' : paymentMethod,
+      }
+
+      // Membership tokens already cover payment in full — no SumUp involvement.
+      if (useToken) {
+        finishBooking()
+        return
+      }
+
+      const amountDueNow = hasDeposit ? depositAmount : discountedPrice
+      if (paymentMethod === 'card' && amountDueNow <= 0) {
+        finishBooking()
+        return
+      }
+
+      await startPayment(bookingId as string, paymentMethod)
     } catch (err: unknown) {
       const msg = err instanceof Error
         ? err.message
@@ -436,13 +510,79 @@ export default function Confirmation() {
               </p>
             )}
 
-            <Button fullWidth size="lg" loading={loading} onClick={handleConfirm}>
-              {useToken ? 'Confirm Booking' : hasDeposit ? `Confirm & Pay ${formatCurrency(depositAmount)} Deposit` : 'Confirm Booking'}
-            </Button>
+            {!useToken && paymentStep === 'review' && (
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('card')}
+                  className={`flex flex-col items-center gap-1 py-2.5 px-2 rounded-lg border text-xs font-medium transition-colors ${
+                    paymentMethod === 'card'
+                      ? 'border-(--color-primary) bg-(--color-primary)/5 text-(--color-primary)'
+                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                  }`}
+                >
+                  <CreditCard className="h-4 w-4" />
+                  Card / Apple Pay / Google Pay
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('venue')}
+                  className={`flex flex-col items-center gap-1 py-2.5 px-2 rounded-lg border text-xs font-medium transition-colors ${
+                    paymentMethod === 'venue'
+                      ? 'border-(--color-primary) bg-(--color-primary)/5 text-(--color-primary)'
+                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                  }`}
+                >
+                  <Building2 className="h-4 w-4" />
+                  Pay at Venue
+                </button>
+              </div>
+            )}
+
+            {!useToken && paymentMethod === 'venue' && paymentStep === 'review' && (
+              <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-3">
+                We'll save your card on file with a temporary £1 hold (refunded instantly) so we can take payment when you arrive, or charge a no-show fee if you don't.
+              </p>
+            )}
+
+            {(useToken || paymentStep === 'review') && (
+              <Button fullWidth size="lg" loading={loading} onClick={handleConfirm}>
+                {useToken
+                  ? 'Confirm Booking'
+                  : paymentMethod === 'venue'
+                  ? 'Save Card & Confirm Booking'
+                  : hasDeposit
+                  ? `Pay ${formatCurrency(depositAmount)} Deposit`
+                  : discountedPrice > 0
+                  ? `Pay ${formatCurrency(discountedPrice)} Now`
+                  : 'Confirm Booking'}
+              </Button>
+            )}
+
+            {paymentStep === 'widget' && (
+              <div>
+                {widgetError && (
+                  <p className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{widgetError}</p>
+                )}
+                <div id={SUMUP_WIDGET_ID} />
+                {widgetError && (
+                  <Button fullWidth size="sm" variant="secondary" className="mt-3" onClick={handleRetryPayment}>
+                    Try Again
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {paymentStep === 'verifying' && (
+              <div className="flex items-center justify-center gap-2 py-6 text-sm text-gray-500">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Confirming your payment…
+              </div>
+            )}
 
             <div className="flex items-center justify-center gap-1.5 mt-3 text-xs text-gray-400">
               <ShieldCheck className="h-3.5 w-3.5" />
-              <span>{useToken ? 'Membership session · no payment needed' : `Secure booking${hasDeposit ? ' · Payment coming soon' : ''}`}</span>
+              <span>{useToken ? 'Membership session · no payment needed' : 'Secure payment powered by SumUp'}</span>
             </div>
           </Card>
         </div>

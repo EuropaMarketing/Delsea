@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { format, parseISO } from 'date-fns'
-import { Download, Gift, CheckCircle2 } from 'lucide-react'
+import { Download, Gift, CheckCircle2, CreditCard } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
@@ -15,8 +15,10 @@ const PAGE_SIZE = 20
 type ExtBooking = Booking & {
   service: { name: string; price: number }
   staff: { name: string } | null
-  customer: { name: string; email: string }
+  customer: { name: string; email: string; sumup_card_token: string | null }
   resource: { name: string } | null
+  payment_status: string
+  deposit_charged: number
 }
 
 export default function AdminBookings() {
@@ -33,6 +35,11 @@ export default function AdminBookings() {
   const [voucherApplying, setVoucherApplying] = useState(false)
   const [voucherRemoving, setVoucherRemoving] = useState(false)
   const [voucherError, setVoucherError] = useState('')
+  const [chargeAmount, setChargeAmount] = useState('')
+  const [chargeType, setChargeType] = useState<'balance' | 'noshow'>('balance')
+  const [charging, setCharging] = useState(false)
+  const [chargeError, setChargeError] = useState('')
+  const [chargeSuccess, setChargeSuccess] = useState(false)
 
   useEffect(() => {
     setPage(0)
@@ -54,7 +61,7 @@ export default function AdminBookings() {
     setLoading(true)
     let query = supabase
       .from('bookings')
-      .select('*, service:services(name,price), staff:staff(name), customer:customers(name,email), resource:resources(name)')
+      .select('*, service:services(name,price), staff:staff(name), customer:customers(name,email,sumup_card_token), resource:resources(name)')
       .eq('business_id', BUSINESS_ID)
       .order('starts_at', { ascending: false })
       .range(pageNum * PAGE_SIZE, (pageNum + 1) * PAGE_SIZE - 1)
@@ -113,6 +120,34 @@ export default function AdminBookings() {
     setBookings((prev) => prev.map((b) => b.id === bookingId ? { ...b, gift_voucher_amount: 0, gift_voucher_id: null } : b))
     setSelectedBooking((b) => b ? { ...b, gift_voucher_amount: 0, gift_voucher_id: null } : b)
     setVoucherRemoving(false)
+  }
+
+  function openBooking(b: ExtBooking) {
+    setSelectedBooking(b)
+    const remaining = (b.service?.price ?? 0) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0) - (b.deposit_charged ?? 0)
+    setChargeAmount(remaining > 0 ? (remaining / 100).toFixed(2) : '')
+    setChargeType('balance')
+    setChargeError('')
+    setChargeSuccess(false)
+  }
+
+  async function handleChargeBalance(bookingId: string) {
+    const amountPence = Math.round(parseFloat(chargeAmount) * 100)
+    if (!amountPence || amountPence <= 0) { setChargeError('Enter a valid amount'); return }
+    setCharging(true)
+    setChargeError('')
+    setChargeSuccess(false)
+    const { data, error } = await supabase.functions.invoke('sumup-charge-balance', {
+      body: { booking_id: bookingId, amount: amountPence, type: chargeType },
+    })
+    if (error || !data?.success) {
+      setChargeError((data as { error?: string } | null)?.error ?? error?.message ?? 'Charge failed')
+    } else {
+      setChargeSuccess(true)
+      setBookings((prev) => prev.map((b) => (b.id === bookingId ? { ...b, payment_status: 'paid_in_full' } : b)))
+      setSelectedBooking((b) => (b ? { ...b, payment_status: 'paid_in_full' } : b))
+    }
+    setCharging(false)
   }
 
   function exportCSV() {
@@ -207,7 +242,7 @@ export default function AdminBookings() {
                   </td>
                   <td className="px-4 py-3">
                     <button
-                      onClick={() => setSelectedBooking(b)}
+                      onClick={() => openBooking(b)}
                       className="text-xs font-medium text-[var(--color-primary)] hover:underline"
                     >
                       View
@@ -315,6 +350,50 @@ export default function AdminBookings() {
                 </div>
               )}
               {voucherError && <p className="text-xs text-red-600">{voucherError}</p>}
+            </div>
+
+            {/* Saved card / charge balance */}
+            <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+                <CreditCard className="h-3.5 w-3.5" /> Payment
+              </p>
+              <p className="text-xs text-gray-500 capitalize">
+                Status: <span className="font-medium text-gray-700">{(selectedBooking.payment_status ?? 'unpaid').replace('_', ' ')}</span>
+              </p>
+              {selectedBooking.customer?.sumup_card_token ? (
+                selectedBooking.payment_status === 'paid_in_full' ? (
+                  <p className="text-xs text-green-700 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Paid in full</p>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <select
+                        value={chargeType}
+                        onChange={(e) => setChargeType(e.target.value as 'balance' | 'noshow')}
+                        className="h-9 px-2 text-xs border border-gray-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-(--color-primary)"
+                      >
+                        <option value="balance">Balance</option>
+                        <option value="noshow">No-show fee</option>
+                      </select>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={chargeAmount}
+                        onChange={(e) => setChargeAmount(e.target.value)}
+                        placeholder="0.00"
+                        className="flex-1 h-9 px-3 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                      />
+                      <Button size="sm" loading={charging} onClick={() => handleChargeBalance(selectedBooking.id)} disabled={!chargeAmount}>
+                        Charge Card
+                      </Button>
+                    </div>
+                    {chargeError && <p className="text-xs text-red-600">{chargeError}</p>}
+                    {chargeSuccess && <p className="text-xs text-green-700 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Charge successful</p>}
+                  </div>
+                )
+              ) : (
+                <p className="text-xs text-gray-400">No card on file for this customer.</p>
+              )}
             </div>
 
             <div className="flex gap-2 pt-2 border-t border-gray-100 flex-wrap">

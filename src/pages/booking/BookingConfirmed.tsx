@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { format } from 'date-fns'
-import { CheckCircle2, Calendar, CalendarClock, User, Clock, PoundSterling } from 'lucide-react'
+import { CheckCircle2, Calendar, CalendarClock, User, Clock, PoundSterling, CreditCard, Building2, Ticket } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBrandStore } from '@/store/brandStore'
 import { Button } from '@/components/ui/Button'
@@ -20,6 +20,8 @@ interface ConfirmedState {
   endsAt: string
   customerEmail: string
   isNewUser: boolean
+  depositAmount?: number
+  paymentMethod?: 'membership' | 'card' | 'venue'
 }
 
 function CreateAccountForm({ email }: { email: string }) {
@@ -185,6 +187,33 @@ export default function BookingConfirmed() {
             <div>
               <p className="text-xs text-gray-400">Price</p>
               <p className="font-semibold text-gray-900 text-sm">{formatCurrency(s.servicePrice)}</p>
+            </div>
+          </li>
+          <li className="flex items-start gap-3">
+            {s.paymentMethod === 'venue' ? (
+              <Building2 className="h-4 w-4 mt-0.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
+            ) : s.paymentMethod === 'membership' ? (
+              <Ticket className="h-4 w-4 mt-0.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
+            ) : (
+              <CreditCard className="h-4 w-4 mt-0.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
+            )}
+            <div>
+              <p className="text-xs text-gray-400">Payment</p>
+              {s.paymentMethod === 'venue' ? (
+                <>
+                  <p className="font-semibold text-gray-900 text-sm">Pay at venue</p>
+                  <p className="text-xs text-gray-500">Card saved on file · charged at your appointment</p>
+                </>
+              ) : s.paymentMethod === 'membership' ? (
+                <p className="font-semibold text-gray-900 text-sm">Paid via membership</p>
+              ) : s.depositAmount ? (
+                <>
+                  <p className="font-semibold text-gray-900 text-sm">{formatCurrency(s.depositAmount)} deposit paid</p>
+                  <p className="text-xs text-gray-500">Balance of {formatCurrency(s.servicePrice - s.depositAmount)} due at your appointment</p>
+                </>
+              ) : (
+                <p className="font-semibold text-gray-900 text-sm">Paid in full</p>
+              )}
             </div>
           </li>
         </ul>
