@@ -52,6 +52,7 @@ export interface Service {
   post_buffer_minutes: number
   commission_type: CommissionType | null
   commission_rate: number | null
+  is_event_only: boolean
   variants?: ServiceVariant[]
   addons?: ServiceAddon[]
 }

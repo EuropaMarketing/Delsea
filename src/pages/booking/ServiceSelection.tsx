@@ -36,6 +36,7 @@ export default function ServiceSelection() {
         .select('*, variants:service_variants(id, name, duration_minutes, price, sort_order, is_active)')
         .eq('business_id', BUSINESS_ID)
         .eq('is_active', true)
+        .eq('is_event_only', false)
         .order('category')
         .order('name')
       if (data) setServices(data as Service[])

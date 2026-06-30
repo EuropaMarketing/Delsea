@@ -20,6 +20,7 @@ type EventRow = {
   max_capacity_override: number | null
   service: Service
   staff: Staff | null
+  resource: { name: string } | null
 }
 
 function combineDateTime(dateStr: string, timeStr: string): Date {
@@ -47,7 +48,7 @@ export default function Events() {
     const today = format(new Date(), 'yyyy-MM-dd')
     const { data } = await supabase
       .from('service_sessions')
-      .select('id, event_date, start_time, max_capacity_override, service:services(*), staff:staff(*)')
+      .select('id, event_date, start_time, max_capacity_override, resource:resources(name), service:services(*), staff:staff(*)')
       .eq('business_id', BUSINESS_ID)
       .eq('is_active', true)
       .not('event_date', 'is', null)
@@ -154,7 +155,11 @@ export default function Events() {
                       <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{e.start_time.slice(0, 5)}</span>
                       <span className="flex items-center gap-1"><Users className="h-3 w-3" />{remaining > 0 ? `${remaining} left` : 'Full'}</span>
                     </div>
-                    {e.staff && <p className="text-xs text-gray-400 mt-1">with {e.staff.name}</p>}
+                    {(e.staff || e.resource) && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        {e.staff ? `with ${e.staff.name}` : ''}{e.staff && e.resource ? ' · ' : ''}{e.resource ? e.resource.name : ''}
+                      </p>
+                    )}
                     <p className="text-sm font-bold text-gray-900 mt-1">{formatCurrency(e.service.price)}</p>
                   </button>
                 )
@@ -177,9 +182,11 @@ export default function Events() {
                 <p className="text-sm text-gray-500 mt-0.5">
                   {format(startsAt, 'EEEE d MMMM yyyy')} · {format(startsAt, 'HH:mm')} – {format(endsAt, 'HH:mm')}
                 </p>
-                {activeEvent.staff && (
-                  <p className="flex items-center gap-1 text-xs text-gray-400 mt-1">
-                    <User className="h-3 w-3" /> with {activeEvent.staff.name}
+                {(activeEvent.staff || activeEvent.resource) && (
+                  <p className="flex items-center gap-2 text-xs text-gray-400 mt-1">
+                    {activeEvent.staff && <><User className="h-3 w-3" /> {activeEvent.staff.name}</>}
+                    {activeEvent.staff && activeEvent.resource && <span>·</span>}
+                    {activeEvent.resource && <>{activeEvent.resource.name}</>}
                   </p>
                 )}
               </div>
