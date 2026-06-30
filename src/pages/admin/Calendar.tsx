@@ -1041,7 +1041,7 @@ export default function AdminCalendar() {
                 <CreditCard className="h-3.5 w-3.5" /> Payment
               </p>
               <p className="text-xs text-gray-500 capitalize">
-                Status: <span className="font-medium text-gray-700">{(selectedBooking.payment_status ?? 'unpaid').replace('_', ' ')}</span>
+                Status: <span className="font-medium text-gray-700">{(selectedBooking.payment_status ?? 'unpaid').replaceAll('_', ' ')}</span>
               </p>
               {selectedBooking.customer?.sumup_card_token ? (
                 selectedBooking.payment_status === 'paid_in_full' ? (
@@ -1052,24 +1052,27 @@ export default function AdminCalendar() {
                       <select
                         value={chargeType}
                         onChange={e => setChargeType(e.target.value as 'balance' | 'noshow')}
-                        className="h-9 px-2 text-xs border border-gray-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-(--color-primary)"
+                        className="h-9 flex-1 px-2 text-xs border border-gray-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-(--color-primary)"
                       >
                         <option value="balance">Balance</option>
                         <option value="noshow">No-show fee</option>
                       </select>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={chargeAmount}
-                        onChange={e => setChargeAmount(e.target.value)}
-                        placeholder="0.00"
-                        className="flex-1 h-9 px-3 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
-                      />
-                      <Button size="sm" loading={charging} onClick={() => handleChargeBalance(selectedBooking.id)} disabled={!chargeAmount}>
-                        Charge
-                      </Button>
+                      <div className="relative w-24 shrink-0">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">£</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={chargeAmount}
+                          onChange={e => setChargeAmount(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full h-9 pl-5 pr-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                        />
+                      </div>
                     </div>
+                    <Button fullWidth size="sm" loading={charging} onClick={() => handleChargeBalance(selectedBooking.id)} disabled={!chargeAmount}>
+                      Charge Card
+                    </Button>
                     {chargeError && <p className="text-xs text-red-600">{chargeError}</p>}
                     {chargeSuccess && <p className="text-xs text-green-700 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Charge successful</p>}
                   </div>
