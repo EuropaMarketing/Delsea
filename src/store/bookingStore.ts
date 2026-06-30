@@ -13,6 +13,7 @@ interface BookingStore {
   useToken: boolean
   tokenMembershipId: string | null
   tokenPlanName: string | null
+  eventSessionId: string | null
   setService: (serviceId: string) => void
   setVariant: (variant: ServiceVariant | null) => void
   setStaff: (staffId: string | null) => void
@@ -26,6 +27,7 @@ interface BookingStore {
   clearReschedule: () => void
   setSpotsBooked: (n: number) => void
   setTokenChoice: (use: boolean, membershipId: string | null, planName: string | null) => void
+  setEventBooking: (params: { serviceId: string; staffId: string | null; date: Date; timeSlot: string; spotsBooked: number; sessionId: string }) => void
   reset: () => void
 }
 
@@ -55,11 +57,12 @@ export const useBookingStore = create<BookingStore>((set) => ({
   useToken: false,
   tokenMembershipId: null,
   tokenPlanName: null,
+  eventSessionId: null,
 
   setAddons: (addons) => set({ selectedAddons: addons }),
 
   setService: (serviceId) =>
-    set((s) => ({ draft: { ...s.draft, serviceId, variantId: null, variantName: null, variantDuration: null, variantPrice: null, staffId: null, date: null, timeSlot: null }, selectedAddons: [] })),
+    set((s) => ({ draft: { ...s.draft, serviceId, variantId: null, variantName: null, variantDuration: null, variantPrice: null, staffId: null, date: null, timeSlot: null }, selectedAddons: [], eventSessionId: null })),
 
   setVariant: (variant) =>
     set((s) => ({
@@ -104,6 +107,17 @@ export const useBookingStore = create<BookingStore>((set) => ({
   setTokenChoice: (use, membershipId, planName) =>
     set({ useToken: use, tokenMembershipId: membershipId, tokenPlanName: planName }),
 
+  setEventBooking: ({ serviceId, staffId, date, timeSlot, spotsBooked, sessionId }) =>
+    set((s) => ({
+      draft: {
+        ...s.draft,
+        serviceId, staffId, date, timeSlot, spotsBooked,
+        variantId: null, variantName: null, variantDuration: null, variantPrice: null,
+      },
+      selectedAddons: [],
+      eventSessionId: sessionId,
+    })),
+
   reset: () => set({
     draft: { ...emptyDraft },
     selectedAddons: [],
@@ -112,5 +126,6 @@ export const useBookingStore = create<BookingStore>((set) => ({
     useToken: false,
     tokenMembershipId: null,
     tokenPlanName: null,
+    eventSessionId: null,
   }),
 }))

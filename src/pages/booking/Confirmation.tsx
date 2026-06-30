@@ -16,7 +16,7 @@ const SUMUP_WIDGET_ID = 'sumup-card-widget'
 
 export default function Confirmation() {
   const navigate = useNavigate()
-  const { draft, services, staff, selectedAddons, reset, useToken, tokenMembershipId, tokenPlanName } = useBookingStore()
+  const { draft, services, staff, selectedAddons, reset, useToken, tokenMembershipId, tokenPlanName, eventSessionId } = useBookingStore()
   const { user } = useAuthStore()
   const { config: brandConfig } = useBrandStore()
 
@@ -192,6 +192,7 @@ export default function Confirmation() {
           p_ends_at: endsAt.toISOString(),
           p_notes: draft.notes || null,
           p_spots_booked: draft.spotsBooked ?? 1,
+          p_session_id: eventSessionId,
         })
 
       if (bErr) throw bErr

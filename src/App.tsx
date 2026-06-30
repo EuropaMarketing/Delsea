@@ -28,6 +28,7 @@ import RescheduleConfirm from '@/pages/booking/RescheduleConfirm'
 import MembershipPlans from '@/pages/booking/MembershipPlans'
 import MembershipConfirmed from '@/pages/booking/MembershipConfirmed'
 import About from '@/pages/booking/About'
+import Events from '@/pages/booking/Events'
 
 // Admin pages
 import ResetPassword from '@/pages/ResetPassword'
@@ -46,6 +47,7 @@ import AdminReviews from '@/pages/admin/Reviews'
 import AdminDiscounts from '@/pages/admin/Discounts'
 import AdminGiftVouchers from '@/pages/admin/GiftVouchers'
 import AdminResources from '@/pages/admin/Resources'
+import AdminEvents from '@/pages/admin/Events'
 
 function AppRoutes() {
   useAuthListener()
@@ -149,6 +151,14 @@ function AppRoutes() {
         element={
           <BookingLayout>
             <About />
+          </BookingLayout>
+        }
+      />
+      <Route
+        path="/events"
+        element={
+          <BookingLayout>
+            <Events />
           </BookingLayout>
         }
       />
@@ -286,6 +296,16 @@ function AppRoutes() {
           <ProtectedRoute adminOnly>
             <AdminLayout>
               <AdminResources />
+            </AdminLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/events"
+        element={
+          <ProtectedRoute adminOnly>
+            <AdminLayout>
+              <AdminEvents />
             </AdminLayout>
           </ProtectedRoute>
         }

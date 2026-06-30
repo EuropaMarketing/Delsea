@@ -38,6 +38,9 @@ export function BookingLayout({ children }: { children: React.ReactNode }) {
             <Link to="/about" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
               About
             </Link>
+            <Link to="/events" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
+              Events
+            </Link>
             <Link to="/memberships" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
               Memberships
             </Link>
