@@ -1,18 +1,16 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format, addMinutes } from 'date-fns'
-import { ShieldCheck, Ticket, AlertCircle, Info, Tag, Gift, CheckCircle2, X, CreditCard, Building2, Loader2 } from 'lucide-react'
+import { ShieldCheck, Ticket, AlertCircle, Info, Tag, Gift, CheckCircle2, X, CreditCard, Building2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
 import { useAuthStore } from '@/store/authStore'
 import { useBrandStore } from '@/store/brandStore'
 import { formatCurrency, formatDuration } from '@/lib/currency'
-import { loadSumUpSdk, type SumUpCardInstance, type SumUpWidgetResponseType } from '@/lib/sumup'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
-const SUMUP_WIDGET_ID = 'sumup-card-widget'
 
 export default function Confirmation() {
   const navigate = useNavigate()
@@ -22,15 +20,8 @@ export default function Confirmation() {
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const confirmed = useRef(false)
-
-  // Payment
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'venue'>('card')
-  const [paymentStep, setPaymentStep] = useState<'review' | 'widget' | 'verifying'>('review')
-  const [widgetError, setWidgetError] = useState<string | null>(null)
-  const bookingIdRef = useRef<string | null>(null)
-  const navStateRef = useRef<Record<string, unknown> | null>(null)
-  const widgetInstanceRef = useRef<SumUpCardInstance | null>(null)
+  const confirmed = useRef(false)
 
   // Discount code state
   const [discountCode, setDiscountCode] = useState('')
@@ -64,8 +55,6 @@ export default function Confirmation() {
     ? Math.min(voucherInfo.remaining_value, Math.max(0, effectivePrice - (discountInfo?.amount ?? 0)))
     : 0
   const discountedPrice = effectivePrice - (discountInfo?.amount ?? 0) - voucherAmount
-  // endsAt includes post-buffer so the calendar blocks clean-down time;
-  // the client-visible end time uses effectiveDuration only.
   const postBuffer = service?.post_buffer_minutes ?? 0
   const endsAt = addMinutes(startsAt, effectiveDuration + postBuffer)
   const clientEndsAt = addMinutes(startsAt, effectiveDuration)
@@ -117,59 +106,6 @@ export default function Confirmation() {
     setVoucherApplying(false)
   }
 
-  function finishBooking() {
-    confirmed.current = true
-    const state = navStateRef.current
-    reset()
-    navigate('/booking-confirmed', { replace: true, state: state ?? undefined })
-  }
-
-  async function verifyPayment() {
-    setPaymentStep('verifying')
-    const bookingId = bookingIdRef.current
-    if (bookingId) {
-      for (let i = 0; i < 8; i++) {
-        await new Promise((r) => setTimeout(r, 1000))
-        const { data } = await supabase.from('bookings').select('payment_status').eq('id', bookingId).single()
-        if (data && data.payment_status !== 'unpaid') break
-      }
-    }
-    finishBooking()
-  }
-
-  function handleWidgetResponse(type: SumUpWidgetResponseType, body: unknown) {
-    if (type === 'success') {
-      verifyPayment()
-    } else if (type === 'fail' || type === 'error') {
-      const msg = (body as { message?: string } | undefined)?.message
-      setWidgetError(msg || 'Payment failed. Please check your card details and try again.')
-    }
-  }
-
-  async function startPayment(bookingId: string, method: 'card' | 'venue') {
-    setWidgetError(null)
-    const { data, error: fnErr } = await supabase.functions.invoke('sumup-create-checkout', {
-      body: { booking_id: bookingId, mode: method === 'card' ? 'payment' : 'tokenize' },
-    })
-    if (fnErr || !data?.checkout_id) {
-      setError('Could not start payment. Please try again.')
-      setPaymentStep('review')
-      return
-    }
-    setPaymentStep('widget')
-    await loadSumUpSdk()
-    widgetInstanceRef.current?.unmount()
-    widgetInstanceRef.current = window.SumUpCard!.mount({
-      id: SUMUP_WIDGET_ID,
-      checkoutId: data.checkout_id,
-      onResponse: handleWidgetResponse,
-    })
-  }
-
-  function handleRetryPayment() {
-    if (bookingIdRef.current) startPayment(bookingIdRef.current, paymentMethod)
-  }
-
   async function handleConfirm() {
     setLoading(true)
     setError(null)
@@ -196,9 +132,7 @@ export default function Confirmation() {
         })
 
       if (bErr) throw bErr
-      bookingIdRef.current = bookingId as string
 
-      // Save selected add-ons
       if (selectedAddons.length > 0) {
         await supabase.from('booking_addons').insert(
           selectedAddons.map((a) => ({
@@ -209,7 +143,6 @@ export default function Confirmation() {
         )
       }
 
-      // Redeem membership token if selected
       if (useToken && tokenMembershipId) {
         await supabase.rpc('redeem_token', {
           p_booking_id: bookingId as string,
@@ -217,7 +150,6 @@ export default function Confirmation() {
         })
       }
 
-      // Apply discount code if entered
       if (discountInfo && discountCode.trim()) {
         await supabase.rpc('apply_discount_to_booking', {
           p_booking_id: bookingId as string,
@@ -226,7 +158,6 @@ export default function Confirmation() {
         })
       }
 
-      // Apply gift voucher if entered
       if (voucherInfo && voucherCode.trim()) {
         await supabase.rpc('apply_gift_voucher_to_booking', {
           p_booking_id: bookingId as string,
@@ -236,9 +167,8 @@ export default function Confirmation() {
       }
 
       const ref = (bookingId as string).slice(0, 8).toUpperCase()
-      const customerEmail = draft.customerEmail
       const wasGuest = !user
-      navStateRef.current = {
+      const confirmedState = {
         bookingRef: ref,
         serviceName: service?.name ?? '',
         variantName: draft.variantName ?? null,
@@ -247,25 +177,43 @@ export default function Confirmation() {
         staffName: staffMember?.name ?? null,
         startsAt: startsAt.toISOString(),
         endsAt: clientEndsAt.toISOString(),
-        customerEmail,
+        customerEmail: draft.customerEmail,
         isNewUser: wasGuest,
         depositAmount,
         paymentMethod: useToken ? 'membership' : paymentMethod,
       }
 
-      // Membership tokens already cover payment in full — no SumUp involvement.
+      // Membership covers cost — no payment page needed.
       if (useToken) {
-        finishBooking()
+        confirmed.current = true
+        reset()
+        navigate('/booking-confirmed', { replace: true, state: confirmedState })
         return
       }
 
+      // Fully covered by discount/voucher — confirm immediately.
       const amountDueNow = hasDeposit ? depositAmount : discountedPrice
       if (paymentMethod === 'card' && amountDueNow <= 0) {
-        finishBooking()
+        confirmed.current = true
+        reset()
+        navigate('/booking-confirmed', { replace: true, state: confirmedState })
         return
       }
 
-      await startPayment(bookingId as string, paymentMethod)
+      // Hand off to dedicated payment screen.
+      navigate('/payment', {
+        state: {
+          bookingId: bookingId as string,
+          paymentMethod,
+          serviceName: service?.name ?? '',
+          startsAt: startsAt.toISOString(),
+          staffName: staffMember?.name ?? null,
+          amountDue: hasDeposit ? depositAmount : discountedPrice,
+          isDeposit: hasDeposit,
+          balanceDue: hasDeposit ? balanceDue : 0,
+          confirmedState,
+        },
+      })
     } catch (err: unknown) {
       const msg = err instanceof Error
         ? err.message
@@ -286,7 +234,6 @@ export default function Confirmation() {
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
         {/* Left — order summary */}
         <div className="space-y-4">
-          {/* Service & appointment */}
           <Card padding="md">
             <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Appointment</h2>
             <dl className="space-y-2.5 text-sm">
@@ -332,7 +279,6 @@ export default function Confirmation() {
             </dl>
           </Card>
 
-          {/* Customer */}
           <Card padding="md">
             <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Your Details</h2>
             <dl className="space-y-2.5 text-sm">
@@ -442,7 +388,7 @@ export default function Confirmation() {
               </div>
             )}
 
-            {/* Discount code + gift voucher entry */}
+            {/* Discount + voucher inputs */}
             {!useToken && (
               <>
                 <div className="border-t border-gray-100 pt-3 mb-3">
@@ -490,8 +436,8 @@ export default function Confirmation() {
                       <input
                         type="text"
                         value={voucherCode}
-                        onChange={(e) => { setVoucherCode(e.target.value.toUpperCase()); setVoucherError(null) }}
-                        onKeyDown={(e) => e.key === 'Enter' && handleApplyVoucher()}
+                        onChange={e => { setVoucherCode(e.target.value.toUpperCase()); setVoucherError(null) }}
+                        onKeyDown={e => e.key === 'Enter' && handleApplyVoucher()}
                         placeholder="GIFT VOUCHER"
                         className="flex-1 h-9 px-3 text-xs font-mono border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) uppercase placeholder:normal-case placeholder:font-sans"
                       />
@@ -505,87 +451,44 @@ export default function Confirmation() {
               </>
             )}
 
+            {/* Payment method selector */}
+            {!useToken && (
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                {(['card', 'venue'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setPaymentMethod(m)}
+                    className={`flex flex-col items-center gap-1 py-2.5 px-2 rounded-lg border text-xs font-medium transition-colors ${
+                      paymentMethod === m
+                        ? 'border-(--color-primary) bg-(--color-primary)/5 text-(--color-primary)'
+                        : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                    }`}
+                  >
+                    {m === 'card' ? <CreditCard className="h-4 w-4" /> : <Building2 className="h-4 w-4" />}
+                    {m === 'card' ? 'Card / Apple Pay / Google Pay' : 'Pay at Venue'}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {error && (
               <p className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                 {error}
               </p>
             )}
 
-            {!useToken && paymentStep === 'review' && (
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('card')}
-                  className={`flex flex-col items-center gap-1 py-2.5 px-2 rounded-lg border text-xs font-medium transition-colors ${
-                    paymentMethod === 'card'
-                      ? 'border-(--color-primary) bg-(--color-primary)/5 text-(--color-primary)'
-                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                  }`}
-                >
-                  <CreditCard className="h-4 w-4" />
-                  Card / Apple Pay / Google Pay
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('venue')}
-                  className={`flex flex-col items-center gap-1 py-2.5 px-2 rounded-lg border text-xs font-medium transition-colors ${
-                    paymentMethod === 'venue'
-                      ? 'border-(--color-primary) bg-(--color-primary)/5 text-(--color-primary)'
-                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                  }`}
-                >
-                  <Building2 className="h-4 w-4" />
-                  Pay at Venue
-                </button>
-              </div>
-            )}
-
-            {!useToken && paymentMethod === 'venue' && paymentStep === 'review' && (
-              <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-3">
-                We'll save your card on file with a temporary £1 hold (refunded instantly) so we can take payment when you arrive, or charge a no-show fee if you don't.
-              </p>
-            )}
-
-            {!useToken && paymentMethod === 'card' && paymentStep === 'review' && (hasDeposit || discountedPrice > 0) && (
-              <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-3">
-                You'll first see a temporary £1 card verification hold (refunded instantly), then your {hasDeposit ? 'deposit' : 'payment'} of {formatCurrency(hasDeposit ? depositAmount : discountedPrice)} will be taken automatically.
-              </p>
-            )}
-
-            {(useToken || paymentStep === 'review') && (
-              <Button fullWidth size="lg" loading={loading} onClick={handleConfirm}>
-                {useToken
-                  ? 'Confirm Booking'
-                  : paymentMethod === 'venue'
-                  ? 'Save Card & Confirm Booking'
-                  : hasDeposit
-                  ? `Pay ${formatCurrency(depositAmount)} Deposit`
-                  : discountedPrice > 0
-                  ? `Pay ${formatCurrency(discountedPrice)} Now`
-                  : 'Confirm Booking'}
-              </Button>
-            )}
-
-            {paymentStep === 'widget' && (
-              <div>
-                {widgetError && (
-                  <p className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{widgetError}</p>
-                )}
-                <div id={SUMUP_WIDGET_ID} />
-                {widgetError && (
-                  <Button fullWidth size="sm" variant="secondary" className="mt-3" onClick={handleRetryPayment}>
-                    Try Again
-                  </Button>
-                )}
-              </div>
-            )}
-
-            {paymentStep === 'verifying' && (
-              <div className="flex items-center justify-center gap-2 py-6 text-sm text-gray-500">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Confirming your payment…
-              </div>
-            )}
+            <Button fullWidth size="lg" loading={loading} onClick={handleConfirm}>
+              {useToken
+                ? 'Confirm Booking'
+                : paymentMethod === 'venue'
+                ? 'Continue to Card Verification →'
+                : hasDeposit
+                ? `Continue to Payment · ${formatCurrency(depositAmount)} →`
+                : discountedPrice > 0
+                ? `Continue to Payment · ${formatCurrency(discountedPrice)} →`
+                : 'Confirm Booking'}
+            </Button>
 
             <div className="flex items-center justify-center gap-1.5 mt-3 text-xs text-gray-400">
               <ShieldCheck className="h-3.5 w-3.5" />

@@ -29,6 +29,7 @@ import MembershipPlans from '@/pages/booking/MembershipPlans'
 import MembershipConfirmed from '@/pages/booking/MembershipConfirmed'
 import About from '@/pages/booking/About'
 import Events from '@/pages/booking/Events'
+import Payment from '@/pages/booking/Payment'
 
 // Admin pages
 import ResetPassword from '@/pages/ResetPassword'
@@ -159,6 +160,14 @@ function AppRoutes() {
         element={
           <BookingLayout>
             <Events />
+          </BookingLayout>
+        }
+      />
+      <Route
+        path="/payment"
+        element={
+          <BookingLayout>
+            <Payment />
           </BookingLayout>
         }
       />
