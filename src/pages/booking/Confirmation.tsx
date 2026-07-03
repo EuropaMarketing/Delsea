@@ -20,6 +20,7 @@ export default function Confirmation() {
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [slotConflict, setSlotConflict] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'venue'>('card')
   const confirmed = useRef(false)
 
@@ -218,6 +219,8 @@ export default function Confirmation() {
       const msg = err instanceof Error
         ? err.message
         : (err as { message?: string })?.message ?? 'Something went wrong. Please try again.'
+      const isSlotConflict = msg.toLowerCase().includes('resource') || msg.toLowerCase().includes('spot') || msg.toLowerCase().includes('slot')
+      setSlotConflict(isSlotConflict)
       setError(msg)
     } finally {
       setLoading(false)
@@ -473,9 +476,23 @@ export default function Confirmation() {
             )}
 
             {error && (
-              <p className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                {error}
-              </p>
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 space-y-2">
+                <p className="text-xs text-red-700">
+                  {slotConflict
+                    ? 'This time slot is no longer available — it was just taken by another booking.'
+                    : error}
+                </p>
+                {slotConflict && (
+                  <Button
+                    fullWidth
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => navigate('/datetime')}
+                  >
+                    Choose a different time →
+                  </Button>
+                )}
+              </div>
             )}
 
             <Button fullWidth size="lg" loading={loading} onClick={handleConfirm}>
