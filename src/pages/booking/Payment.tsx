@@ -28,7 +28,6 @@ export default function Payment() {
   const { reset } = useBookingStore()
 
   const [checkoutLoading, setCheckoutLoading] = useState(true)
-  const [widgetReady, setWidgetReady] = useState(false)
   const [widgetError, setWidgetError] = useState<string | null>(null)
   const [verifying, setVerifying] = useState(false)
   const instanceRef = useRef<SumUpCardInstance | null>(null)
@@ -45,7 +44,6 @@ export default function Payment() {
   async function startCheckout() {
     setCheckoutLoading(true)
     setWidgetError(null)
-    setWidgetReady(false)
 
     const { data, error } = await supabase.functions.invoke('sumup-create-checkout', {
       body: {
@@ -68,7 +66,6 @@ export default function Payment() {
       onResponse: handleWidgetResponse,
     })
     setCheckoutLoading(false)
-    setWidgetReady(true)
   }
 
   function handleWidgetResponse(type: SumUpWidgetResponseType, body: unknown) {
@@ -77,7 +74,6 @@ export default function Payment() {
     } else if (type === 'fail' || type === 'error') {
       const msg = (body as { message?: string } | undefined)?.message
       setWidgetError(msg || 'Payment failed. Please check your details and try again.')
-      setWidgetReady(false)
     }
   }
 
@@ -139,18 +135,25 @@ export default function Payment() {
         )}
       </div>
 
-      {/* Widget area */}
-      {verifying ? (
+      {/* Widget div must always be in the DOM so SumUpCard.mount() can attach to it.
+          Visibility is controlled purely via CSS — never conditionally unmount this div. */}
+      <div id={WIDGET_ID} className={!checkoutLoading && !widgetError && !verifying ? '' : 'hidden'} />
+
+      {verifying && (
         <div className="flex flex-col items-center gap-3 py-16 text-gray-500">
           <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
           <p className="text-sm font-medium">Confirming your payment…</p>
         </div>
-      ) : checkoutLoading ? (
+      )}
+
+      {checkoutLoading && (
         <div className="flex flex-col items-center gap-3 py-16 text-gray-500">
           <Loader2 className="h-8 w-8 animate-spin text-gray-300" />
           <p className="text-sm">Setting up secure payment…</p>
         </div>
-      ) : widgetError ? (
+      )}
+
+      {widgetError && (
         <div className="space-y-4">
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {widgetError}
@@ -160,8 +163,6 @@ export default function Payment() {
             Try Again
           </Button>
         </div>
-      ) : (
-        <div id={WIDGET_ID} className={widgetReady ? '' : 'hidden'} />
       )}
 
       {/* Security note */}

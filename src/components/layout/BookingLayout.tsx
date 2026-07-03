@@ -24,8 +24,9 @@ export function BookingLayout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen" style={{ backgroundColor: 'var(--color-background)' }}>
       {/* Header */}
       <header className="bg-white border-b border-gray-100 sticky top-0 z-30">
-        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2">
+        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
+          {/* Brand */}
+          <Link to="/" className="flex items-center gap-2 shrink-0">
             <img src={config.logo} alt={config.brandName} className="h-8 w-auto" onError={(e) => {
               const t = e.target as HTMLImageElement
               t.style.display = 'none'
@@ -34,39 +35,37 @@ export function BookingLayout({ children }: { children: React.ReactNode }) {
               {config.brandName}
             </span>
           </Link>
-          <div className="flex items-center gap-4">
-            <Link to="/about" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
-              About
+
+          {/* Nav links */}
+          <nav className="hidden sm:flex items-center gap-5">
+            <Link to="/about" className="text-sm text-gray-500 hover:text-gray-900 transition-colors whitespace-nowrap">About</Link>
+            <Link to="/events" className="text-sm text-gray-500 hover:text-gray-900 transition-colors whitespace-nowrap">Events</Link>
+            <Link to="/memberships" className="text-sm text-gray-500 hover:text-gray-900 transition-colors whitespace-nowrap">Memberships</Link>
+            <Link to="/my-bookings" className="text-sm text-gray-500 hover:text-gray-900 transition-colors whitespace-nowrap">My Bookings</Link>
+          </nav>
+
+          {/* Auth area */}
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Mobile: show My Bookings icon */}
+            <Link to="/my-bookings" className="sm:hidden text-gray-500 hover:text-gray-900 transition-colors">
+              <UserCircle2 className="h-5 w-5" />
             </Link>
-            <Link to="/events" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
-              Events
-            </Link>
-            <Link to="/memberships" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
-              Memberships
-            </Link>
-            <Link to="/my-bookings" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
-              My Bookings
-            </Link>
-            {user && (
-              <div className="flex items-center gap-2 border-l border-gray-100 pl-4">
+            {user ? (
+              <div className="flex items-center gap-3 pl-3 border-l border-gray-100">
                 {isAdmin && (
-                  <Link to="/admin" className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 transition-colors">
+                  <Link to="/admin" className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 transition-colors whitespace-nowrap">
                     <LayoutDashboard className="h-3.5 w-3.5" />
-                    <span className="hidden sm:block">Admin</span>
+                    <span>Admin</span>
                   </Link>
                 )}
-                <Link to="/my-bookings" className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 transition-colors">
-                  <UserCircle2 className="h-3.5 w-3.5" />
-                  <span className="max-w-35 truncate hidden sm:block">{user.email}</span>
-                </Link>
                 <button
                   onClick={() => supabase.auth.signOut()}
-                  className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                  className="text-xs text-gray-400 hover:text-gray-600 transition-colors whitespace-nowrap"
                 >
                   Sign out
                 </button>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </header>
