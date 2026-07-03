@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Users } from 'lucide-react'
+import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Users, ChevronUp, ChevronDown } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDuration, calculateDeposit } from '@/lib/currency'
 import { Badge } from '@/components/ui/Badge'
@@ -45,6 +45,11 @@ export default function AdminServices() {
   type Assignment = { commission_type: CommissionType | null; commission_rate: string | null }
   const [staffAssignments, setStaffAssignments] = useState<Map<string, Assignment>>(new Map())
   const [togglingStaffId, setTogglingStaffId] = useState<string | null>(null)
+
+  // Room priority
+  type ServiceResource = { resource_id: string; priority: number; name: string }
+  const [serviceResources, setServiceResources] = useState<ServiceResource[]>([])
+  const [addResourceId, setAddResourceId] = useState('')
 
   // Add-ons
   const [addonsList, setAddonsList] = useState<ServiceAddon[]>([])
@@ -123,6 +128,18 @@ export default function AdminServices() {
       }
     }
     setStaffAddonAssignments(saMap)
+
+    // Fetch room priority list
+    const { data: srData } = await supabase
+      .from('service_resources')
+      .select('resource_id, priority, resource:resources(name)')
+      .eq('service_id', service.id)
+      .order('priority')
+    setServiceResources(
+      ((srData ?? []) as unknown as { resource_id: string; priority: number; resource: { name: string } }[])
+        .map(r => ({ resource_id: r.resource_id, priority: r.priority, name: r.resource.name }))
+    )
+    setAddResourceId('')
     setModalOpen(true)
   }
 
@@ -277,6 +294,44 @@ export default function AdminServices() {
       const next = new Set(current); next.add(staffId)
       setStaffAddonAssignments(prev => new Map(prev).set(addonId, next))
     }
+  }
+
+  async function handleAddServiceResource(resourceId: string) {
+    if (!editTarget || !resourceId) return
+    const nextPriority = serviceResources.length > 0
+      ? Math.max(...serviceResources.map(r => r.priority)) + 1
+      : 1
+    await supabase.from('service_resources').insert({ service_id: editTarget.id, resource_id: resourceId, priority: nextPriority })
+    const name = resources.find(r => r.id === resourceId)?.name ?? ''
+    setServiceResources(prev => [...prev, { resource_id: resourceId, priority: nextPriority, name }])
+    setAddResourceId('')
+  }
+
+  async function handleRemoveServiceResource(resourceId: string) {
+    if (!editTarget) return
+    await supabase.from('service_resources').delete().eq('service_id', editTarget.id).eq('resource_id', resourceId)
+    const updated = serviceResources
+      .filter(r => r.resource_id !== resourceId)
+      .map((r, i) => ({ ...r, priority: i + 1 }))
+    await Promise.all(updated.map(r =>
+      supabase.from('service_resources').update({ priority: r.priority }).eq('service_id', editTarget.id).eq('resource_id', r.resource_id)
+    ))
+    setServiceResources(updated)
+  }
+
+  async function handleMoveServiceResource(resourceId: string, direction: 'up' | 'down') {
+    if (!editTarget) return
+    const idx = serviceResources.findIndex(r => r.resource_id === resourceId)
+    if (direction === 'up' && idx === 0) return
+    if (direction === 'down' && idx === serviceResources.length - 1) return
+    const list = [...serviceResources]
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    ;[list[idx], list[swapIdx]] = [list[swapIdx], list[idx]]
+    const numbered = list.map((r, i) => ({ ...r, priority: i + 1 }))
+    await Promise.all(numbered.map(r =>
+      supabase.from('service_resources').update({ priority: r.priority }).eq('service_id', editTarget.id).eq('resource_id', r.resource_id)
+    ))
+    setServiceResources(numbered)
   }
 
   if (loading) return <FullPageSpinner />
@@ -908,17 +963,89 @@ export default function AdminServices() {
           )}
 
           {resources.length > 0 && (
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-1 block">Required Resource</label>
-              <select
-                value={form.resource_id ?? ''}
-                onChange={e => setForm(f => ({ ...f, resource_id: e.target.value || null }))}
-                className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
-              >
-                <option value="">No resource required</option>
-                {resources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-              </select>
-            </div>
+            editTarget ? (
+              /* Priority room list — only available when editing an existing service */
+              <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
+                <div>
+                  <p className="text-sm font-semibold text-gray-700">Room Priority</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Rooms are tried in order when booking — if Room 1 is taken, Room 2 is used, and so on.
+                  </p>
+                </div>
+
+                {serviceResources.length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-1">No rooms assigned — bookings won't require a specific room.</p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {serviceResources.map((sr, i) => (
+                      <li key={sr.resource_id} className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
+                        <span className="text-xs font-bold text-gray-400 w-5 text-center">{i + 1}</span>
+                        <span className="flex-1 text-sm font-medium text-gray-900">{sr.name}</span>
+                        <div className="flex gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => handleMoveServiceResource(sr.resource_id, 'up')}
+                            disabled={i === 0}
+                            className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 disabled:opacity-20 transition-colors"
+                          >
+                            <ChevronUp className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMoveServiceResource(sr.resource_id, 'down')}
+                            disabled={i === serviceResources.length - 1}
+                            className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 disabled:opacity-20 transition-colors"
+                          >
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveServiceResource(sr.resource_id)}
+                            className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {(() => {
+                  const available = resources.filter(r => !serviceResources.find(sr => sr.resource_id === r.id))
+                  if (available.length === 0) return null
+                  return (
+                    <div className="flex gap-2">
+                      <select
+                        value={addResourceId}
+                        onChange={e => setAddResourceId(e.target.value)}
+                        className="flex-1 h-9 px-2 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                      >
+                        <option value="">Add a room…</option>
+                        {available.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                      <Button size="sm" disabled={!addResourceId} onClick={() => handleAddServiceResource(addResourceId)}>
+                        <Plus className="h-3.5 w-3.5" /> Add
+                      </Button>
+                    </div>
+                  )
+                })()}
+              </div>
+            ) : (
+              /* Simple single-room pick when creating a new service */
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Default Room (optional)</label>
+                <select
+                  value={form.resource_id ?? ''}
+                  onChange={e => setForm(f => ({ ...f, resource_id: e.target.value || null }))}
+                  className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                >
+                  <option value="">No room required</option>
+                  {resources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">You can set a full room priority order after saving the service.</p>
+              </div>
+            )
           )}
 
           <div className="flex justify-end gap-3 pt-2">
