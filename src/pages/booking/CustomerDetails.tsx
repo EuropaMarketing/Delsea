@@ -37,28 +37,25 @@ export default function CustomerDetails() {
   const service = services.find((s) => s.id === draft.serviceId)
   const staffMember = staff.find((s) => s.id === draft.staffId)
 
-  // Pre-fill form when user signs in and immediately check token balance
+  // Pre-fill form when user signs in.
+  // Uses get_customer_profile (SECURITY DEFINER) which matches by user_id OR email,
+  // avoiding the race condition where link_customer_to_user may not have completed yet.
   useEffect(() => {
     if (user) {
       const email = user.email ?? ''
-      setForm((f) => ({
-        ...f,
-        email,
-        name: user.user_metadata?.full_name ?? f.name,
-      }))
+      setForm((f) => ({ ...f, email }))
       if (email) checkTokenBalance(email)
-      // Also try to fetch their customer record for phone
       supabase
-        .from('customers')
-        .select('name, phone')
-        .eq('user_id', user.id)
-        .maybeSingle()
+        .rpc('get_customer_profile', { p_business_id: BUSINESS_ID })
         .then(({ data }) => {
-          if (data) setForm((f) => ({
-            ...f,
-            name: data.name ?? f.name,
-            phone: data.phone ?? f.phone,
-          }))
+          const profile = Array.isArray(data) ? data[0] : data
+          if (profile) {
+            setForm((f) => ({
+              ...f,
+              name: profile.name ?? f.name,
+              phone: profile.phone ?? f.phone,
+            }))
+          }
         })
     }
   }, [user])

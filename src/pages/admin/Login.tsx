@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/Button'
 
 export default function AdminLogin() {
   const navigate = useNavigate()
-  const { setSession, setAdmin } = useAuthStore()
+  const { setSession, setAdmin, setStaffInfo } = useAuthStore()
   const { config } = useBrandStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -24,20 +24,25 @@ export default function AdminLogin() {
       if (authError) {
         setError(authError.message)
       } else if (data.session) {
-        // Check admin status before navigating so ProtectedRoute doesn't bounce back
+        // Check staff role before navigating
         const { data: staffData } = await supabase
           .from('staff')
-          .select('id')
+          .select('id, role')
           .eq('user_id', data.session.user.id)
-          .eq('role', 'admin')
-          .single()
+          .maybeSingle()
         if (!staffData) {
           await supabase.auth.signOut()
-          setError('This account does not have admin access.')
+          setError('No staff account found for this login.')
         } else {
           setSession(data.session)
-          setAdmin(true)
-          navigate('/admin')
+          setStaffInfo(true, staffData.id)
+          if (staffData.role === 'admin') {
+            setAdmin(true)
+            navigate('/admin')
+          } else {
+            setAdmin(false)
+            navigate('/staff-portal')
+          }
         }
       } else {
         setError('Sign in failed — no session returned.')
@@ -54,7 +59,7 @@ export default function AdminLogin() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-gray-900">{config.brandName}</h1>
-          <p className="text-sm text-gray-500 mt-1">Admin sign in</p>
+          <p className="text-sm text-gray-500 mt-1">Team sign in</p>
         </div>
         <div className="bg-white border border-gray-200 brand-card p-6 shadow-sm">
           <form onSubmit={handleLogin} className="space-y-4">

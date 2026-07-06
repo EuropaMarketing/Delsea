@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { format, parseISO, startOfDay, endOfDay, isBefore } from 'date-fns'
-import { Plus, Pencil, Trash2, PlaneTakeoff, Camera, CalendarX2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, PlaneTakeoff, Camera, CalendarX2, Images, KeyRound, CheckCircle2, XCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
@@ -54,6 +54,16 @@ export default function AdminStaff() {
   const [saveError, setSaveError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Portfolio photo picker
+  const [portfolioPhotos, setPortfolioPhotos] = useState<{ id: string; url: string; caption: string | null }[]>([])
+  const [portfolioPickerOpen, setPortfolioPickerOpen] = useState(false)
+
+  // Login setup
+  const [loginEmail, setLoginEmail] = useState('')
+  const [loginPassword, setLoginPassword] = useState('')
+  const [loginSaving, setLoginSaving] = useState(false)
+  const [loginMessage, setLoginMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+
   // Leave / blocked-time modal
   const [leaveMember, setLeaveMember] = useState<Staff | null>(null)
   const [leaveBlocks, setLeaveBlocks] = useState<BlockedTime[]>([])
@@ -89,18 +99,23 @@ export default function AdminStaff() {
     setAvatarError('')
     setSaveError('')
     setErrors({})
+    setPortfolioPickerOpen(false)
+    setLoginEmail('')
+    setLoginPassword('')
+    setLoginMessage(null)
 
-    const { data: avail } = await supabase
-      .from('availability')
-      .select('*')
-      .eq('staff_id', member.id)
+    const [availRes, portfolioRes] = await Promise.all([
+      supabase.from('availability').select('*').eq('staff_id', member.id),
+      supabase.from('portfolio_photos').select('id, url, caption').eq('business_id', BUSINESS_ID).eq('is_active', true).order('sort_order'),
+    ])
     const sched = defaultSchedule()
-    if (avail) {
-      avail.forEach((a: Availability) => {
+    if (availRes.data) {
+      availRes.data.forEach((a: Availability) => {
         sched[a.day_of_week] = { enabled: true, start_time: a.start_time, end_time: a.end_time }
       })
     }
     setSchedule(sched)
+    if (portfolioRes.data) setPortfolioPhotos(portfolioRes.data as typeof portfolioPhotos)
     setModalOpen(true)
   }
 
@@ -114,7 +129,33 @@ export default function AdminStaff() {
     setSaveError('')
     setSchedule(defaultSchedule())
     setErrors({})
+    setPortfolioPickerOpen(false)
+    setPortfolioPhotos([])
+    setLoginEmail('')
+    setLoginPassword('')
+    setLoginMessage(null)
     setModalOpen(true)
+  }
+
+  async function handleCreateLogin() {
+    if (!editTarget || !loginEmail.trim() || !loginPassword.trim()) return
+    setLoginSaving(true)
+    setLoginMessage(null)
+    const { data, error } = await supabase.functions.invoke('create-staff-login', {
+      body: { staff_id: editTarget.id, email: loginEmail.trim(), password: loginPassword.trim() },
+    })
+    if (error || !data?.success) {
+      setLoginMessage({ type: 'error', text: (data as { error?: string } | null)?.error ?? error?.message ?? 'Failed' })
+    } else {
+      const action = (data as { action: string }).action
+      setLoginMessage({ type: 'success', text: action === 'created' ? 'Login created — they can now sign in.' : 'Password updated successfully.' })
+      setLoginPassword('')
+      if (action === 'created') {
+        setStaff(prev => prev.map(s => s.id === editTarget.id ? { ...s, user_id: (data as { user_id?: string }).user_id ?? s.user_id } : s))
+        setEditTarget(prev => prev ? { ...prev, user_id: (data as { user_id?: string }).user_id ?? prev.user_id } : prev)
+      }
+    }
+    setLoginSaving(false)
   }
 
   function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -329,14 +370,10 @@ export default function AdminStaff() {
         size="lg"
       >
         <div className="space-y-4">
-          {/* Avatar upload */}
+          {/* Avatar */}
           <div className="flex flex-col items-center gap-2">
             <div className="relative">
-              <Avatar
-                src={displayAvatar}
-                name={form.name || 'New'}
-                size="xl"
-              />
+              <Avatar src={displayAvatar} name={form.name || 'New'} size="xl" />
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -346,25 +383,46 @@ export default function AdminStaff() {
                 <Camera className="h-3.5 w-3.5 text-gray-600" />
               </button>
             </div>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="text-xs font-medium hover:underline"
-              style={{ color: 'var(--color-primary)' }}
-            >
-              {displayAvatar ? 'Change photo' : 'Upload photo'}
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleAvatarChange}
-            />
-            {avatarError && (
-              <p className="text-xs text-red-500 text-center max-w-xs">{avatarError}</p>
-            )}
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => fileInputRef.current?.click()} className="text-xs font-medium hover:underline" style={{ color: 'var(--color-primary)' }}>
+                Upload photo
+              </button>
+              {portfolioPhotos.length > 0 && (
+                <>
+                  <span className="text-xs text-gray-300">|</span>
+                  <button type="button" onClick={() => setPortfolioPickerOpen(o => !o)} className="text-xs font-medium hover:underline flex items-center gap-1" style={{ color: 'var(--color-primary)' }}>
+                    <Images className="h-3 w-3" /> Pick from portfolio
+                  </button>
+                </>
+              )}
+            </div>
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
+            {avatarError && <p className="text-xs text-red-500 text-center max-w-xs">{avatarError}</p>}
           </div>
+
+          {/* Portfolio photo picker */}
+          {portfolioPickerOpen && portfolioPhotos.length > 0 && (
+            <div className="border border-gray-200 rounded-xl p-3 bg-gray-50">
+              <p className="text-xs font-semibold text-gray-500 mb-2">Select a portfolio photo</p>
+              <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto">
+                {portfolioPhotos.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      setCurrentAvatarUrl(p.url)
+                      setAvatarFile(null)
+                      setAvatarPreview(null)
+                      setPortfolioPickerOpen(false)
+                    }}
+                    className={`aspect-square rounded-lg overflow-hidden border-2 transition-colors ${currentAvatarUrl === p.url ? 'border-(--color-primary)' : 'border-transparent hover:border-gray-300'}`}
+                  >
+                    <img src={p.url} alt={p.caption ?? ''} className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <Input
@@ -472,6 +530,41 @@ export default function AdminStaff() {
               ))}
             </div>
           </div>
+
+          {/* Login setup — only for existing staff members */}
+          {editTarget && (
+            <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
+              <div className="flex items-center gap-2">
+                <KeyRound className="h-4 w-4 text-gray-400" />
+                <p className="text-sm font-semibold text-gray-700">App Login</p>
+                {editTarget.user_id ? (
+                  <span className="ml-auto flex items-center gap-1 text-xs text-green-700">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Login active
+                  </span>
+                ) : (
+                  <span className="ml-auto flex items-center gap-1 text-xs text-gray-400">
+                    <XCircle className="h-3.5 w-3.5" /> No login yet
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-500">
+                {editTarget.user_id
+                  ? 'Update the login credentials for this team member below.'
+                  : 'Create login credentials so this team member can access their staff portal.'}
+              </p>
+              <Input label="Login email" type="email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="e.g. paul@example.com" />
+              <Input label={editTarget.user_id ? 'New password' : 'Initial password'} type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} placeholder="Min 6 characters" />
+              {loginMessage && (
+                <p className={`text-xs rounded-lg px-3 py-2 ${loginMessage.type === 'success' ? 'text-green-700 bg-green-50 border border-green-200' : 'text-red-600 bg-red-50 border border-red-200'}`}>
+                  {loginMessage.text}
+                </p>
+              )}
+              <Button size="sm" variant="secondary" loading={loginSaving} disabled={!loginEmail.trim() || loginPassword.length < 6} onClick={handleCreateLogin}>
+                <KeyRound className="h-3.5 w-3.5" />
+                {editTarget.user_id ? 'Update Login' : 'Create Login'}
+              </Button>
+            </div>
+          )}
 
           {saveError && (
             <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">

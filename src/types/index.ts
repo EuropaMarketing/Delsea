@@ -19,6 +19,7 @@ export interface Staff {
   on_holiday: boolean
   commission_type: CommissionType
   commission_rate: number
+  user_id: string | null
 }
 
 export type DepositType = 'none' | 'fixed' | 'percentage'

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { format, startOfWeek, endOfWeek, startOfDay, endOfDay } from 'date-fns'
-import { CalendarClock, XCircle, PoundSterling, CheckCircle2, X, Loader2, CheckCheck } from 'lucide-react'
+import { CalendarClock, XCircle, PoundSterling, CheckCircle2, X, Loader2, CheckCheck, UserCheck } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
@@ -19,7 +19,7 @@ interface Stats {
 }
 
 export default function Dashboard() {
-  type TodayBooking = Booking & { service: { name: string; price: number }; staff: { name: string } | null; customer: { name: string } | null; discount_amount: number; gift_voucher_amount: number }
+  type TodayBooking = Booking & { service: { name: string; price: number }; staff: { name: string } | null; customer: { name: string } | null; discount_amount: number; gift_voucher_amount: number; checked_in_at: string | null }
   const [todayBookings, setTodayBookings] = useState<TodayBooking[]>([])
   const [stats, setStats] = useState<Stats>({ todayCount: 0, todayCompleted: 0, weekCount: 0, weekRevenue: 0, weekCancellations: 0 })
   const [loading, setLoading] = useState(true)
@@ -36,7 +36,7 @@ export default function Dashboard() {
       const [todayRes, weekRes] = await Promise.all([
         supabase
           .from('bookings')
-          .select('*, service:services(name,price), staff:staff(name), customer:customers(name)')
+          .select('*, service:services(name,price), staff:staff(name), customer:customers(name), checked_in_at')
           .eq('business_id', BUSINESS_ID)
           .gte('starts_at', todayStart)
           .lte('starts_at', todayEnd)
@@ -71,6 +71,14 @@ export default function Dashboard() {
     }
     load()
   }, [])
+
+  async function handleCheckIn(bookingId: string) {
+    setUpdating(bookingId)
+    const checkedInAt = new Date().toISOString()
+    await supabase.from('bookings').update({ checked_in_at: checkedInAt }).eq('id', bookingId)
+    setTodayBookings((prev) => prev.map((b) => b.id === bookingId ? { ...b, checked_in_at: checkedInAt } : b))
+    setUpdating(null)
+  }
 
   async function updateStatus(bookingId: string, status: BookingStatus) {
     if (status === 'cancelled' && !confirm('Cancel this booking?')) return
@@ -148,6 +156,25 @@ export default function Dashboard() {
                     <span className="text-sm font-bold text-gray-900 hidden sm:block">
                       {b.service ? formatCurrency(b.service.price - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0)) : '—'}
                     </span>
+                    {b.checked_in_at ? (
+                      <span
+                        title={`Checked in`}
+                        className="p-1.5 rounded-lg text-white"
+                        style={{ backgroundColor: 'var(--color-primary)' }}
+                      >
+                        <UserCheck className="h-4 w-4" />
+                      </span>
+                    ) : isActionable ? (
+                      <button
+                        onClick={() => handleCheckIn(b.id)}
+                        disabled={isUpdating}
+                        title="Check in customer"
+                        className="p-1.5 rounded-lg hover:opacity-90 text-white transition-opacity disabled:opacity-50"
+                        style={{ backgroundColor: 'var(--color-primary)' }}
+                      >
+                        {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />}
+                      </button>
+                    ) : null}
                     <Badge variant={statusBadgeVariant(b.status)} className="capitalize">
                       {b.status}
                     </Badge>

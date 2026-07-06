@@ -49,6 +49,7 @@ import AdminDiscounts from '@/pages/admin/Discounts'
 import AdminGiftVouchers from '@/pages/admin/GiftVouchers'
 import AdminResources from '@/pages/admin/Resources'
 import AdminEvents from '@/pages/admin/Events'
+import StaffPortal from '@/pages/staff/StaffPortal'
 
 function AppRoutes() {
   useAuthListener()
@@ -169,6 +170,16 @@ function AppRoutes() {
           <BookingLayout>
             <Payment />
           </BookingLayout>
+        }
+      />
+
+      {/* Staff portal */}
+      <Route
+        path="/staff-portal"
+        element={
+          <ProtectedRoute staffOnly>
+            <StaffPortal />
+          </ProtectedRoute>
         }
       />
 
