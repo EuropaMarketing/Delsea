@@ -35,6 +35,7 @@ type ActivityLogEntry = {
 export default function AdminBookings() {
   const [bookings, setBookings] = useState<ExtBooking[]>([])
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<BookingStatus | 'all'>('all')
   const [selectedBooking, setSelectedBooking] = useState<ExtBooking | null>(null)
   const [updating, setUpdating] = useState(false)
@@ -83,10 +84,13 @@ export default function AdminBookings() {
 
     if (statusFilter !== 'all') query = query.eq('status', statusFilter)
 
-    const { data } = await query
-    if (data) {
-      setBookings((prev) => (reset ? data : [...prev, ...data]) as ExtBooking[])
-      setHasMore(data.length === PAGE_SIZE)
+    const { data, error } = await query
+    if (error) {
+      setFetchError(`Failed to load bookings: ${error.message}`)
+    } else {
+      setFetchError(null)
+      setBookings((prev) => (reset ? data ?? [] : [...prev, ...(data ?? [])]) as ExtBooking[])
+      setHasMore((data ?? []).length === PAGE_SIZE)
     }
     setLoading(false)
   }
@@ -262,6 +266,11 @@ export default function AdminBookings() {
             <tbody className="divide-y divide-gray-50">
               {loading && bookings.length === 0 ? (
                 <tr><td colSpan={7} className="py-12 text-center"><FullPageSpinner /></td></tr>
+              ) : fetchError ? (
+                <tr><td colSpan={7} className="py-12 text-center">
+                  <p className="text-red-500 text-sm mb-2">{fetchError}</p>
+                  <p className="text-gray-400 text-xs">Try signing out and signing back in to refresh your session.</p>
+                </td></tr>
               ) : bookings.length === 0 ? (
                 <tr><td colSpan={7} className="py-12 text-center text-gray-400 text-sm">No bookings found.</td></tr>
               ) : bookings.map((b) => (
