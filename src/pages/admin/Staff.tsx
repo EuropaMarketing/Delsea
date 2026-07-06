@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { format, parseISO, startOfDay, endOfDay, isBefore } from 'date-fns'
-import { Plus, Pencil, Trash2, PlaneTakeoff, Camera, CalendarX2, Images, KeyRound, CheckCircle2, XCircle } from 'lucide-react'
+import { Plus, Pencil, Trash2, PlaneTakeoff, Camera, CalendarX2, Images, KeyRound, CheckCircle2, XCircle, Eye, EyeOff } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
@@ -63,6 +63,7 @@ export default function AdminStaff() {
   const [loginPassword, setLoginPassword] = useState('')
   const [loginSaving, setLoginSaving] = useState(false)
   const [loginMessage, setLoginMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [showLoginPassword, setShowLoginPassword] = useState(false)
 
   // Leave / blocked-time modal
   const [leaveMember, setLeaveMember] = useState<Staff | null>(null)
@@ -553,7 +554,31 @@ export default function AdminStaff() {
                   : 'Create login credentials so this team member can access their staff portal.'}
               </p>
               <Input label="Login email" type="email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="e.g. paul@example.com" />
-              <Input label={editTarget.user_id ? 'New password' : 'Initial password'} type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} placeholder="Min 6 characters" />
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">
+                  {editTarget.user_id ? 'New password' : 'Initial password'}
+                </label>
+                <div className="relative">
+                  <input
+                    type={showLoginPassword ? 'text' : 'password'}
+                    value={loginPassword}
+                    onChange={e => setLoginPassword(e.target.value)}
+                    placeholder="Min 6 characters"
+                    className="w-full h-10 pl-3 pr-9 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowLoginPassword(v => !v)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    tabIndex={-1}
+                  >
+                    {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                {loginPassword.length > 0 && loginPassword.length < 6 && (
+                  <p className="text-xs text-amber-600 mt-1">Password must be at least 6 characters</p>
+                )}
+              </div>
               {loginMessage && (
                 <p className={`text-xs rounded-lg px-3 py-2 ${loginMessage.type === 'success' ? 'text-green-700 bg-green-50 border border-green-200' : 'text-red-600 bg-red-50 border border-red-200'}`}>
                   {loginMessage.text}
