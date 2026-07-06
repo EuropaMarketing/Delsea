@@ -135,7 +135,7 @@ function SignInPrompt() {
 
 export default function MyBookings() {
   const { user } = useAuthStore()
-  const { services, setServices, setReschedule } = useBookingStore()
+  const { services, setServices, setReschedule, clearReschedule, rescheduleBookingId } = useBookingStore()
   const { config } = useBrandStore()
   const navigate = useNavigate()
   const { state: locationState } = useLocation()
@@ -233,6 +233,9 @@ export default function MyBookings() {
     setBookings((prev) =>
       prev.map((b) => (b.id === bookingId ? { ...b, status: 'cancelled' } : b)),
     )
+    // Clear any stale reschedule state for the cancelled booking so a fresh
+    // booking attempt from /book doesn't get stuck in reschedule mode.
+    if (rescheduleBookingId === bookingId) clearReschedule()
     setCancelling(null)
     setCancelTarget(null)
   }

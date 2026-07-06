@@ -62,7 +62,7 @@ export const useBookingStore = create<BookingStore>((set) => ({
   setAddons: (addons) => set({ selectedAddons: addons }),
 
   setService: (serviceId) =>
-    set((s) => ({ draft: { ...s.draft, serviceId, variantId: null, variantName: null, variantDuration: null, variantPrice: null, staffId: null, date: null, timeSlot: null }, selectedAddons: [], eventSessionId: null })),
+    set((s) => ({ draft: { ...s.draft, serviceId, variantId: null, variantName: null, variantDuration: null, variantPrice: null, staffId: null, date: null, timeSlot: null }, selectedAddons: [], eventSessionId: null, rescheduleBookingId: null, rescheduleOriginalTime: null })),
 
   setVariant: (variant) =>
     set((s) => ({
