@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Calendar, List, Scissors, Users, Settings,
@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { useBrandStore } from '@/store/brandStore'
 import { cn } from '@/lib/cn'
+import { CheckInToasts, type CheckInAlert } from '@/components/ui/CheckInToast'
 
 const navItems = [
   { label: 'Dashboard',  icon: LayoutDashboard, path: '/admin' },
@@ -52,6 +53,58 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
   const { setSession } = useAuthStore()
   const { config } = useBrandStore()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [checkInAlerts, setCheckInAlerts] = useState<CheckInAlert[]>([])
+
+  const dismissAlert = useCallback((id: string) => {
+    setCheckInAlerts((prev) => prev.filter((a) => a.id !== id))
+  }, [])
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-check-ins')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'bookings' },
+        async (payload) => {
+          const oldRow = payload.old as Record<string, unknown>
+          const newRow = payload.new as Record<string, unknown>
+          // Only fire when checked_in_at transitions from null → set.
+          if (!newRow.checked_in_at || oldRow.checked_in_at) return
+
+          const { data } = await supabase
+            .from('bookings')
+            .select('id, starts_at, customer:customers(name), service:services(name), staff:staff(name), resource:resources(name)')
+            .eq('id', newRow.id as string)
+            .single()
+
+          if (!data) return
+
+          const b = data as unknown as {
+            id: string
+            starts_at: string
+            customer: { name: string } | null
+            service: { name: string } | null
+            staff: { name: string } | null
+            resource: { name: string } | null
+          }
+
+          setCheckInAlerts((prev) => [
+            ...prev,
+            {
+              id: b.id,
+              customerName: b.customer?.name ?? 'Customer',
+              serviceName: b.service?.name ?? 'appointment',
+              staffName: b.staff?.name ?? null,
+              startsAt: b.starts_at,
+              roomName: b.resource?.name ?? null,
+            },
+          ])
+        },
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [])
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -86,6 +139,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
+      <CheckInToasts alerts={checkInAlerts} onDismiss={dismissAlert} />
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex flex-col w-56 bg-white border-r border-gray-100 shrink-0">
         <Sidebar />

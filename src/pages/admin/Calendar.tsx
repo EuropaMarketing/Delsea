@@ -5,7 +5,7 @@ import {
 } from 'date-fns'
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History,
+  Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { FullPageSpinner } from '@/components/ui/Spinner'
@@ -30,6 +30,7 @@ type RichBooking = Booking & {
   discount_amount: number
   payment_status: string
   deposit_charged: number
+  checked_in_at: string | null
   service: { name: string; category: string; price: number }
   staff: { name: string } | null
   customer: { name: string; email: string; phone: string | null; sumup_card_token: string | null }
@@ -368,6 +369,15 @@ export default function AdminCalendar() {
     await supabase.from('bookings').update({ status }).eq('id', bookingId)
     setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status } as RichBooking : b))
     setSelectedBooking(null)
+    setActionLoading(false)
+  }
+
+  async function handleCheckIn(bookingId: string) {
+    setActionLoading(true)
+    const checkedInAt = new Date().toISOString()
+    await supabase.from('bookings').update({ checked_in_at: checkedInAt }).eq('id', bookingId)
+    setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, checked_in_at: checkedInAt } as RichBooking : b))
+    setSelectedBooking(prev => prev ? { ...prev, checked_in_at: checkedInAt } : prev)
     setActionLoading(false)
   }
 
@@ -821,7 +831,8 @@ export default function AdminCalendar() {
                         style={{ top, height, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
                         title={`${booking.customer?.name} — ${booking.service?.name}`}
                       >
-                        <p className="text-xs font-semibold truncate leading-tight" style={{ color }}>
+                        <p className="text-xs font-semibold truncate leading-tight flex items-center gap-1" style={{ color }}>
+                          {booking.checked_in_at && <UserCheck className="h-3 w-3 shrink-0" />}
                           {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
                         </p>
                         <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
@@ -1151,23 +1162,39 @@ export default function AdminCalendar() {
                 </div>
               </div>
             ) : (
-              <div className="flex gap-2 pt-2 border-t border-gray-100">
-                <Button variant="secondary" size="sm" onClick={openEditMode} className="shrink-0">
-                  <Pencil className="h-3.5 w-3.5" />
-                  Edit
-                </Button>
+              <div className="space-y-2 pt-2 border-t border-gray-100">
+                {/* Check In */}
                 {(selectedBooking.status === 'confirmed' || selectedBooking.status === 'pending') && (
-                  <>
-                    <Button fullWidth variant="secondary" size="sm" loading={actionLoading} onClick={() => handleBookingAction(selectedBooking.id, 'completed')} className="text-green-700! border-green-200! hover:bg-green-50!">
-                      <CheckCircle2 className="h-4 w-4" />
-                      Complete
+                  selectedBooking.checked_in_at ? (
+                    <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                      <UserCheck className="h-4 w-4 shrink-0" />
+                      Checked in at {format(parseISO(selectedBooking.checked_in_at), 'HH:mm')}
+                    </div>
+                  ) : (
+                    <Button fullWidth size="sm" loading={actionLoading} onClick={() => handleCheckIn(selectedBooking.id)} style={{ backgroundColor: 'var(--color-primary)' }}>
+                      <UserCheck className="h-4 w-4" />
+                      Check In Customer
                     </Button>
-                    <Button fullWidth variant="danger" size="sm" onClick={() => setCancelReasonOpen(true)}>
-                      <XCircle className="h-4 w-4" />
-                      Cancel
-                    </Button>
-                  </>
+                  )
                 )}
+                <div className="flex gap-2">
+                  <Button variant="secondary" size="sm" onClick={openEditMode} className="shrink-0">
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit
+                  </Button>
+                  {(selectedBooking.status === 'confirmed' || selectedBooking.status === 'pending') && (
+                    <>
+                      <Button fullWidth variant="secondary" size="sm" loading={actionLoading} onClick={() => handleBookingAction(selectedBooking.id, 'completed')} className="text-green-700! border-green-200! hover:bg-green-50!">
+                        <CheckCircle2 className="h-4 w-4" />
+                        Complete
+                      </Button>
+                      <Button fullWidth variant="danger" size="sm" onClick={() => setCancelReasonOpen(true)}>
+                        <XCircle className="h-4 w-4" />
+                        Cancel
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>

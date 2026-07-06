@@ -102,6 +102,7 @@ export interface Booking {
   discount_amount?: number
   gift_voucher_id?: string | null
   gift_voucher_amount?: number
+  checked_in_at?: string | null
   created_at: string
   staff?: Staff
   service?: Service
