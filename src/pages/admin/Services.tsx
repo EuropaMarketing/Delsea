@@ -1014,17 +1014,18 @@ export default function AdminServices() {
                 {(() => {
                   const available = resources.filter(r => !serviceResources.find(sr => sr.resource_id === r.id))
                   if (available.length === 0) return null
+                  // Default to first available room so the button is always clickable immediately.
+                  const effectiveId = addResourceId || available[0].id
                   return (
                     <div className="flex gap-2">
                       <select
-                        value={addResourceId}
+                        value={effectiveId}
                         onChange={e => setAddResourceId(e.target.value)}
                         className="flex-1 h-9 px-2 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
                       >
-                        <option value="">Add a room…</option>
                         {available.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                       </select>
-                      <Button size="sm" disabled={!addResourceId} onClick={() => handleAddServiceResource(addResourceId)}>
+                      <Button size="sm" onClick={() => handleAddServiceResource(effectiveId)}>
                         <Plus className="h-3.5 w-3.5" /> Add
                       </Button>
                     </div>
