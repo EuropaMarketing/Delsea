@@ -5,7 +5,7 @@ import {
 } from 'date-fns'
 import {
   CalendarClock, Clock, UserCheck, CheckCircle2, XCircle, Pencil, CreditCard,
-  ChevronLeft, ChevronRight, CalendarDays, Plus, Trash2,
+  ChevronLeft, ChevronRight, Plus, Trash2, Star,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
@@ -16,7 +16,7 @@ import { Card } from '@/components/ui/Card'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import { StaffLayout } from '@/components/layout/StaffLayout'
+import { StaffLayout, type StaffSection } from '@/components/layout/StaffLayout'
 import type { Resource } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
@@ -32,10 +32,11 @@ type Appt = {
   service: { name: string; duration_minutes: number; price: number } | null
   resource: { name: string } | null; equipment_resource: { name: string } | null
 }
-
 type CalAppt = { id: string; starts_at: string; ends_at: string; status: string; payment_status: string; customer: { name: string } | null; service: { name: string } | null }
 type BlockedTime = { id: string; staff_id: string; starts_at: string; ends_at: string; reason: string | null }
 type ActivityEntry = { id: string; actor_name: string; summary: string; reason: string | null; created_at: string }
+type Review = { id: string; reviewer_name: string; rating: number; comment: string | null; is_approved: boolean; created_at: string }
+type ClientEntry = { customer_id: string; name: string; email: string; visits: number; upcoming: number }
 
 function positionBlock(startsAt: string, endsAt: string) {
   const s = parseISO(startsAt), e = parseISO(endsAt)
@@ -44,12 +45,20 @@ function positionBlock(startsAt: string, endsAt: string) {
   return { top, height }
 }
 
+function StarRating({ n }: { n: number }) {
+  return (
+    <span className="flex gap-0.5">
+      {[1,2,3,4,5].map(i => <Star key={i} className={`h-3.5 w-3.5 ${i <= n ? 'fill-amber-400 text-amber-400' : 'text-gray-200'}`} />)}
+    </span>
+  )
+}
+
 export default function StaffPortal() {
   const { staffId } = useAuthStore()
   const [staffName, setStaffName] = useState('')
-  const [activeTab, setActiveTab] = useState<'schedule' | 'calendar'>('schedule')
+  const [activeSection, setActiveSection] = useState<StaffSection>('schedule')
 
-  // ── Schedule tab ─────────────────────────────────────────────────────────
+  // ── Schedule ──────────────────────────────────────────────────────────────
   const [todayAppts, setTodayAppts] = useState<Appt[]>([])
   const [upcomingAppts, setUpcomingAppts] = useState<Appt[]>([])
   const [resources, setResources] = useState<Resource[]>([])
@@ -72,7 +81,7 @@ export default function StaffPortal() {
   const [chargeSuccess, setChargeSuccess] = useState(false)
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([])
 
-  // ── Calendar tab ─────────────────────────────────────────────────────────
+  // ── Calendar ──────────────────────────────────────────────────────────────
   const [calDay, setCalDay] = useState(() => new Date())
   const [calWeekAppts, setCalWeekAppts] = useState<CalAppt[]>([])
   const [calBlocked, setCalBlocked] = useState<BlockedTime[]>([])
@@ -81,6 +90,17 @@ export default function StaffPortal() {
   const [blockForm, setBlockForm] = useState({ date: '', startTime: '09:00', endTime: '17:00', reason: '' })
   const [blockSaving, setBlockSaving] = useState(false)
 
+  // ── Reviews ───────────────────────────────────────────────────────────────
+  const [reviews, setReviews] = useState<Review[]>([])
+  const [reviewsLoading, setReviewsLoading] = useState(false)
+  const [reviewsLoaded, setReviewsLoaded] = useState(false)
+
+  // ── Clients ───────────────────────────────────────────────────────────────
+  const [clients, setClients] = useState<ClientEntry[]>([])
+  const [clientsLoading, setClientsLoading] = useState(false)
+  const [clientsLoaded, setClientsLoaded] = useState(false)
+
+  // Initial load: schedule data
   useEffect(() => {
     if (!staffId) return
     async function load() {
@@ -90,8 +110,7 @@ export default function StaffPortal() {
           .select('id, starts_at, ends_at, status, notes, resource_id, equipment_resource_id, checked_in_at, payment_status, deposit_charged, discount_amount, gift_voucher_amount, customer:customers(name,phone,email,sumup_card_token), service:services(name,duration_minutes,price), resource:resources!resource_id(name), equipment_resource:resources!equipment_resource_id(name)')
           .eq('business_id', BUSINESS_ID).eq('staff_id', staffId).neq('status', 'cancelled')
           .gte('starts_at', startOfDay(new Date()).toISOString())
-          .lte('starts_at', endOfDay(addDays(new Date(), 60)).toISOString())
-          .order('starts_at'),
+          .lte('starts_at', endOfDay(addDays(new Date(), 60)).toISOString()).order('starts_at'),
         supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'room').order('name'),
         supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'equipment').order('name'),
       ])
@@ -106,11 +125,11 @@ export default function StaffPortal() {
     load()
   }, [staffId])
 
+  // Calendar week loader
   const loadCalWeek = useCallback(async (day: Date) => {
     if (!staffId) return
     setCalLoading(true)
-    const ws = startOfWeek(day, { weekStartsOn: 1 })
-    const we = endOfWeek(day, { weekStartsOn: 1 })
+    const ws = startOfWeek(day, { weekStartsOn: 1 }), we = endOfWeek(day, { weekStartsOn: 1 })
     const [apptRes, blockRes] = await Promise.all([
       supabase.from('bookings')
         .select('id, starts_at, ends_at, status, payment_status, customer:customers(name), service:services(name)')
@@ -124,7 +143,43 @@ export default function StaffPortal() {
     setCalLoading(false)
   }, [staffId])
 
-  useEffect(() => { if (activeTab === 'calendar') loadCalWeek(calDay) }, [activeTab, calDay, loadCalWeek])
+  useEffect(() => { if (activeSection === 'calendar') loadCalWeek(calDay) }, [activeSection, calDay, loadCalWeek])
+
+  // Reviews loader (lazy)
+  useEffect(() => {
+    if (activeSection !== 'reviews' || reviewsLoaded || !staffId) return
+    setReviewsLoading(true)
+    supabase.from('staff_reviews').select('id, reviewer_name, rating, comment, is_approved, created_at')
+      .eq('staff_id', staffId).eq('business_id', BUSINESS_ID).order('created_at', { ascending: false })
+      .then(({ data }) => {
+        if (data) setReviews(data as Review[])
+        setReviewsLoading(false)
+        setReviewsLoaded(true)
+      })
+  }, [activeSection, reviewsLoaded, staffId])
+
+  // Clients loader (lazy)
+  useEffect(() => {
+    if (activeSection !== 'clients' || clientsLoaded || !staffId) return
+    setClientsLoading(true)
+    supabase.from('bookings')
+      .select('customer_id, status, starts_at, customer:customers(name,email)')
+      .eq('business_id', BUSINESS_ID).eq('staff_id', staffId).neq('status', 'cancelled')
+      .then(({ data }) => {
+        const map = new Map<string, ClientEntry>()
+        const now = new Date()
+        for (const b of (data ?? []) as unknown as { customer_id: string; status: string; starts_at: string; customer: { name: string; email: string } | null }[]) {
+          if (!b.customer_id) continue
+          if (!map.has(b.customer_id)) map.set(b.customer_id, { customer_id: b.customer_id, name: b.customer?.name ?? '—', email: b.customer?.email ?? '', visits: 0, upcoming: 0 })
+          const entry = map.get(b.customer_id)!
+          if (b.status === 'completed') entry.visits++
+          else if (new Date(b.starts_at) > now) entry.upcoming++
+        }
+        setClients(Array.from(map.values()).sort((a, b) => b.visits - a.visits))
+        setClientsLoading(false)
+        setClientsLoaded(true)
+      })
+  }, [activeSection, clientsLoaded, staffId])
 
   const refreshActivityLog = useCallback(async (id: string) => {
     const { data } = await supabase.from('booking_activity_log').select('id, actor_name, summary, reason, created_at').eq('booking_id', id).order('created_at', { ascending: false })
@@ -187,7 +242,6 @@ export default function StaffPortal() {
     }
     setCharging(false)
   }
-
   async function handleAddBlock() {
     if (!staffId || !blockForm.date || !blockForm.startTime || !blockForm.endTime) return
     setBlockSaving(true)
@@ -202,7 +256,7 @@ export default function StaffPortal() {
     setCalBlocked(p => p.filter(b => b.id !== id))
   }
 
-  if (loading) return <StaffLayout staffName=""><FullPageSpinner /></StaffLayout>
+  if (loading) return <StaffLayout staffName="" activeSection={activeSection} onSection={setActiveSection}><FullPageSpinner /></StaffLayout>
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(calDay, { weekStartsOn: 1 }), i))
   const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => i + START_HOUR)
@@ -211,39 +265,30 @@ export default function StaffPortal() {
     const s = parseISO(bt.starts_at), e = parseISO(bt.ends_at)
     return isSameDay(s, calDay) || isSameDay(e, calDay) || (s < startOfDay(calDay) && e > endOfDay(calDay))
   })
-  const categoryColor = (status: string) => status === 'completed' ? '#6b7280' : 'var(--color-primary)'
+  const color = 'var(--color-primary)'
+  const approvedReviews = reviews.filter(r => r.is_approved)
+  const avgRating = approvedReviews.length ? (approvedReviews.reduce((s, r) => s + r.rating, 0) / approvedReviews.length).toFixed(1) : null
 
   return (
-    <StaffLayout staffName={staffName}>
-      <div className="mb-4">
-        <h1 className="text-xl font-bold text-gray-900">Good {greeting()}, {staffName.split(' ')[0]}</h1>
-        <p className="text-sm text-gray-500">{format(new Date(), 'EEEE, d MMMM yyyy')}</p>
-      </div>
+    <StaffLayout staffName={staffName} activeSection={activeSection} onSection={setActiveSection}>
 
-      {/* Tabs */}
-      <div className="flex border-b border-gray-200 mb-5">
-        {(['schedule', 'calendar'] as const).map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2.5 text-sm font-medium capitalize border-b-2 -mb-px transition-colors ${activeTab === tab ? 'border-(--color-primary) text-(--color-primary)' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-            {tab === 'schedule' ? <span className="flex items-center gap-1.5"><CalendarClock className="h-3.5 w-3.5" />Schedule</span> : <span className="flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" />Calendar</span>}
-          </button>
-        ))}
-      </div>
-
-      {/* ── SCHEDULE TAB ── */}
-      {activeTab === 'schedule' && (
+      {/* ── SCHEDULE ── */}
+      {activeSection === 'schedule' && (
         <>
+          <div className="mb-6">
+            <h1 className="text-xl font-bold text-gray-900">Good {greeting()}, {staffName.split(' ')[0]}</h1>
+            <p className="text-sm text-gray-500">{format(new Date(), 'EEEE, d MMMM yyyy')}</p>
+          </div>
           <section className="mb-8">
             <div className="flex items-center gap-2 mb-3">
               <CalendarClock className="h-4 w-4 text-gray-400" />
               <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Today</h2>
               <span className="text-xs text-gray-400 ml-auto">{todayAppts.length} appointment{todayAppts.length !== 1 ? 's' : ''}</span>
             </div>
-            {todayAppts.length === 0 ? (
-              <Card padding="md" className="text-center py-10"><p className="text-gray-400 text-sm">No appointments today.</p></Card>
-            ) : (
-              <div className="space-y-2">{todayAppts.map(a => <ApptCard key={a.id} appt={a} onClick={() => openDetail(a)} />)}</div>
-            )}
+            {todayAppts.length === 0
+              ? <Card padding="md" className="text-center py-10"><p className="text-gray-400 text-sm">No appointments today.</p></Card>
+              : <div className="space-y-2">{todayAppts.map(a => <ApptCard key={a.id} appt={a} onClick={() => openDetail(a)} />)}</div>
+            }
           </section>
           {upcomingAppts.length > 0 && (
             <section>
@@ -257,10 +302,15 @@ export default function StaffPortal() {
         </>
       )}
 
-      {/* ── CALENDAR TAB ── */}
-      {activeTab === 'calendar' && (
+      {/* ── CALENDAR ── */}
+      {activeSection === 'calendar' && (
         <div>
-          {/* Week strip */}
+          <div className="flex items-center justify-between mb-3">
+            <h1 className="text-xl font-bold text-gray-900">Calendar</h1>
+            <Button size="sm" variant="secondary" onClick={() => { setBlockForm(f => ({ ...f, date: format(calDay, 'yyyy-MM-dd') })); setBlockOpen(true) }}>
+              <Plus className="h-3.5 w-3.5" /> Block Time
+            </Button>
+          </div>
           <div className="flex items-center justify-between mb-3">
             <button onClick={() => setCalDay(d => subDays(d, 7))} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronLeft className="h-4 w-4" /></button>
             <span className="text-xs font-semibold text-gray-500">{format(weekDays[0], 'd MMM')} – {format(weekDays[6], 'd MMM yyyy')}</span>
@@ -274,7 +324,7 @@ export default function StaffPortal() {
               return (
                 <button key={d.toISOString()} onClick={() => setCalDay(d)}
                   className={`flex flex-col items-center py-1.5 rounded-lg text-xs transition-colors ${sel ? 'text-white' : isToday(d) ? 'bg-gray-100 font-semibold text-gray-900' : 'text-gray-500 hover:bg-gray-50'}`}
-                  style={sel ? { backgroundColor: 'var(--color-primary)' } : {}}>
+                  style={sel ? { backgroundColor: color } : {}}>
                   <span>{format(d, 'EEE')[0]}</span>
                   <span className="font-semibold">{format(d, 'd')}</span>
                   {(hasAppts || hasBlock) && <span className={`h-1 w-1 rounded-full mt-0.5 ${sel ? 'bg-white/70' : 'bg-(--color-primary)'}`} />}
@@ -282,16 +332,9 @@ export default function StaffPortal() {
               )
             })}
           </div>
-
-          {/* Day header + add button */}
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm font-semibold text-gray-700">{format(calDay, 'EEEE d MMMM')}</p>
-            <Button size="sm" variant="secondary" onClick={() => { setBlockForm(f => ({ ...f, date: format(calDay, 'yyyy-MM-dd') })); setBlockOpen(true) }}>
-              <Plus className="h-3.5 w-3.5" /> Block Time
-            </Button>
           </div>
-
-          {/* Time grid */}
           <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
             {calLoading ? <div className="py-16 text-center text-sm text-gray-400">Loading…</div> : (
               <div className="relative overflow-y-auto" style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}>
@@ -301,39 +344,29 @@ export default function StaffPortal() {
                     <div className="flex-1 border-t border-gray-100" />
                   </div>
                 ))}
-
-                {/* Blocked times */}
                 {dayBlocked.map(bt => {
                   const { top, height } = positionBlock(bt.starts_at, bt.ends_at)
                   return (
                     <div key={bt.id} className="absolute rounded-md bg-red-50 border-l-4 border-red-400 px-2 py-1 group" style={{ top, height, left: '3.5rem', right: 4 }}>
                       <p className="text-xs font-semibold text-red-700 truncate">{format(parseISO(bt.starts_at), 'HH:mm')}–{format(parseISO(bt.ends_at), 'HH:mm')} Block Time{bt.reason ? `: ${bt.reason}` : ''}</p>
-                      <button onClick={() => handleDeleteBlock(bt.id)} className="absolute top-1 right-1 hidden group-hover:block text-red-400 hover:text-red-600">
-                        <Trash2 className="h-3 w-3" />
-                      </button>
+                      <button onClick={() => handleDeleteBlock(bt.id)} className="absolute top-1 right-1 hidden group-hover:block text-red-400 hover:text-red-600"><Trash2 className="h-3 w-3" /></button>
                     </div>
                   )
                 })}
-
-                {/* Bookings */}
                 {dayAppts.map(a => {
                   const { top, height } = positionBlock(a.starts_at, a.ends_at)
-                  const color = categoryColor(a.status)
+                  const c = a.status === 'completed' ? '#6b7280' : color
                   const isPaid = a.payment_status === 'paid_in_full'
                   return (
-                    <div key={a.id} onClick={() => {
-                      const full = [...todayAppts, ...upcomingAppts].find(x => x.id === a.id)
-                      if (full) openDetail(full)
-                    }}
+                    <div key={a.id} onClick={() => { const full = [...todayAppts, ...upcomingAppts].find(x => x.id === a.id); if (full) openDetail(full) }}
                       className="absolute rounded-md px-2 py-1 cursor-pointer hover:brightness-95 transition-colors"
-                      style={{ top, height, left: '3.5rem', right: 4, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}>
-                      <p className="text-xs font-semibold truncate" style={{ color }}>{format(parseISO(a.starts_at), 'HH:mm')}–{format(parseISO(a.ends_at), 'HH:mm')} {a.service?.name}</p>
+                      style={{ top, height, left: '3.5rem', right: 4, backgroundColor: `${c}22`, borderLeft: `3px solid ${c}` }}>
+                      <p className="text-xs font-semibold truncate" style={{ color: c }}>{format(parseISO(a.starts_at), 'HH:mm')}–{format(parseISO(a.ends_at), 'HH:mm')} {a.service?.name}</p>
                       <p className="text-xs text-gray-600 truncate">{a.customer?.name}</p>
                       {isPaid && <CheckCircle2 className="h-3 w-3 text-green-600 absolute top-1 right-1" />}
                     </div>
                   )
                 })}
-
                 {dayAppts.length === 0 && dayBlocked.length === 0 && (
                   <p className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">No appointments</p>
                 )}
@@ -343,19 +376,84 @@ export default function StaffPortal() {
         </div>
       )}
 
-      {/* Booking detail modal */}
+      {/* ── REVIEWS ── */}
+      {activeSection === 'reviews' && (
+        <div>
+          <div className="mb-6">
+            <h1 className="text-xl font-bold text-gray-900">My Reviews</h1>
+            {avgRating && <p className="text-sm text-gray-500 mt-0.5">{avgRating} ★ average across {approvedReviews.length} published review{approvedReviews.length !== 1 ? 's' : ''}</p>}
+          </div>
+          {reviewsLoading ? <FullPageSpinner /> : reviews.length === 0 ? (
+            <Card padding="md" className="text-center py-16"><p className="text-gray-400 text-sm">No reviews yet.</p></Card>
+          ) : (
+            <div className="space-y-3">
+              {reviews.map(r => (
+                <Card key={r.id} padding="md" className={!r.is_approved ? 'opacity-60' : ''}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <p className="font-semibold text-sm text-gray-900">{r.reviewer_name}</p>
+                        <StarRating n={r.rating} />
+                        {!r.is_approved && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Pending approval</span>}
+                      </div>
+                      {r.comment && <p className="text-sm text-gray-600">{r.comment}</p>}
+                      <p className="text-xs text-gray-400 mt-1">{format(parseISO(r.created_at), 'd MMM yyyy')}</p>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── CLIENTS ── */}
+      {activeSection === 'clients' && (
+        <div>
+          <div className="mb-6">
+            <h1 className="text-xl font-bold text-gray-900">My Clients</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{clients.length} client{clients.length !== 1 ? 's' : ''} seen</p>
+          </div>
+          {clientsLoading ? <FullPageSpinner /> : clients.length === 0 ? (
+            <Card padding="md" className="text-center py-16"><p className="text-gray-400 text-sm">No clients yet.</p></Card>
+          ) : (
+            <div className="space-y-2">
+              {clients.map(c => (
+                <Card key={c.customer_id} padding="sm" className="flex items-center gap-4">
+                  <div className="h-9 w-9 rounded-full bg-gray-100 flex items-center justify-center shrink-0 text-sm font-bold text-gray-500">
+                    {c.name[0]?.toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-900 truncate">{c.name}</p>
+                    <p className="text-xs text-gray-400 truncate">{c.email}</p>
+                  </div>
+                  <div className="flex items-center gap-4 shrink-0 text-right">
+                    <div>
+                      <p className="text-lg font-bold text-gray-900">{c.visits}</p>
+                      <p className="text-xs text-gray-400">visit{c.visits !== 1 ? 's' : ''}</p>
+                    </div>
+                    {c.upcoming > 0 && (
+                      <div>
+                        <p className="text-lg font-bold" style={{ color }}>{c.upcoming}</p>
+                        <p className="text-xs text-gray-400">upcoming</p>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Booking detail modal ── */}
       <Modal open={!!selected} onClose={() => { setSelected(null); setEditMode(false) }} title={selected?.service?.name ?? 'Appointment'} size="sm">
         {selected && (
           <div className="space-y-4">
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between"><dt className="text-gray-500">Customer</dt><dd className="font-medium text-gray-900">{selected.customer?.name}</dd></div>
               {selected.customer?.phone && <div className="flex justify-between"><dt className="text-gray-500">Phone</dt><dd className="text-gray-700">{selected.customer.phone}</dd></div>}
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Time</dt>
-                <dd className="font-medium" style={{ color: 'var(--color-primary)' }}>
-                  {format(parseISO(selected.starts_at), 'EEE d MMM, HH:mm')} – {format(parseISO(selected.ends_at), 'HH:mm')}
-                </dd>
-              </div>
+              <div className="flex justify-between"><dt className="text-gray-500">Time</dt><dd className="font-medium" style={{ color }}>{format(parseISO(selected.starts_at), 'EEE d MMM, HH:mm')} – {format(parseISO(selected.ends_at), 'HH:mm')}</dd></div>
               {selected.resource && <div className="flex justify-between"><dt className="text-gray-500">Room</dt><dd className="text-gray-700">{selected.resource.name}</dd></div>}
               {selected.equipment_resource && <div className="flex justify-between"><dt className="text-gray-500">Equipment</dt><dd className="text-gray-700">{selected.equipment_resource.name}</dd></div>}
               {selected.notes && <div className="flex justify-between gap-4"><dt className="text-gray-500 shrink-0">Notes</dt><dd className="text-gray-700 text-right text-xs">{selected.notes}</dd></div>}
@@ -368,13 +466,11 @@ export default function StaffPortal() {
                 </dd>
               </div>
             </dl>
-
             {editMode ? (
               <div className="space-y-3">
                 <Textarea label="Notes" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Add notes…" />
                 {resources.length > 0 && (
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 mb-1 block">Room</label>
+                  <div><label className="text-sm font-medium text-gray-700 mb-1 block">Room</label>
                     <select value={editResourceId ?? ''} onChange={e => setEditResourceId(e.target.value || null)} className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)">
                       <option value="">No room assigned</option>
                       {resources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
@@ -382,8 +478,7 @@ export default function StaffPortal() {
                   </div>
                 )}
                 {equipmentResources.length > 0 && (
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 mb-1 block">Equipment</label>
+                  <div><label className="text-sm font-medium text-gray-700 mb-1 block">Equipment</label>
                     <select value={editEquipmentResourceId ?? ''} onChange={e => setEditEquipmentResourceId(e.target.value || null)} className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)">
                       <option value="">No equipment</option>
                       {equipmentResources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
@@ -397,18 +492,14 @@ export default function StaffPortal() {
               </div>
             ) : (
               <>
-                {/* Payment */}
                 {selected.payment_status !== 'paid_in_full' && (
                   <div className="border border-gray-100 rounded-lg p-3 space-y-2">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
-                      <CreditCard className="h-3.5 w-3.5" /> Payment
-                    </p>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5"><CreditCard className="h-3.5 w-3.5" /> Payment</p>
                     {selected.customer?.sumup_card_token && (
                       <>
                         <div className="flex gap-2">
                           <select value={chargeType} onChange={e => setChargeType(e.target.value as 'balance' | 'noshow')} className="h-9 flex-1 px-2 text-xs border border-gray-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-(--color-primary)">
-                            <option value="balance">Balance</option>
-                            <option value="noshow">No-show fee</option>
+                            <option value="balance">Balance</option><option value="noshow">No-show fee</option>
                           </select>
                           <div className="relative w-24 shrink-0">
                             <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-500">£</span>
@@ -426,8 +517,6 @@ export default function StaffPortal() {
                     </Button>
                   </div>
                 )}
-
-                {/* Activity */}
                 {activityLog.length > 0 && (
                   <div className="border border-gray-100 rounded-lg p-3 space-y-2 max-h-36 overflow-y-auto">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">History</p>
@@ -440,8 +529,6 @@ export default function StaffPortal() {
                     ))}
                   </div>
                 )}
-
-                {/* Actions */}
                 {cancelOpen ? (
                   <div className="border border-red-200 bg-red-50 rounded-lg p-3 space-y-2">
                     <p className="text-xs font-semibold text-red-800">Reason for cancellation (required)</p>
@@ -458,7 +545,7 @@ export default function StaffPortal() {
                         <UserCheck className="h-4 w-4 shrink-0" /> Checked in at {format(parseISO(selected.checked_in_at), 'HH:mm')}
                       </div>
                     ) : (
-                      <Button fullWidth size="sm" loading={actionLoading} onClick={() => handleCheckIn(selected.id)} style={{ backgroundColor: 'var(--color-primary)' }}>
+                      <Button fullWidth size="sm" loading={actionLoading} onClick={() => handleCheckIn(selected.id)} style={{ backgroundColor: color }}>
                         <UserCheck className="h-4 w-4" /> Check In Customer
                       </Button>
                     )}
@@ -497,8 +584,8 @@ export default function StaffPortal() {
 
 function ApptCard({ appt: a, onClick, compact }: { appt: Appt; onClick: () => void; compact?: boolean }) {
   const startsAt = parseISO(a.starts_at)
-  const dateLabel = isToday(startsAt) ? null : isTomorrow(startsAt) ? 'Tomorrow' : format(startsAt, 'EEE d MMM')
   const isPaid = a.payment_status === 'paid_in_full'
+  const dateLabel = isToday(startsAt) ? null : isTomorrow(startsAt) ? 'Tomorrow' : format(startsAt, 'EEE d MMM')
   return (
     <Card padding="sm" className="flex items-center gap-4 cursor-pointer hover:shadow-md transition-shadow" onClick={onClick}>
       <div className="w-16 text-center shrink-0">
@@ -509,9 +596,7 @@ function ApptCard({ appt: a, onClick, compact }: { appt: Appt; onClick: () => vo
       <div className="flex-1 min-w-0">
         <p className="font-medium text-gray-900 truncate">{a.customer?.name ?? 'Customer'}</p>
         <p className="text-xs text-gray-500 truncate">
-          {a.service?.name}
-          {!compact && a.service && ` · ${formatDuration(a.service.duration_minutes)}`}
-          {a.resource && ` · ${a.resource.name}`}
+          {a.service?.name}{!compact && a.service && ` · ${formatDuration(a.service.duration_minutes)}`}{a.resource && ` · ${a.resource.name}`}
         </p>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">

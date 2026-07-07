@@ -1,15 +1,35 @@
-import { useEffect, useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LogOut } from 'lucide-react'
+import {
+  CalendarClock, CalendarDays, Star, Users, LogOut, Menu, X,
+} from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { useBrandStore } from '@/store/brandStore'
+import { cn } from '@/lib/cn'
 import { CheckInToasts, type CheckInAlert } from '@/components/ui/CheckInToast'
 
-export function StaffLayout({ children, staffName }: { children: React.ReactNode; staffName: string }) {
+export type StaffSection = 'schedule' | 'calendar' | 'reviews' | 'clients'
+
+const NAV: { label: string; icon: typeof CalendarClock; section: StaffSection }[] = [
+  { label: 'Schedule', icon: CalendarClock, section: 'schedule' },
+  { label: 'Calendar', icon: CalendarDays,  section: 'calendar' },
+  { label: 'Reviews',  icon: Star,          section: 'reviews' },
+  { label: 'Clients',  icon: Users,         section: 'clients' },
+]
+
+interface Props {
+  children: React.ReactNode
+  staffName: string
+  activeSection: StaffSection
+  onSection: (s: StaffSection) => void
+}
+
+export function StaffLayout({ children, staffName, activeSection, onSection }: Props) {
   const navigate = useNavigate()
   const { setSession, staffId } = useAuthStore()
   const { config } = useBrandStore()
+  const [mobileOpen, setMobileOpen] = useState(false)
   const [checkInAlerts, setCheckInAlerts] = useState<CheckInAlert[]>([])
 
   const dismissAlert = useCallback((id: string) => {
@@ -20,37 +40,23 @@ export function StaffLayout({ children, staffName }: { children: React.ReactNode
     if (!staffId) return
     const channel = supabase
       .channel('staff-check-ins')
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'bookings', filter: `staff_id=eq.${staffId}` },
-        async (payload) => {
-          const oldRow = payload.old as Record<string, unknown>
-          const newRow = payload.new as Record<string, unknown>
-          if (!newRow.checked_in_at || oldRow.checked_in_at) return
-
-          const { data } = await supabase
-            .from('bookings')
-            .select('id, starts_at, customer:customers(name), service:services(name), resource:resources!resource_id(name)')
-            .eq('id', newRow.id as string)
-            .single()
-
-          if (!data) return
-          const b = data as unknown as {
-            id: string; starts_at: string
-            customer: { name: string } | null; service: { name: string } | null; resource: { name: string } | null
-          }
-          setCheckInAlerts((prev) => [...prev, {
-            id: b.id,
-            customerName: b.customer?.name ?? 'Customer',
-            serviceName: b.service?.name ?? 'appointment',
-            staffName,
-            startsAt: b.starts_at,
-            roomName: b.resource?.name ?? null,
-          }])
-        },
-      )
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bookings', filter: `staff_id=eq.${staffId}` }, async (payload) => {
+        const oldRow = payload.old as Record<string, unknown>
+        const newRow = payload.new as Record<string, unknown>
+        if (!newRow.checked_in_at || oldRow.checked_in_at) return
+        const { data } = await supabase
+          .from('bookings')
+          .select('id, starts_at, customer:customers(name), service:services(name), resource:resources!resource_id(name)')
+          .eq('id', newRow.id as string).single()
+        if (!data) return
+        const b = data as unknown as { id: string; starts_at: string; customer: { name: string } | null; service: { name: string } | null; resource: { name: string } | null }
+        setCheckInAlerts((prev) => [...prev, {
+          id: b.id, customerName: b.customer?.name ?? 'Customer',
+          serviceName: b.service?.name ?? 'appointment', staffName,
+          startsAt: b.starts_at, roomName: b.resource?.name ?? null,
+        }])
+      })
       .subscribe()
-
     return () => { supabase.removeChannel(channel) }
   }, [staffId, staffName])
 
@@ -60,27 +66,80 @@ export function StaffLayout({ children, staffName }: { children: React.ReactNode
     navigate('/admin/login')
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <CheckInToasts alerts={checkInAlerts} onDismiss={dismissAlert} />
-      <header className="bg-white border-b border-gray-100 sticky top-0 z-30">
-        <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between">
-          <div>
-            <span className="font-semibold text-sm" style={{ color: 'var(--color-primary)' }}>
-              {config.brandName}
-            </span>
-            <span className="text-xs text-gray-400 ml-2">· {staffName}</span>
-          </div>
+  const NavLinks = ({ onClose }: { onClose?: () => void }) => (
+    <>
+      {NAV.map(item => {
+        const active = activeSection === item.section
+        return (
           <button
-            onClick={handleLogout}
-            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors"
+            key={item.section}
+            onClick={() => { onSection(item.section); onClose?.(); setMobileOpen(false) }}
+            className={cn(
+              'flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+              active ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-100',
+            )}
           >
-            <LogOut className="h-3.5 w-3.5" />
-            Sign out
+            <item.icon className="h-4 w-4 shrink-0" />
+            {item.label}
           </button>
+        )
+      })}
+    </>
+  )
+
+  const Sidebar = ({ onClose }: { onClose?: () => void }) => (
+    <div className="flex flex-col h-full">
+      <div className="px-4 py-5 border-b border-gray-100">
+        <span className="font-bold text-base" style={{ color: 'var(--color-primary)' }}>{config.brandName}</span>
+        <p className="text-xs text-gray-400 mt-0.5 truncate">{staffName}</p>
+      </div>
+      <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
+        <NavLinks onClose={onClose} />
+      </nav>
+      <div className="p-3 border-t border-gray-100">
+        <button onClick={handleLogout} className="flex items-center gap-3 px-3 py-2.5 w-full rounded-lg text-sm font-medium text-red-500 hover:bg-red-50 transition-colors">
+          <LogOut className="h-4 w-4" /> Sign Out
+        </button>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="flex h-screen bg-gray-50 overflow-hidden">
+      <CheckInToasts alerts={checkInAlerts} onDismiss={dismissAlert} />
+
+      {/* Desktop sidebar */}
+      <aside className="hidden lg:flex flex-col w-52 bg-white border-r border-gray-100 shrink-0">
+        <Sidebar />
+      </aside>
+
+      {/* Mobile sidebar */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
+          <aside className="relative w-52 h-full bg-white border-r border-gray-100 flex flex-col">
+            <div className="absolute top-3 right-3">
+              <button onClick={() => setMobileOpen(false)} className="p-1 rounded text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <Sidebar onClose={() => setMobileOpen(false)} />
+          </aside>
         </div>
-      </header>
-      <main className="max-w-2xl mx-auto px-4 py-6">{children}</main>
+      )}
+
+      {/* Main area */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <header className="lg:hidden flex items-center gap-3 px-4 h-14 bg-white border-b border-gray-100">
+          <button onClick={() => setMobileOpen(true)} className="p-1.5 rounded text-gray-500 hover:bg-gray-100">
+            <Menu className="h-5 w-5" />
+          </button>
+          <span className="font-semibold text-sm" style={{ color: 'var(--color-primary)' }}>
+            {config.brandName}
+          </span>
+        </header>
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
+      </div>
     </div>
   )
 }
