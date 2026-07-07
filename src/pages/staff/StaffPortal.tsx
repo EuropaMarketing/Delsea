@@ -91,6 +91,7 @@ export default function StaffPortal() {
   const [blockOpen, setBlockOpen] = useState(false)
   const [blockForm, setBlockForm] = useState({ date: '', startTime: '09:00', endTime: '17:00', reason: '' })
   const [blockSaving, setBlockSaving] = useState(false)
+  const [blockError, setBlockError] = useState('')
 
   // ── Reviews ───────────────────────────────────────────────────────────────
   const [reviews, setReviews] = useState<Review[]>([])
@@ -270,15 +271,24 @@ export default function StaffPortal() {
   async function handleAddBlock() {
     if (!staffId || !blockForm.date || !blockForm.startTime || !blockForm.endTime) return
     setBlockSaving(true)
+    setBlockError('')
     const starts = new Date(`${blockForm.date}T${blockForm.startTime}`)
     const ends = new Date(`${blockForm.date}T${blockForm.endTime}`)
-    const { data } = await supabase.from('blocked_times').insert({ staff_id: staffId, starts_at: starts.toISOString(), ends_at: ends.toISOString(), reason: blockForm.reason.trim() || null }).select().single()
-    if (data) { setCalBlocked(p => [...p, data as BlockedTime]); setBlockOpen(false); setBlockForm({ date: '', startTime: '09:00', endTime: '17:00', reason: '' }) }
+    const { data, error } = await supabase.from('blocked_times')
+      .insert({ staff_id: staffId, starts_at: starts.toISOString(), ends_at: ends.toISOString(), reason: blockForm.reason.trim() || null })
+      .select().single()
+    if (error) {
+      setBlockError('Could not save — make sure you have permission to block time.')
+    } else if (data) {
+      setCalBlocked(p => [...p, data as BlockedTime])
+      setBlockOpen(false)
+      setBlockForm({ date: '', startTime: '09:00', endTime: '17:00', reason: '' })
+    }
     setBlockSaving(false)
   }
   async function handleDeleteBlock(id: string) {
-    await supabase.from('blocked_times').delete().eq('id', id)
-    setCalBlocked(p => p.filter(b => b.id !== id))
+    const { error } = await supabase.from('blocked_times').delete().eq('id', id)
+    if (!error) setCalBlocked(p => p.filter(b => b.id !== id))
   }
 
   if (loading) return <StaffLayout staffName="" activeSection={activeSection} onSection={setActiveSection}><FullPageSpinner /></StaffLayout>
@@ -611,7 +621,7 @@ export default function StaffPortal() {
       </Modal>
 
       {/* Block Time modal */}
-      <Modal open={blockOpen} onClose={() => setBlockOpen(false)} title="Block Time" size="sm">
+      <Modal open={blockOpen} onClose={() => { setBlockOpen(false); setBlockError('') }} title="Block Time" size="sm">
         <div className="space-y-3">
           <Input label="Date" type="date" value={blockForm.date} onChange={e => setBlockForm(f => ({ ...f, date: e.target.value }))} />
           <div className="grid grid-cols-2 gap-3">
@@ -619,6 +629,7 @@ export default function StaffPortal() {
             <Input label="Until" type="time" value={blockForm.endTime} onChange={e => setBlockForm(f => ({ ...f, endTime: e.target.value }))} />
           </div>
           <Input label="Reason (optional)" value={blockForm.reason} onChange={e => setBlockForm(f => ({ ...f, reason: e.target.value }))} placeholder="e.g. Lunch break, training…" />
+          {blockError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{blockError}</p>}
           <Button fullWidth loading={blockSaving} disabled={!blockForm.date || !blockForm.startTime || !blockForm.endTime} onClick={handleAddBlock}>
             Block Time
           </Button>
