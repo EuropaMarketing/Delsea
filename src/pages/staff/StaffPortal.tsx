@@ -63,6 +63,8 @@ export default function StaffPortal() {
   const [upcomingAppts, setUpcomingAppts] = useState<Appt[]>([])
   const [resources, setResources] = useState<Resource[]>([])
   const [equipmentResources, setEquipmentResources] = useState<Resource[]>([])
+  const [weekCancellations, setWeekCancellations] = useState(0)
+  const [nextApptIn, setNextApptIn] = useState('—')
   const [loading, setLoading] = useState(true)
 
   const [selected, setSelected] = useState<Appt | null>(null)
@@ -104,7 +106,7 @@ export default function StaffPortal() {
   useEffect(() => {
     if (!staffId) return
     async function load() {
-      const [staffRes, apptRes, resRes, equipRes] = await Promise.all([
+      const [staffRes, apptRes, resRes, equipRes, cancelRes] = await Promise.all([
         supabase.from('staff').select('name').eq('id', staffId).single(),
         supabase.from('bookings')
           .select('id, starts_at, ends_at, status, notes, resource_id, equipment_resource_id, checked_in_at, payment_status, deposit_charged, discount_amount, gift_voucher_amount, customer:customers(name,phone,email,sumup_card_token), service:services(name,duration_minutes,price), resource:resources!resource_id(name), equipment_resource:resources!equipment_resource_id(name)')
@@ -113,6 +115,10 @@ export default function StaffPortal() {
           .lte('starts_at', endOfDay(addDays(new Date(), 60)).toISOString()).order('starts_at'),
         supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'room').order('name'),
         supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'equipment').order('name'),
+        supabase.from('bookings').select('id', { count: 'exact', head: true })
+          .eq('business_id', BUSINESS_ID).eq('staff_id', staffId).eq('status', 'cancelled')
+          .gte('starts_at', startOfWeek(new Date(), { weekStartsOn: 1 }).toISOString())
+          .lte('starts_at', endOfWeek(new Date(), { weekStartsOn: 1 }).toISOString()),
       ])
       if (staffRes.data) setStaffName(staffRes.data.name)
       const all = (apptRes.data ?? []) as unknown as Appt[]
@@ -120,12 +126,31 @@ export default function StaffPortal() {
       setUpcomingAppts(all.filter(a => !isToday(parseISO(a.starts_at))))
       if (resRes.data) setResources(resRes.data as Resource[])
       if (equipRes.data) setEquipmentResources(equipRes.data as Resource[])
+      setWeekCancellations((cancelRes as { count: number | null }).count ?? 0)
       setLoading(false)
     }
     load()
   }, [staffId])
 
   // Calendar week loader
+  // Live countdown to next appointment — updates every 30 seconds
+  useEffect(() => {
+    function tick() {
+      const all = [...todayAppts, ...upcomingAppts]
+      const next = all
+        .filter(a => (a.status === 'confirmed' || a.status === 'pending') && new Date(a.starts_at) > new Date())
+        .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())[0]
+      if (!next) { setNextApptIn('None'); return }
+      const diff = differenceInMinutes(parseISO(next.starts_at), new Date())
+      if (diff <= 0) { setNextApptIn('Now'); return }
+      const h = Math.floor(diff / 60), m = diff % 60
+      setNextApptIn(h > 0 ? `${h}h ${m}m` : `${m}m`)
+    }
+    tick()
+    const timer = setInterval(tick, 30000)
+    return () => clearInterval(timer)
+  }, [todayAppts, upcomingAppts])
+
   const loadCalWeek = useCallback(async (day: Date) => {
     if (!staffId) return
     setCalLoading(true)
@@ -275,10 +300,31 @@ export default function StaffPortal() {
       {/* ── SCHEDULE ── */}
       {activeSection === 'schedule' && (
         <>
-          <div className="mb-6">
+          <div className="mb-5">
             <h1 className="text-xl font-bold text-gray-900">Good {greeting()}, {staffName.split(' ')[0]}</h1>
             <p className="text-sm text-gray-500">{format(new Date(), 'EEEE, d MMMM yyyy')}</p>
           </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+            {[
+              { label: 'Remaining Today', value: todayAppts.filter(a => a.status === 'confirmed' || a.status === 'pending').length, color: 'text-blue-600', bg: 'bg-blue-50', icon: CalendarClock },
+              { label: 'Completed Today', value: todayAppts.filter(a => a.status === 'completed').length, color: 'text-green-600', bg: 'bg-green-50', icon: CheckCircle2 },
+              { label: 'Cancellations', value: weekCancellations, color: 'text-red-500', bg: 'bg-red-50', icon: XCircle },
+              { label: 'Next Appt In', value: nextApptIn, color: 'text-purple-600', bg: 'bg-purple-50', icon: Clock },
+            ].map(s => (
+              <Card key={s.label} padding="md">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className={`p-1.5 rounded-lg ${s.bg}`}>
+                    <s.icon className={`h-3.5 w-3.5 ${s.color}`} />
+                  </div>
+                </div>
+                <p className="text-2xl font-extrabold text-gray-900">{s.value}</p>
+                <p className="text-xs text-gray-500 mt-0.5 leading-tight">{s.label}</p>
+              </Card>
+            ))}
+          </div>
+
           <section className="mb-8">
             <div className="flex items-center gap-2 mb-3">
               <CalendarClock className="h-4 w-4 text-gray-400" />
