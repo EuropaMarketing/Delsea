@@ -87,7 +87,7 @@ export function StaffLayout({ children, staffName, activeSection, onSection }: P
     </>
   )
 
-  const Sidebar = ({ onClose }: { onClose?: () => void }) => (
+  const SidebarContent = ({ onClose }: { onClose?: () => void }) => (
     <div className="flex flex-col h-full">
       <div className="px-4 py-5 border-b border-gray-100">
         <span className="font-bold text-sm whitespace-nowrap" style={{ color: 'var(--color-primary)' }}>{config.brandName}</span>
@@ -106,15 +106,33 @@ export function StaffLayout({ children, staffName, activeSection, onSection }: P
   )
 
   return (
-    <div className="flex bg-gray-50 overflow-hidden" style={{ height: '100dvh' }}>
+    <>
       <CheckInToasts alerts={checkInAlerts} onDismiss={dismissAlert} />
 
-      {/* Desktop sidebar */}
-      <aside className="hidden lg:flex flex-col w-56 bg-white border-r border-gray-100 shrink-0">
-        <Sidebar />
-      </aside>
+      {/* ── MOBILE layout: sticky header + normal page scroll ── */}
+      <div className="lg:hidden flex flex-col min-h-screen bg-gray-50">
+        <header className="sticky top-0 z-30 flex items-center gap-3 px-4 h-14 bg-white border-b border-gray-100 shrink-0">
+          <button onClick={() => setMobileOpen(true)} className="p-1.5 rounded text-gray-500 hover:bg-gray-100">
+            <Menu className="h-5 w-5" />
+          </button>
+          <span className="font-semibold text-sm" style={{ color: 'var(--color-primary)' }}>
+            {config.brandName}
+          </span>
+        </header>
+        <main className="flex-1 overflow-x-hidden p-4">{children}</main>
+      </div>
 
-      {/* Mobile sidebar */}
+      {/* ── DESKTOP layout: sidebar + scrollable main ── */}
+      <div className="hidden lg:flex h-screen bg-gray-50 overflow-hidden">
+        <aside className="flex flex-col w-56 bg-white border-r border-gray-100 shrink-0">
+          <SidebarContent />
+        </aside>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <main className="flex-1 overflow-y-auto overflow-x-hidden p-6">{children}</main>
+        </div>
+      </div>
+
+      {/* Mobile sidebar overlay (shared) */}
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
@@ -124,23 +142,10 @@ export function StaffLayout({ children, staffName, activeSection, onSection }: P
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <Sidebar onClose={() => setMobileOpen(false)} />
+            <SidebarContent onClose={() => setMobileOpen(false)} />
           </aside>
         </div>
       )}
-
-      {/* Main area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="lg:hidden flex items-center gap-3 px-4 h-14 bg-white border-b border-gray-100">
-          <button onClick={() => setMobileOpen(true)} className="p-1.5 rounded text-gray-500 hover:bg-gray-100">
-            <Menu className="h-5 w-5" />
-          </button>
-          <span className="font-semibold text-sm" style={{ color: 'var(--color-primary)' }}>
-            {config.brandName}
-          </span>
-        </header>
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6">{children}</main>
-      </div>
-    </div>
+    </>
   )
 }

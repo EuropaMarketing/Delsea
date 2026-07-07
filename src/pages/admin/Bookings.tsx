@@ -259,8 +259,35 @@ export default function AdminBookings() {
         ))}
       </div>
 
-      {/* Table */}
-      <div className="bg-white border border-gray-200 brand-card overflow-hidden">
+      {/* Mobile cards — hidden on desktop */}
+      <div className="sm:hidden bg-white border border-gray-200 brand-card overflow-hidden divide-y divide-gray-100">
+        {loading && bookings.length === 0 ? (
+          <div className="py-12 flex justify-center"><FullPageSpinner /></div>
+        ) : fetchError ? (
+          <div className="p-4 text-center"><p className="text-red-500 text-sm">{fetchError}</p></div>
+        ) : bookings.length === 0 ? (
+          <div className="py-12 text-center text-gray-400 text-sm">No bookings found.</div>
+        ) : bookings.map((b) => (
+          <button key={b.id} onClick={() => openBooking(b)} className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors">
+            <div className="flex items-start justify-between gap-2 mb-1">
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-gray-900 text-sm truncate">{b.customer?.name}</p>
+                <p className="text-xs text-gray-500 truncate">{b.service?.name} · {b.staff?.name ?? 'Any'}</p>
+              </div>
+              <Badge variant={statusBadgeVariant(b.status)} className="capitalize shrink-0">{b.status}</Badge>
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-gray-400">{format(parseISO(b.starts_at), 'dd/MM/yyyy HH:mm')}</p>
+              <p className="text-sm font-bold text-gray-900">
+                {b.service ? formatCurrency(b.service.price - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0)) : '—'}
+              </p>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* Desktop table — hidden on mobile */}
+      <div className="hidden sm:block bg-white border border-gray-200 brand-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>

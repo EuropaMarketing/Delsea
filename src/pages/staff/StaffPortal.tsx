@@ -1099,16 +1099,17 @@ function ApptCard({ appt: a, onClick, compact }: { appt: Appt; onClick: () => vo
   const isPaid = a.payment_status === 'paid_in_full'
   const dateLabel = isToday(startsAt) ? null : isTomorrow(startsAt) ? 'Tomorrow' : format(startsAt, 'EEE d MMM')
   return (
-    <Card padding="sm" className="flex items-center gap-4 cursor-pointer hover:shadow-md transition-shadow" onClick={onClick}>
-      <div className="w-16 text-center shrink-0">
-        {dateLabel && <p className="text-xs text-gray-400 mb-0.5">{dateLabel}</p>}
-        <p className="font-bold text-sm" style={{ color: 'var(--color-primary)' }}>{format(startsAt, 'HH:mm')}</p>
+    <Card padding="sm" className="flex items-center gap-3 cursor-pointer hover:shadow-md transition-shadow" onClick={onClick}>
+      <div className="w-12 sm:w-16 text-center shrink-0">
+        {dateLabel && <p className="text-xs text-gray-400 mb-0.5 hidden sm:block">{dateLabel}</p>}
+        {dateLabel && <p className="text-xs text-gray-400 mb-0.5 sm:hidden">{format(startsAt, 'd MMM')}</p>}
+        <p className="font-bold text-xs sm:text-sm" style={{ color: 'var(--color-primary)' }}>{format(startsAt, 'HH:mm')}</p>
         {!compact && <p className="text-xs text-gray-400">{format(parseISO(a.ends_at), 'HH:mm')}</p>}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="font-medium text-gray-900 truncate">{a.customer?.name ?? 'Customer'}</p>
-        <p className="text-xs text-gray-500 truncate">
-          {a.service?.name}{!compact && a.service && ` · ${formatDuration(a.service.duration_minutes)}`}{a.resource && ` · ${a.resource.name}`}
+        <p className="font-medium text-gray-900 text-sm leading-snug line-clamp-1">{a.customer?.name ?? 'Customer'}</p>
+        <p className="text-xs text-gray-500 line-clamp-1">
+          {a.service?.name}{!compact && a.service && <span className="hidden sm:inline"> · {formatDuration(a.service.duration_minutes)}</span>}{a.resource && ` · ${a.resource.name}`}
         </p>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
