@@ -590,36 +590,50 @@ export default function StaffPortal() {
 
           {/* Fixed controls — don't scroll */}
           <div className="shrink-0">
-            <div className="flex items-center justify-between mb-2">
-              <h1 className="text-base font-bold text-gray-900 lg:text-xl">Calendar</h1>
-              <Button size="sm" variant="secondary" onClick={() => { setBlockForm(f => ({ ...f, startDate: format(calDay, 'yyyy-MM-dd'), endDate: format(calDay, 'yyyy-MM-dd') })); setBlockOpen(true) }}>
+            {/* Header: title + block button — icon-only button on mobile */}
+            <div className="flex items-center justify-between mb-1.5 lg:mb-2">
+              <h1 className="text-sm font-bold text-gray-900 lg:text-xl">Calendar</h1>
+              <button
+                onClick={() => { setBlockForm(f => ({ ...f, startDate: format(calDay, 'yyyy-MM-dd'), endDate: format(calDay, 'yyyy-MM-dd') })); setBlockOpen(true) }}
+                className="flex items-center gap-1 text-xs font-medium px-2 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors text-gray-600 lg:hidden"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span className="hidden xs:inline">Block</span>
+              </button>
+              <Button size="sm" variant="secondary" className="hidden lg:flex" onClick={() => { setBlockForm(f => ({ ...f, startDate: format(calDay, 'yyyy-MM-dd'), endDate: format(calDay, 'yyyy-MM-dd') })); setBlockOpen(true) }}>
                 <Plus className="h-3.5 w-3.5" /> Block Time
               </Button>
             </div>
-            <div className="flex items-center justify-between mb-2">
-              <button onClick={() => setCalDay(d => subDays(d, 7))} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronLeft className="h-4 w-4" /></button>
+            {/* Week navigation — compact on mobile */}
+            <div className="flex items-center justify-between mb-1.5 lg:mb-2">
+              <button onClick={() => setCalDay(d => subDays(d, 7))} className="p-1 rounded hover:bg-gray-100 text-gray-500 lg:p-1.5 lg:rounded-lg"><ChevronLeft className="h-3.5 w-3.5 lg:h-4 lg:w-4" /></button>
               <span className="text-xs font-semibold text-gray-500">
                 {format(weekDays[0], 'd MMM')} – {format(weekDays[6], 'd MMM')}
               </span>
-              <button onClick={() => setCalDay(d => addDays(d, 7))} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronRight className="h-4 w-4" /></button>
+              <button onClick={() => setCalDay(d => addDays(d, 7))} className="p-1 rounded hover:bg-gray-100 text-gray-500 lg:p-1.5 lg:rounded-lg"><ChevronRight className="h-3.5 w-3.5 lg:h-4 lg:w-4" /></button>
             </div>
-            <div className="grid grid-cols-7 gap-1 mb-2">
+            {/* Day strip — tighter on mobile */}
+            <div className="grid grid-cols-7 gap-0.5 mb-1.5 lg:gap-1 lg:mb-2">
               {weekDays.map(d => {
                 const hasAppts = calWeekAppts.some(a => isSameDay(parseISO(a.starts_at), d))
                 const hasBlock = calBlocked.some(bt => isSameDay(parseISO(bt.starts_at), d))
                 const sel = isSameDay(d, calDay)
                 return (
                   <button key={d.toISOString()} onClick={() => setCalDay(d)}
-                    className={`flex flex-col items-center py-1.5 rounded-lg text-xs transition-colors ${sel ? 'text-white' : isToday(d) ? 'bg-gray-100 font-semibold text-gray-900' : 'text-gray-500 hover:bg-gray-50'}`}
+                    className={`flex flex-col items-center py-1 rounded text-xs transition-colors lg:py-1.5 lg:rounded-lg ${sel ? 'text-white' : isToday(d) ? 'bg-gray-100 font-semibold text-gray-900' : 'text-gray-500 hover:bg-gray-50'}`}
                     style={sel ? { backgroundColor: color } : {}}>
-                    <span>{format(d, 'EEE')[0]}</span>
-                    <span className="font-semibold">{format(d, 'd')}</span>
+                    <span className="text-[10px] lg:text-xs">{format(d, 'EEE')[0]}</span>
+                    <span className="font-semibold text-[11px] lg:text-xs">{format(d, 'd')}</span>
                     {(hasAppts || hasBlock) && <span className={`h-1 w-1 rounded-full mt-0.5 ${sel ? 'bg-white/70' : 'bg-(--color-primary)'}`} />}
                   </button>
                 )
               })}
             </div>
-            <p className="text-xs font-semibold text-gray-700 mb-2">{format(calDay, 'EEE d MMMM')}</p>
+            {/* Selected day label — short on mobile */}
+            <p className="text-xs font-semibold text-gray-700 mb-1.5 lg:mb-2">
+              <span className="lg:hidden">{format(calDay, 'EEE d MMM')}</span>
+              <span className="hidden lg:inline">{format(calDay, 'EEEE d MMMM')}</span>
+            </p>
           </div>
 
           {/* Time grid — fills remaining height, scrolls only vertically */}
