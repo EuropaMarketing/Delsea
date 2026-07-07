@@ -79,7 +79,7 @@ export default function AdminBookings() {
     setLoading(true)
     let query = supabase
       .from('bookings')
-      .select('*, service:services(name,price), staff:staff(name), customer:customers(name,email,sumup_card_token), resource:resources(name)')
+      .select('*, service:services(name,price), staff:staff(name), customer:customers(name,email,sumup_card_token), resource:resources!resource_id(name)')
       .eq('business_id', BUSINESS_ID)
       .order('starts_at', { ascending: false })
       .range(pageNum * PAGE_SIZE, (pageNum + 1) * PAGE_SIZE - 1)

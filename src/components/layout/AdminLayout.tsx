@@ -73,7 +73,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
 
           const { data } = await supabase
             .from('bookings')
-            .select('id, starts_at, customer:customers(name), service:services(name), staff:staff(name), resource:resources(name)')
+            .select('id, starts_at, customer:customers(name), service:services(name), staff:staff(name), resource:resources!resource_id(name)')
             .eq('id', newRow.id as string)
             .single()
 

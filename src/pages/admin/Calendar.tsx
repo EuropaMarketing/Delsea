@@ -198,7 +198,7 @@ export default function AdminCalendar() {
         supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name'),
         supabase
           .from('bookings')
-          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token), resource:resources(name)')
+          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token), resource:resources!resource_id(name)')
           .eq('business_id', BUSINESS_ID)
           .gte('starts_at', dayStart)
           .lte('starts_at', dayEnd)
