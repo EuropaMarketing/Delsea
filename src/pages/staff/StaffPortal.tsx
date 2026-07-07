@@ -90,6 +90,8 @@ export default function StaffPortal() {
   const [calDay, setCalDay] = useState(() => new Date())
   const [calWeekAppts, setCalWeekAppts] = useState<CalAppt[]>([])
   const [calBlocked, setCalBlocked] = useState<BlockedTime[]>([])
+  type DragState = { id: string; type: 'booking' | 'block'; startY: number; originalEndsAt: string; currentEndsAt: string }
+  const [drag, setDrag] = useState<DragState | null>(null)
   // Cell click popover
   const [cellPopover, setCellPopover] = useState<{ x: number; y: number; time: string } | null>(null)
   // New booking from calendar
@@ -337,6 +339,35 @@ export default function StaffPortal() {
     if (!error) setCalBlocked(p => p.filter(b => b.id !== id))
   }
 
+  function handleDragMove(e: React.MouseEvent<HTMLDivElement>) {
+    if (!drag) return
+    const deltaY = e.clientY - drag.startY
+    const rawDeltaMins = (deltaY / HOUR_HEIGHT) * 60
+    const snappedDeltaMins = Math.round(rawDeltaMins / 15) * 15
+    const newEnd = addMinutes(parseISO(drag.originalEndsAt), snappedDeltaMins)
+    // Prevent dragging end before start
+    const item = drag.type === 'booking'
+      ? calWeekAppts.find(b => b.id === drag.id)
+      : calBlocked.find(b => b.id === drag.id)
+    if (item && newEnd <= parseISO(item.starts_at)) return
+    setDrag(d => d ? { ...d, currentEndsAt: newEnd.toISOString() } : null)
+  }
+
+  async function handleDragEnd() {
+    if (!drag || drag.currentEndsAt === drag.originalEndsAt) { setDrag(null); return }
+    const newEndsAt = drag.currentEndsAt
+    if (drag.type === 'booking') {
+      await supabase.from('bookings').update({ ends_at: newEndsAt }).eq('id', drag.id)
+      setCalWeekAppts(p => p.map(b => b.id === drag.id ? { ...b, ends_at: newEndsAt } : b))
+      const up = (p: Appt[]) => p.map(a => a.id === drag.id ? { ...a, ends_at: newEndsAt } : a)
+      setTodayAppts(up); setUpcomingAppts(up)
+    } else {
+      await supabase.from('blocked_times').update({ ends_at: newEndsAt }).eq('id', drag.id)
+      setCalBlocked(p => p.map(b => b.id === drag.id ? { ...b, ends_at: newEndsAt } : b))
+    }
+    setDrag(null)
+  }
+
   function handleGridClick(e: React.MouseEvent<HTMLDivElement>) {
     if ((e.target as HTMLElement).closest('[data-block]')) return
     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
@@ -511,7 +542,14 @@ export default function StaffPortal() {
           </div>
           <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
             {calLoading ? <div className="py-16 text-center text-sm text-gray-400">Loading…</div> : (
-              <div className="relative overflow-y-auto cursor-pointer" style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }} onClick={handleGridClick}>
+              <div
+                className="relative overflow-y-auto cursor-pointer"
+                style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR), userSelect: drag ? 'none' : 'auto' }}
+                onClick={handleGridClick}
+                onMouseMove={handleDragMove}
+                onMouseUp={handleDragEnd}
+                onMouseLeave={() => { if (drag) setDrag(null) }}
+              >
                 {hours.map(h => (
                   <div key={h} className="absolute w-full flex" style={{ top: (h - START_HOUR) * HOUR_HEIGHT, height: HOUR_HEIGHT }}>
                     <span className="text-xs text-gray-400 w-12 text-right pr-2 pt-0.5 shrink-0">{h}:00</span>
@@ -519,34 +557,54 @@ export default function StaffPortal() {
                   </div>
                 ))}
                 {dayBlocked.map(bt => {
-                  const { top, height } = positionBlock(bt.starts_at, bt.ends_at)
+                  const liveEnd = drag?.id === bt.id ? drag.currentEndsAt : bt.ends_at
+                  const { top, height } = positionBlock(bt.starts_at, liveEnd)
+                  const isDragging = drag?.id === bt.id
                   return (
-                    <div key={bt.id} data-block className="absolute rounded-md bg-red-50 border-l-4 border-red-400 px-2 py-1 group" style={{ top, height, left: '3.5rem', right: 4 }}>
-                      <p className="text-xs font-semibold text-red-700 truncate">{format(parseISO(bt.starts_at), 'HH:mm')}–{format(parseISO(bt.ends_at), 'HH:mm')} Block Time{bt.reason ? `: ${bt.reason}` : ''}</p>
+                    <div key={bt.id} data-block className={`absolute rounded-md bg-red-50 border-l-4 border-red-400 px-2 py-1 group ${isDragging ? 'shadow-lg' : ''}`} style={{ top, height, left: '3.5rem', right: 4 }}>
+                      <p className="text-xs font-semibold text-red-700 truncate">{format(parseISO(bt.starts_at), 'HH:mm')}–{format(parseISO(liveEnd), 'HH:mm')} Block Time{bt.reason ? `: ${bt.reason}` : ''}</p>
                       <button onClick={() => handleDeleteBlock(bt.id)} className="absolute top-1 right-1 hidden group-hover:block text-red-400 hover:text-red-600"><Trash2 className="h-3 w-3" /></button>
+                      {/* Drag handle */}
+                      <div
+                        data-block
+                        className="absolute bottom-0 left-0 right-0 h-3 cursor-s-resize flex items-end justify-center pb-0.5"
+                        onMouseDown={e => { e.stopPropagation(); e.preventDefault(); setDrag({ id: bt.id, type: 'block', startY: e.clientY, originalEndsAt: bt.ends_at, currentEndsAt: bt.ends_at }) }}
+                      >
+                        <div className="w-8 h-1 rounded-full bg-red-300 opacity-60" />
+                      </div>
                     </div>
                   )
                 })}
                 {dayAppts.map(a => {
-                  const { top, height } = positionBlock(a.starts_at, a.ends_at)
+                  const liveEnd = drag?.id === a.id ? drag.currentEndsAt : a.ends_at
+                  const { top, height } = positionBlock(a.starts_at, liveEnd)
                   const c = a.status === 'completed' ? '#6b7280' : color
                   const isPaid = a.payment_status === 'paid_in_full'
+                  const isDragging = drag?.id === a.id
                   return (
                     <div key={a.id} onClick={async () => {
+                        if (drag) return // ignore clicks after drag
                         const full = [...todayAppts, ...upcomingAppts].find(x => x.id === a.id)
                         if (full) { openDetail(full); return }
-                        // Booking not in schedule list (e.g. past appointment) — fetch on demand
                         const { data } = await supabase.from('bookings')
                           .select('id, starts_at, ends_at, status, notes, resource_id, equipment_resource_id, checked_in_at, payment_status, deposit_charged, discount_amount, gift_voucher_amount, customer:customers(name,phone,email,sumup_card_token), service:services(name,duration_minutes,price), resource:resources!resource_id(name), equipment_resource:resources!equipment_resource_id(name)')
                           .eq('id', a.id).single()
                         if (data) openDetail(data as unknown as Appt)
                       }}
                       data-block
-                      className="absolute rounded-md px-2 py-1 cursor-pointer hover:brightness-95 transition-colors"
+                      className={`absolute rounded-md px-2 py-1 cursor-pointer transition-colors ${isDragging ? 'shadow-lg' : 'hover:brightness-95'}`}
                       style={{ top, height, left: '3.5rem', right: 4, backgroundColor: `${c}22`, borderLeft: `3px solid ${c}` }}>
-                      <p className="text-xs font-semibold truncate" style={{ color: c }}>{format(parseISO(a.starts_at), 'HH:mm')}–{format(parseISO(a.ends_at), 'HH:mm')} {a.service?.name}</p>
+                      <p className="text-xs font-semibold truncate" style={{ color: c }}>{format(parseISO(a.starts_at), 'HH:mm')}–{format(parseISO(liveEnd), 'HH:mm')} {a.service?.name}</p>
                       <p className="text-xs text-gray-600 truncate">{a.customer?.name}</p>
                       {isPaid && <CheckCircle2 className="h-3 w-3 text-green-600 absolute top-1 right-1" />}
+                      {/* Drag handle */}
+                      <div
+                        data-block
+                        className="absolute bottom-0 left-0 right-0 h-3 cursor-s-resize flex items-end justify-center pb-0.5"
+                        onMouseDown={e => { e.stopPropagation(); e.preventDefault(); setDrag({ id: a.id, type: 'booking', startY: e.clientY, originalEndsAt: a.ends_at, currentEndsAt: a.ends_at }) }}
+                      >
+                        <div className="w-8 h-1 rounded-full opacity-40" style={{ backgroundColor: c }} />
+                      </div>
                     </div>
                   )
                 })}
