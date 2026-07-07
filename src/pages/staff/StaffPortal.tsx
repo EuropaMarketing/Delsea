@@ -183,7 +183,7 @@ export default function StaffPortal() {
     if (activeSection !== 'calendar') return
     loadCalWeek(calDay)
     if (calServices.length === 0) {
-      supabase.from('services').select('id, name, duration_minutes').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('is_group_session', false).neq('is_self_service', true).order('name')
+      supabase.from('services').select('id, name, duration_minutes').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('is_event_only', false).order('name')
         .then(({ data }) => { if (data) setCalServices(data as { id: string; name: string; duration_minutes: number }[]) })
     }
   }, [activeSection, calDay, loadCalWeek])
