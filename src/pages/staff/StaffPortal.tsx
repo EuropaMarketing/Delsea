@@ -24,6 +24,7 @@ type Appt = {
   status: string
   notes: string | null
   resource_id: string | null
+  equipment_resource_id: string | null
   checked_in_at: string | null
   payment_status: string
   deposit_charged: number
@@ -32,6 +33,7 @@ type Appt = {
   customer: { name: string; phone: string | null; email: string; sumup_card_token: string | null } | null
   service: { name: string; duration_minutes: number; price: number } | null
   resource: { name: string } | null
+  equipment_resource: { name: string } | null
 }
 
 type ActivityEntry = {
@@ -47,7 +49,8 @@ export default function StaffPortal() {
   const [staffName, setStaffName] = useState('')
   const [todayAppts, setTodayAppts] = useState<Appt[]>([])
   const [upcomingAppts, setUpcomingAppts] = useState<Appt[]>([])
-  const [resources, setResources] = useState<Resource[]>([])
+  const [resources, setResources] = useState<Resource[]>([])          // room-type
+  const [equipmentResources, setEquipmentResources] = useState<Resource[]>([]) // equipment-type
   const [loading, setLoading] = useState(true)
 
   // Booking detail modal
@@ -58,6 +61,7 @@ export default function StaffPortal() {
   const [editMode, setEditMode] = useState(false)
   const [editNotes, setEditNotes] = useState('')
   const [editResourceId, setEditResourceId] = useState<string | null>(null)
+  const [editEquipmentResourceId, setEditEquipmentResourceId] = useState<string | null>(null)
   const [editSaving, setEditSaving] = useState(false)
 
   // Cancel with reason
@@ -77,11 +81,11 @@ export default function StaffPortal() {
   useEffect(() => {
     if (!staffId) return
     async function load() {
-      const [staffRes, apptRes, resRes] = await Promise.all([
+      const [staffRes, apptRes, resRes, equipRes] = await Promise.all([
         supabase.from('staff').select('name').eq('id', staffId).single(),
         supabase
           .from('bookings')
-          .select('id, starts_at, ends_at, status, notes, resource_id, checked_in_at, payment_status, deposit_charged, discount_amount, gift_voucher_amount, customer:customers(name,phone,email,sumup_card_token), service:services(name,duration_minutes,price), resource:resources(name)')
+          .select('id, starts_at, ends_at, status, notes, resource_id, equipment_resource_id, checked_in_at, payment_status, deposit_charged, discount_amount, gift_voucher_amount, customer:customers(name,phone,email,sumup_card_token), service:services(name,duration_minutes,price), resource:resources!resource_id(name), equipment_resource:resources!equipment_resource_id(name)')
           .eq('business_id', BUSINESS_ID)
           .eq('staff_id', staffId)
           .neq('status', 'cancelled')
@@ -89,12 +93,14 @@ export default function StaffPortal() {
           .lte('starts_at', endOfDay(addDays(new Date(), 6)).toISOString())
           .order('starts_at'),
         supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'room').order('name'),
+        supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'equipment').order('name'),
       ])
       if (staffRes.data) setStaffName(staffRes.data.name)
       const all = (apptRes.data ?? []) as unknown as Appt[]
       setTodayAppts(all.filter(a => isToday(parseISO(a.starts_at))))
       setUpcomingAppts(all.filter(a => !isToday(parseISO(a.starts_at))))
       if (resRes.data) setResources(resRes.data as Resource[])
+      if (equipRes.data) setEquipmentResources(equipRes.data as Resource[])
       setLoading(false)
     }
     load()
@@ -114,6 +120,7 @@ export default function StaffPortal() {
     setEditMode(false)
     setEditNotes(a.notes ?? '')
     setEditResourceId(a.resource_id ?? null)
+    setEditEquipmentResourceId(a.equipment_resource_id ?? null)
     setCancelOpen(false)
     setCancelReason('')
     const remaining = (a.service?.price ?? 0) - (a.discount_amount ?? 0) - (a.gift_voucher_amount ?? 0) - (a.deposit_charged ?? 0)
@@ -164,8 +171,19 @@ export default function StaffPortal() {
   async function handleSaveEdit(id: string) {
     setEditSaving(true)
     const matchedResource = resources.find(r => r.id === editResourceId) ?? null
-    await supabase.from('bookings').update({ notes: editNotes.trim() || null, resource_id: editResourceId }).eq('id', id)
-    updateLocal(id, { notes: editNotes.trim() || null, resource_id: editResourceId, resource: matchedResource ? { name: matchedResource.name } : null })
+    const matchedEquipment = equipmentResources.find(r => r.id === editEquipmentResourceId) ?? null
+    await supabase.from('bookings').update({
+      notes: editNotes.trim() || null,
+      resource_id: editResourceId,
+      equipment_resource_id: editEquipmentResourceId,
+    }).eq('id', id)
+    updateLocal(id, {
+      notes: editNotes.trim() || null,
+      resource_id: editResourceId,
+      resource: matchedResource ? { name: matchedResource.name } : null,
+      equipment_resource_id: editEquipmentResourceId,
+      equipment_resource: matchedEquipment ? { name: matchedEquipment.name } : null,
+    })
     await refreshActivityLog(id)
     setEditMode(false)
     setEditSaving(false)
@@ -270,6 +288,12 @@ export default function StaffPortal() {
                   <dd className="text-gray-700">{selected.resource.name}</dd>
                 </div>
               )}
+              {selected.equipment_resource && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Equipment</dt>
+                  <dd className="text-gray-700">{selected.equipment_resource.name}</dd>
+                </div>
+              )}
               {selected.notes && (
                 <div className="flex justify-between gap-4">
                   <dt className="text-gray-500 shrink-0">Notes</dt>
@@ -296,6 +320,19 @@ export default function StaffPortal() {
                     >
                       <option value="">No room assigned</option>
                       {resources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {equipmentResources.length > 0 && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">Equipment</label>
+                    <select
+                      value={editEquipmentResourceId ?? ''}
+                      onChange={e => setEditEquipmentResourceId(e.target.value || null)}
+                      className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                    >
+                      <option value="">No equipment</option>
+                      {equipmentResources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
                   </div>
                 )}

@@ -115,6 +115,8 @@ export default function AdminCalendar() {
   const [editTokenLoading, setEditTokenLoading] = useState(false)
   // Resource state in edit mode
   const [editResourceId, setEditResourceId] = useState<string | null>(null)
+  const [editEquipmentResourceId, setEditEquipmentResourceId] = useState<string | null>(null)
+  const [equipmentResources, setEquipmentResources] = useState<Resource[]>([])
 
   // Gift voucher state in edit mode
   const [editVoucherCode, setEditVoucherCode] = useState('')
@@ -192,7 +194,7 @@ export default function AdminCalendar() {
       const dayStart = startOfDay(selectedDay).toISOString()
       const dayEnd = endOfDay(selectedDay).toISOString()
 
-      const [staffRes, bookRes, svcRes, blockRes, resRes] = await Promise.all([
+      const [staffRes, bookRes, svcRes, blockRes, resRes, equipRes] = await Promise.all([
         supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name'),
         supabase
           .from('bookings')
@@ -208,12 +210,14 @@ export default function AdminCalendar() {
           .lt('starts_at', dayEnd)
           .gt('ends_at', dayStart),
         supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'room').order('name'),
+          supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'equipment').order('name'),
       ])
       if (staffRes.data) setStaff(staffRes.data as Staff[])
       if (bookRes.data) setBookings(bookRes.data as RichBooking[])
       if (svcRes.data) setServices(svcRes.data as Service[])
       if (blockRes.data) setBlockedTimes(blockRes.data as BlockedTime[])
       if (resRes.data) setResources(resRes.data as Resource[])
+      if (equipRes.data) setEquipmentResources(equipRes.data as Resource[])
       setLoading(false)
     }
     load()
@@ -386,6 +390,7 @@ export default function AdminCalendar() {
     setEditMode(true)
     setEditNotes(selectedBooking.notes ?? '')
     setEditResourceId(selectedBooking.resource_id ?? null)
+    setEditEquipmentResourceId((selectedBooking as unknown as { equipment_resource_id: string | null }).equipment_resource_id ?? null)
     setEditVoucherCode('')
     setEditVoucherError('')
     setEditVoucherApplied((selectedBooking.gift_voucher_amount ?? 0) > 0)
@@ -486,20 +491,22 @@ export default function AdminCalendar() {
     setEditSaving(true)
     setEditError('')
     const matchedResource = resources.find((r) => r.id === editResourceId) ?? null
+    const matchedEquipment = equipmentResources.find((r) => r.id === editEquipmentResourceId) ?? null
     const { error } = await supabase
       .from('bookings')
-      .update({ notes: editNotes.trim() || null, resource_id: editResourceId })
+      .update({ notes: editNotes.trim() || null, resource_id: editResourceId, equipment_resource_id: editEquipmentResourceId })
       .eq('id', selectedBooking.id)
     if (error) {
       setEditError(error.message)
     } else {
       const resourceObj = matchedResource ? { name: matchedResource.name } : null
+      const equipObj = matchedEquipment ? { name: matchedEquipment.name } : null
       setBookings(prev => prev.map(b => b.id === selectedBooking.id
         ? { ...b, notes: editNotes.trim() || null, resource_id: editResourceId, resource: resourceObj }
         : b,
       ))
       setSelectedBooking(prev => prev
-        ? { ...prev, notes: editNotes.trim() || null, resource_id: editResourceId, resource: resourceObj }
+        ? { ...prev, notes: editNotes.trim() || null, resource_id: editResourceId, resource: resourceObj, equipment_resource_id: editEquipmentResourceId, equipment_resource: equipObj }
         : null,
       )
       await refreshActivityLog(selectedBooking.id)
@@ -1205,17 +1212,34 @@ export default function AdminCalendar() {
             {/* Notes */}
             <Textarea label="Notes" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Add notes…" />
 
-            {/* Resource */}
+            {/* Room */}
             {resources.length > 0 && (
               <div>
-                <label className="text-sm font-medium text-gray-700 mb-1 block">Resource</label>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Room</label>
                 <select
                   value={editResourceId ?? ''}
                   onChange={e => setEditResourceId(e.target.value || null)}
                   className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
                 >
-                  <option value="">No resource assigned</option>
+                  <option value="">No room assigned</option>
                   {resources.map(r => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Equipment */}
+            {equipmentResources.length > 0 && (
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Equipment</label>
+                <select
+                  value={editEquipmentResourceId ?? ''}
+                  onChange={e => setEditEquipmentResourceId(e.target.value || null)}
+                  className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                >
+                  <option value="">No equipment</option>
+                  {equipmentResources.map(r => (
                     <option key={r.id} value={r.id}>{r.name}</option>
                   ))}
                 </select>
