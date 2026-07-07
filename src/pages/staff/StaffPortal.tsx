@@ -590,19 +590,16 @@ export default function StaffPortal() {
 
           {/* Fixed controls — don't scroll */}
           <div className="shrink-0">
-            {/* Header: title + block button — icon-only button on mobile */}
-            <div className="flex items-center justify-between mb-1.5 lg:mb-2">
+            {/* Header: stacked on mobile, side-by-side on desktop */}
+            <div className="flex flex-col gap-1.5 mb-1.5 lg:flex-row lg:items-center lg:justify-between lg:mb-2">
               <h1 className="text-sm font-bold text-gray-900 lg:text-xl">Calendar</h1>
               <button
                 onClick={() => { setBlockForm(f => ({ ...f, startDate: format(calDay, 'yyyy-MM-dd'), endDate: format(calDay, 'yyyy-MM-dd') })); setBlockOpen(true) }}
-                className="flex items-center gap-1 text-xs font-medium px-2 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors text-gray-600 lg:hidden"
+                className="flex items-center gap-1.5 self-start text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors text-gray-600"
               >
-                <Plus className="h-3.5 w-3.5" />
-                <span className="hidden xs:inline">Block</span>
+                <Plus className="h-3 w-3 shrink-0" />
+                <span>Block Time</span>
               </button>
-              <Button size="sm" variant="secondary" className="hidden lg:flex" onClick={() => { setBlockForm(f => ({ ...f, startDate: format(calDay, 'yyyy-MM-dd'), endDate: format(calDay, 'yyyy-MM-dd') })); setBlockOpen(true) }}>
-                <Plus className="h-3.5 w-3.5" /> Block Time
-              </Button>
             </div>
             {/* Week navigation — compact on mobile */}
             <div className="flex items-center justify-between mb-1.5 lg:mb-2">
