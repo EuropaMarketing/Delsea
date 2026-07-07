@@ -90,7 +90,7 @@ export default function StaffPortal() {
           .eq('staff_id', staffId)
           .neq('status', 'cancelled')
           .gte('starts_at', startOfDay(new Date()).toISOString())
-          .lte('starts_at', endOfDay(addDays(new Date(), 6)).toISOString())
+          .lte('starts_at', endOfDay(addDays(new Date(), 60)).toISOString())
           .order('starts_at'),
         supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'room').order('name'),
         supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'equipment').order('name'),
