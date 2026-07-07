@@ -190,6 +190,14 @@ export default function StaffPortal() {
     setCharging(false)
   }
 
+  async function handleMarkAsPaid(id: string) {
+    setCharging(true)
+    await supabase.from('bookings').update({ payment_status: 'paid_in_full', balance_charged_at: new Date().toISOString() }).eq('id', id)
+    updateLocal(id, { payment_status: 'paid_in_full' })
+    await refreshActivityLog(id)
+    setCharging(false)
+  }
+
   if (loading) return <StaffLayout staffName=""><FullPageSpinner /></StaffLayout>
 
   return (
@@ -298,37 +306,53 @@ export default function StaffPortal() {
               </div>
             ) : (
               <>
-                {/* Payment */}
-                {selected.customer?.sumup_card_token && selected.payment_status !== 'paid_in_full' && (
+                {/* Payment — show for any appointment that isn't fully paid */}
+                {selected.payment_status !== 'paid_in_full' && (
                   <div className="border border-gray-100 rounded-lg p-3 space-y-2">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
                       <CreditCard className="h-3.5 w-3.5" /> Payment
-                      <span className="ml-auto font-normal normal-case text-gray-400">{selected.payment_status.replaceAll('_', ' ')}</span>
+                      <span className="ml-auto font-normal capitalize text-gray-400">{selected.payment_status.replaceAll('_', ' ')}</span>
                     </p>
-                    <div className="flex gap-2">
-                      <select
-                        value={chargeType}
-                        onChange={e => setChargeType(e.target.value as 'balance' | 'noshow')}
-                        className="h-9 flex-1 px-2 text-xs border border-gray-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-(--color-primary)"
-                      >
-                        <option value="balance">Balance</option>
-                        <option value="noshow">No-show fee</option>
-                      </select>
-                      <div className="relative w-24 shrink-0">
-                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-500">£</span>
-                        <input
-                          type="number" min="0" step="0.01" value={chargeAmount}
-                          onChange={e => setChargeAmount(e.target.value)}
-                          placeholder="0.00"
-                          className="w-full h-9 pl-5 pr-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
-                        />
-                      </div>
-                    </div>
-                    <Button fullWidth size="sm" loading={charging} disabled={!chargeAmount} onClick={() => handleChargeBalance(selected.id)}>
-                      Charge Card
+
+                    {/* Charge saved card */}
+                    {selected.customer?.sumup_card_token && (
+                      <>
+                        <div className="flex gap-2">
+                          <select
+                            value={chargeType}
+                            onChange={e => setChargeType(e.target.value as 'balance' | 'noshow')}
+                            className="h-9 flex-1 px-2 text-xs border border-gray-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-(--color-primary)"
+                          >
+                            <option value="balance">Balance</option>
+                            <option value="noshow">No-show fee</option>
+                          </select>
+                          <div className="relative w-24 shrink-0">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-500">£</span>
+                            <input
+                              type="number" min="0" step="0.01" value={chargeAmount}
+                              onChange={e => setChargeAmount(e.target.value)}
+                              placeholder="0.00"
+                              className="w-full h-9 pl-5 pr-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                            />
+                          </div>
+                        </div>
+                        <Button fullWidth size="sm" loading={charging} disabled={!chargeAmount} onClick={() => handleChargeBalance(selected.id)}>
+                          Charge Saved Card
+                        </Button>
+                        {chargeError && <p className="text-xs text-red-600">{chargeError}</p>}
+                        {chargeSuccess && <p className="text-xs text-green-700 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Charged successfully</p>}
+                        <div className="relative">
+                          <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-100" /></div>
+                          <div className="relative flex justify-center"><span className="text-xs text-gray-400 bg-white px-2">or</span></div>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Mark as paid (cash / in-person card reader / other) */}
+                    <Button fullWidth size="sm" variant="secondary" loading={charging} onClick={() => handleMarkAsPaid(selected.id)}>
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Mark as Paid (Cash / Other)
                     </Button>
-                    {chargeError && <p className="text-xs text-red-600">{chargeError}</p>}
-                    {chargeSuccess && <p className="text-xs text-green-700 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Charged successfully</p>}
                   </div>
                 )}
 
