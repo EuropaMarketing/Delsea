@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { useBrandStore } from '@/store/brandStore'
-import { Input } from '@/components/ui/Input'
+import { Input, PasswordInput } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 
 export default function AdminLogin() {
@@ -72,9 +72,8 @@ export default function AdminLogin() {
               placeholder="admin@example.com"
               autoComplete="email"
             />
-            <Input
+            <PasswordInput
               label="Password"
-              type="password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { format, parseISO, startOfDay, endOfDay, isBefore } from 'date-fns'
-import { Plus, Pencil, Trash2, PlaneTakeoff, Camera, CalendarX2, Images, KeyRound, CheckCircle2, XCircle, Eye, EyeOff } from 'lucide-react'
+import { Plus, Pencil, Trash2, PlaneTakeoff, Camera, CalendarX2, Images, KeyRound, CheckCircle2, XCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Input, Textarea } from '@/components/ui/Input'
+import { Input, PasswordInput, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import type { Staff, Availability, BlockedTime, CommissionType } from '@/types'
@@ -63,7 +63,6 @@ export default function AdminStaff() {
   const [loginPassword, setLoginPassword] = useState('')
   const [loginSaving, setLoginSaving] = useState(false)
   const [loginMessage, setLoginMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
-  const [showLoginPassword, setShowLoginPassword] = useState(false)
 
   // Leave / blocked-time modal
   const [leaveMember, setLeaveMember] = useState<Staff | null>(null)
@@ -559,26 +558,12 @@ export default function AdminStaff() {
               </p>
               <Input label="Login email" type="email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="e.g. paul@example.com" />
               <div>
-                <label className="text-sm font-medium text-gray-700 mb-1 block">
-                  {editTarget.user_id ? 'New password' : 'Initial password'}
-                </label>
-                <div className="relative">
-                  <input
-                    type={showLoginPassword ? 'text' : 'password'}
-                    value={loginPassword}
-                    onChange={e => setLoginPassword(e.target.value)}
-                    placeholder="Min 6 characters"
-                    className="w-full h-10 pl-3 pr-9 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowLoginPassword(v => !v)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    tabIndex={-1}
-                  >
-                    {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
+                <PasswordInput
+                  label={editTarget.user_id ? 'New password' : 'Initial password'}
+                  value={loginPassword}
+                  onChange={e => setLoginPassword(e.target.value)}
+                  placeholder="Min 6 characters"
+                />
                 {loginPassword.length > 0 && loginPassword.length < 6 && (
                   <p className="text-xs text-amber-600 mt-1">Password must be at least 6 characters</p>
                 )}
