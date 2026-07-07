@@ -141,63 +141,83 @@ export default function Dashboard() {
               const isUpdating = updating === b.id
               const isActionable = b.status === 'confirmed' || b.status === 'pending'
               return (
-                <Card key={b.id} padding="sm" className="flex items-center gap-4">
-                  <div className="w-14 text-center shrink-0">
-                    <p className="font-bold text-sm" style={{ color: 'var(--color-primary)' }}>
-                      {format(new Date(b.starts_at), 'HH:mm')}
-                    </p>
-                    <p className="text-xs text-gray-400">{format(new Date(b.ends_at), 'HH:mm')}</p>
+                <Card key={b.id} padding="sm">
+                  {/* ── Mobile layout: stacked ── */}
+                  <div className="sm:hidden">
+                    <div className="flex items-start justify-between gap-2 mb-0.5">
+                      <p className="font-semibold text-gray-900 text-sm leading-snug flex-1">{b.service?.name}</p>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {b.checked_in_at && <UserCheck className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />}
+                        <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${b.status === 'confirmed' ? 'bg-green-500' : b.status === 'pending' ? 'bg-amber-400' : 'bg-gray-400'}`} />
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mb-1.5">{b.customer?.name ?? 'Unknown'} · {b.staff?.name ?? 'Any'}</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold" style={{ color: 'var(--color-primary)' }}>
+                        {format(new Date(b.starts_at), 'HH:mm')} – {format(new Date(b.ends_at), 'HH:mm')}
+                      </p>
+                      {isActionable && (
+                        <div className="flex items-center gap-1.5">
+                          {!b.checked_in_at && (
+                            <button onClick={() => handleCheckIn(b.id)} disabled={isUpdating} title="Check in"
+                              className="p-1.5 rounded-lg text-white text-xs" style={{ backgroundColor: 'var(--color-primary)' }}>
+                              {isUpdating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserCheck className="h-3.5 w-3.5" />}
+                            </button>
+                          )}
+                          <button onClick={() => updateStatus(b.id, 'completed')} disabled={isUpdating} title="Complete"
+                            className="p-1.5 rounded-lg bg-green-50 text-green-600">
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                          </button>
+                          <button onClick={() => updateStatus(b.id, 'cancelled')} disabled={isUpdating} title="Cancel"
+                            className="p-1.5 rounded-lg bg-red-50 text-red-500">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-900 truncate">{b.service?.name}</p>
-                    <p className="text-xs text-gray-500 truncate">{b.customer?.name ?? 'Unknown'} · {b.staff?.name ?? 'Any'}</p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-sm font-bold text-gray-900 hidden sm:block">
-                      {b.service ? formatCurrency(b.service.price - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0)) : '—'}
-                    </span>
-                    {b.checked_in_at ? (
-                      <span
-                        title={`Checked in`}
-                        className="p-1.5 rounded-lg text-white"
-                        style={{ backgroundColor: 'var(--color-primary)' }}
-                      >
-                        <UserCheck className="h-4 w-4" />
+
+                  {/* ── Desktop layout: horizontal row (unchanged) ── */}
+                  <div className="hidden sm:flex items-center gap-4">
+                    <div className="w-14 text-center shrink-0">
+                      <p className="font-bold text-sm" style={{ color: 'var(--color-primary)' }}>
+                        {format(new Date(b.starts_at), 'HH:mm')}
+                      </p>
+                      <p className="text-xs text-gray-400">{format(new Date(b.ends_at), 'HH:mm')}</p>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">{b.service?.name}</p>
+                      <p className="text-xs text-gray-500 truncate">{b.customer?.name ?? 'Unknown'} · {b.staff?.name ?? 'Any'}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-sm font-bold text-gray-900">
+                        {b.service ? formatCurrency(b.service.price - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0)) : '—'}
                       </span>
-                    ) : isActionable ? (
-                      <button
-                        onClick={() => handleCheckIn(b.id)}
-                        disabled={isUpdating}
-                        title="Check in customer"
-                        className="p-1.5 rounded-lg hover:opacity-90 text-white transition-opacity disabled:opacity-50"
-                        style={{ backgroundColor: 'var(--color-primary)' }}
-                      >
-                        {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />}
-                      </button>
-                    ) : null}
-                    <Badge variant={statusBadgeVariant(b.status)} className="capitalize">
-                      {b.status}
-                    </Badge>
-                    {isActionable && (
-                      <>
-                        <button
-                          onClick={() => updateStatus(b.id, 'completed')}
-                          disabled={isUpdating}
-                          title="Mark as completed"
-                          className="p-1.5 rounded-lg bg-green-50 hover:bg-green-100 text-green-600 transition-colors disabled:opacity-50"
-                        >
-                          {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                      {b.checked_in_at ? (
+                        <span className="p-1.5 rounded-lg text-white" style={{ backgroundColor: 'var(--color-primary)' }}>
+                          <UserCheck className="h-4 w-4" />
+                        </span>
+                      ) : isActionable ? (
+                        <button onClick={() => handleCheckIn(b.id)} disabled={isUpdating}
+                          className="p-1.5 rounded-lg hover:opacity-90 text-white transition-opacity disabled:opacity-50"
+                          style={{ backgroundColor: 'var(--color-primary)' }}>
+                          {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />}
                         </button>
-                        <button
-                          onClick={() => updateStatus(b.id, 'cancelled')}
-                          disabled={isUpdating}
-                          title="Cancel booking"
-                          className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-500 transition-colors disabled:opacity-50"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </>
-                    )}
+                      ) : null}
+                      <Badge variant={statusBadgeVariant(b.status)} className="capitalize">{b.status}</Badge>
+                      {isActionable && (
+                        <>
+                          <button onClick={() => updateStatus(b.id, 'completed')} disabled={isUpdating}
+                            className="p-1.5 rounded-lg bg-green-50 hover:bg-green-100 text-green-600 transition-colors disabled:opacity-50">
+                            {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                          </button>
+                          <button onClick={() => updateStatus(b.id, 'cancelled')} disabled={isUpdating}
+                            className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-500 transition-colors disabled:opacity-50">
+                            <X className="h-4 w-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </Card>
               )
