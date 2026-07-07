@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { applyBrandTheme } from '@/lib/theme'
 import brand from '@/config/brand'
 import { supabase } from '@/lib/supabase'
@@ -50,12 +50,30 @@ import AdminGiftVouchers from '@/pages/admin/GiftVouchers'
 import AdminResources from '@/pages/admin/Resources'
 import AdminEvents from '@/pages/admin/Events'
 import StaffPortal from '@/pages/staff/StaffPortal'
+import { useAuthStore } from '@/store/authStore'
+
+// Customer-facing paths that a staff-only (non-admin) user should never land on.
+const CUSTOMER_PATHS = ['/', '/book', '/staff', '/addons', '/datetime', '/details', '/confirm', '/payment', '/my-bookings', '/booking-confirmed', '/events', '/memberships', '/about', '/reschedule-confirm', '/membership-confirmed']
+
+function StaffRedirectGuard() {
+  const { isStaff, isAdmin, initialized } = useAuthStore()
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  useEffect(() => {
+    if (initialized && isStaff && !isAdmin && CUSTOMER_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'))) {
+      navigate('/staff-portal', { replace: true })
+    }
+  }, [initialized, isStaff, isAdmin, pathname, navigate])
+  return null
+}
 
 function AppRoutes() {
   useAuthListener()
 
   return (
-    <Routes>
+    <>
+      <StaffRedirectGuard />
+      <Routes>
       {/* Landing */}
       <Route path="/" element={<Landing />} />
 
@@ -343,6 +361,7 @@ function AppRoutes() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   )
 }
 
