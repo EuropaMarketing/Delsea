@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { format, startOfDay, endOfDay, addDays, isToday, isTomorrow, parseISO } from 'date-fns'
+import {
+  format, startOfDay, endOfDay, addDays, subDays,
+  isToday, isTomorrow, isSameDay, parseISO, startOfWeek, endOfWeek, differenceInMinutes,
+} from 'date-fns'
 import {
   CalendarClock, Clock, UserCheck, CheckCircle2, XCircle, Pencil, CreditCard,
+  ChevronLeft, ChevronRight, CalendarDays, Plus, Trash2,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
@@ -9,86 +13,82 @@ import { formatDuration } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Textarea } from '@/components/ui/Input'
+import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { StaffLayout } from '@/components/layout/StaffLayout'
 import type { Resource } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
+const HOUR_HEIGHT = 64
+const START_HOUR = 8
+const END_HOUR = 20
 
 type Appt = {
-  id: string
-  starts_at: string
-  ends_at: string
-  status: string
-  notes: string | null
-  resource_id: string | null
-  equipment_resource_id: string | null
-  checked_in_at: string | null
-  payment_status: string
-  deposit_charged: number
-  discount_amount: number
-  gift_voucher_amount: number
+  id: string; starts_at: string; ends_at: string; status: string; notes: string | null
+  resource_id: string | null; equipment_resource_id: string | null; checked_in_at: string | null
+  payment_status: string; deposit_charged: number; discount_amount: number; gift_voucher_amount: number
   customer: { name: string; phone: string | null; email: string; sumup_card_token: string | null } | null
   service: { name: string; duration_minutes: number; price: number } | null
-  resource: { name: string } | null
-  equipment_resource: { name: string } | null
+  resource: { name: string } | null; equipment_resource: { name: string } | null
 }
 
-type ActivityEntry = {
-  id: string
-  actor_name: string
-  summary: string
-  reason: string | null
-  created_at: string
+type CalAppt = { id: string; starts_at: string; ends_at: string; status: string; payment_status: string; customer: { name: string } | null; service: { name: string } | null }
+type BlockedTime = { id: string; staff_id: string; starts_at: string; ends_at: string; reason: string | null }
+type ActivityEntry = { id: string; actor_name: string; summary: string; reason: string | null; created_at: string }
+
+function positionBlock(startsAt: string, endsAt: string) {
+  const s = parseISO(startsAt), e = parseISO(endsAt)
+  const top = (s.getHours() + s.getMinutes() / 60 - START_HOUR) * HOUR_HEIGHT
+  const height = Math.max(differenceInMinutes(e, s) / 60 * HOUR_HEIGHT, 24)
+  return { top, height }
 }
 
 export default function StaffPortal() {
   const { staffId } = useAuthStore()
   const [staffName, setStaffName] = useState('')
+  const [activeTab, setActiveTab] = useState<'schedule' | 'calendar'>('schedule')
+
+  // ── Schedule tab ─────────────────────────────────────────────────────────
   const [todayAppts, setTodayAppts] = useState<Appt[]>([])
   const [upcomingAppts, setUpcomingAppts] = useState<Appt[]>([])
-  const [resources, setResources] = useState<Resource[]>([])          // room-type
-  const [equipmentResources, setEquipmentResources] = useState<Resource[]>([]) // equipment-type
+  const [resources, setResources] = useState<Resource[]>([])
+  const [equipmentResources, setEquipmentResources] = useState<Resource[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Booking detail modal
   const [selected, setSelected] = useState<Appt | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
-
-  // Edit mode
   const [editMode, setEditMode] = useState(false)
   const [editNotes, setEditNotes] = useState('')
   const [editResourceId, setEditResourceId] = useState<string | null>(null)
   const [editEquipmentResourceId, setEditEquipmentResourceId] = useState<string | null>(null)
   const [editSaving, setEditSaving] = useState(false)
-
-  // Cancel with reason
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
-
-  // Charge balance
   const [chargeAmount, setChargeAmount] = useState('')
   const [chargeType, setChargeType] = useState<'balance' | 'noshow'>('balance')
   const [charging, setCharging] = useState(false)
   const [chargeError, setChargeError] = useState('')
   const [chargeSuccess, setChargeSuccess] = useState(false)
-
-  // Activity log
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([])
+
+  // ── Calendar tab ─────────────────────────────────────────────────────────
+  const [calDay, setCalDay] = useState(() => new Date())
+  const [calWeekAppts, setCalWeekAppts] = useState<CalAppt[]>([])
+  const [calBlocked, setCalBlocked] = useState<BlockedTime[]>([])
+  const [calLoading, setCalLoading] = useState(false)
+  const [blockOpen, setBlockOpen] = useState(false)
+  const [blockForm, setBlockForm] = useState({ date: '', startTime: '09:00', endTime: '17:00', reason: '' })
+  const [blockSaving, setBlockSaving] = useState(false)
 
   useEffect(() => {
     if (!staffId) return
     async function load() {
       const [staffRes, apptRes, resRes, equipRes] = await Promise.all([
         supabase.from('staff').select('name').eq('id', staffId).single(),
-        supabase
-          .from('bookings')
+        supabase.from('bookings')
           .select('id, starts_at, ends_at, status, notes, resource_id, equipment_resource_id, checked_in_at, payment_status, deposit_charged, discount_amount, gift_voucher_amount, customer:customers(name,phone,email,sumup_card_token), service:services(name,duration_minutes,price), resource:resources!resource_id(name), equipment_resource:resources!equipment_resource_id(name)')
-          .eq('business_id', BUSINESS_ID)
-          .eq('staff_id', staffId)
-          .neq('status', 'cancelled')
+          .eq('business_id', BUSINESS_ID).eq('staff_id', staffId).neq('status', 'cancelled')
           .gte('starts_at', startOfDay(new Date()).toISOString())
           .lte('starts_at', endOfDay(addDays(new Date(), 60)).toISOString())
           .order('starts_at'),
@@ -106,218 +106,276 @@ export default function StaffPortal() {
     load()
   }, [staffId])
 
-  const refreshActivityLog = useCallback(async (bookingId: string) => {
-    const { data } = await supabase
-      .from('booking_activity_log')
-      .select('id, actor_name, summary, reason, created_at')
-      .eq('booking_id', bookingId)
-      .order('created_at', { ascending: false })
+  const loadCalWeek = useCallback(async (day: Date) => {
+    if (!staffId) return
+    setCalLoading(true)
+    const ws = startOfWeek(day, { weekStartsOn: 1 })
+    const we = endOfWeek(day, { weekStartsOn: 1 })
+    const [apptRes, blockRes] = await Promise.all([
+      supabase.from('bookings')
+        .select('id, starts_at, ends_at, status, payment_status, customer:customers(name), service:services(name)')
+        .eq('business_id', BUSINESS_ID).eq('staff_id', staffId).neq('status', 'cancelled')
+        .gte('starts_at', ws.toISOString()).lte('starts_at', we.toISOString()).order('starts_at'),
+      supabase.from('blocked_times').select('*').eq('staff_id', staffId)
+        .gte('starts_at', ws.toISOString()).lte('ends_at', we.toISOString()),
+    ])
+    setCalWeekAppts((apptRes.data ?? []) as unknown as CalAppt[])
+    setCalBlocked((blockRes.data ?? []) as BlockedTime[])
+    setCalLoading(false)
+  }, [staffId])
+
+  useEffect(() => { if (activeTab === 'calendar') loadCalWeek(calDay) }, [activeTab, calDay, loadCalWeek])
+
+  const refreshActivityLog = useCallback(async (id: string) => {
+    const { data } = await supabase.from('booking_activity_log').select('id, actor_name, summary, reason, created_at').eq('booking_id', id).order('created_at', { ascending: false })
     if (data) setActivityLog(data as ActivityEntry[])
   }, [])
 
   function openDetail(a: Appt) {
-    setSelected(a)
-    setEditMode(false)
-    setEditNotes(a.notes ?? '')
-    setEditResourceId(a.resource_id ?? null)
+    setSelected(a); setEditMode(false); setEditNotes(a.notes ?? ''); setEditResourceId(a.resource_id ?? null)
     setEditEquipmentResourceId(a.equipment_resource_id ?? null)
-    setCancelOpen(false)
-    setCancelReason('')
+    setCancelOpen(false); setCancelReason('')
     const remaining = (a.service?.price ?? 0) - (a.discount_amount ?? 0) - (a.gift_voucher_amount ?? 0) - (a.deposit_charged ?? 0)
     setChargeAmount(remaining > 0 ? (remaining / 100).toFixed(2) : '')
-    setChargeType('balance')
-    setChargeError('')
-    setChargeSuccess(false)
-    setActivityLog([])
+    setChargeType('balance'); setChargeError(''); setChargeSuccess(false); setActivityLog([])
     refreshActivityLog(a.id)
   }
 
   function updateLocal(id: string, patch: Partial<Appt>) {
-    const update = (prev: Appt[]) => prev.map(a => a.id === id ? { ...a, ...patch } : a)
-    setTodayAppts(update)
-    setUpcomingAppts(update)
-    setSelected(prev => prev?.id === id ? { ...prev, ...patch } : prev)
+    const up = (p: Appt[]) => p.map(a => a.id === id ? { ...a, ...patch } : a)
+    setTodayAppts(up); setUpcomingAppts(up); setSelected(p => p?.id === id ? { ...p, ...patch } : p)
   }
 
   async function handleCheckIn(id: string) {
-    setActionLoading(true)
-    const checkedInAt = new Date().toISOString()
-    await supabase.from('bookings').update({ checked_in_at: checkedInAt }).eq('id', id)
-    updateLocal(id, { checked_in_at: checkedInAt })
-    await refreshActivityLog(id)
-    setActionLoading(false)
+    setActionLoading(true); const t = new Date().toISOString()
+    await supabase.from('bookings').update({ checked_in_at: t }).eq('id', id)
+    updateLocal(id, { checked_in_at: t }); await refreshActivityLog(id); setActionLoading(false)
   }
-
   async function handleComplete(id: string) {
     setActionLoading(true)
     await supabase.from('bookings').update({ status: 'completed' }).eq('id', id)
-    updateLocal(id, { status: 'completed' })
-    await refreshActivityLog(id)
-    setActionLoading(false)
+    updateLocal(id, { status: 'completed' }); await refreshActivityLog(id); setActionLoading(false)
   }
-
   async function handleCancelWithReason(id: string) {
-    if (!cancelReason.trim()) return
-    setActionLoading(true)
+    if (!cancelReason.trim()) return; setActionLoading(true)
     await supabase.from('bookings').update({ status: 'cancelled', cancellation_reason: cancelReason.trim() }).eq('id', id)
-    setTodayAppts(p => p.filter(a => a.id !== id))
-    setUpcomingAppts(p => p.filter(a => a.id !== id))
-    setSelected(null)
-    setCancelOpen(false)
-    setCancelReason('')
-    setActionLoading(false)
+    setTodayAppts(p => p.filter(a => a.id !== id)); setUpcomingAppts(p => p.filter(a => a.id !== id))
+    setSelected(null); setCancelOpen(false); setCancelReason(''); setActionLoading(false)
   }
-
   async function handleSaveEdit(id: string) {
     setEditSaving(true)
-    const matchedResource = resources.find(r => r.id === editResourceId) ?? null
-    const matchedEquipment = equipmentResources.find(r => r.id === editEquipmentResourceId) ?? null
-    await supabase.from('bookings').update({
-      notes: editNotes.trim() || null,
-      resource_id: editResourceId,
-      equipment_resource_id: editEquipmentResourceId,
-    }).eq('id', id)
-    updateLocal(id, {
-      notes: editNotes.trim() || null,
-      resource_id: editResourceId,
-      resource: matchedResource ? { name: matchedResource.name } : null,
-      equipment_resource_id: editEquipmentResourceId,
-      equipment_resource: matchedEquipment ? { name: matchedEquipment.name } : null,
-    })
-    await refreshActivityLog(id)
-    setEditMode(false)
-    setEditSaving(false)
+    const mr = resources.find(r => r.id === editResourceId) ?? null
+    const me = equipmentResources.find(r => r.id === editEquipmentResourceId) ?? null
+    await supabase.from('bookings').update({ notes: editNotes.trim() || null, resource_id: editResourceId, equipment_resource_id: editEquipmentResourceId }).eq('id', id)
+    updateLocal(id, { notes: editNotes.trim() || null, resource_id: editResourceId, resource: mr ? { name: mr.name } : null, equipment_resource_id: editEquipmentResourceId, equipment_resource: me ? { name: me.name } : null })
+    await refreshActivityLog(id); setEditMode(false); setEditSaving(false)
   }
-
-  async function handleChargeBalance(id: string) {
-    const amountPence = Math.round(parseFloat(chargeAmount) * 100)
-    if (!amountPence || amountPence <= 0) { setChargeError('Enter a valid amount'); return }
+  async function handleMarkAsPaid(id: string) {
     setCharging(true)
-    setChargeError('')
-    setChargeSuccess(false)
-    const { data, error } = await supabase.functions.invoke('sumup-charge-balance', {
-      body: { booking_id: id, amount: amountPence, type: chargeType },
-    })
+    await supabase.from('bookings').update({ payment_status: 'paid_in_full', balance_charged_at: new Date().toISOString() }).eq('id', id)
+    updateLocal(id, { payment_status: 'paid_in_full' }); await refreshActivityLog(id); setCharging(false)
+  }
+  async function handleChargeBalance(id: string) {
+    const amtP = Math.round(parseFloat(chargeAmount) * 100)
+    if (!amtP || amtP <= 0) { setChargeError('Enter a valid amount'); return }
+    setCharging(true); setChargeError(''); setChargeSuccess(false)
+    const { data, error } = await supabase.functions.invoke('sumup-charge-balance', { body: { booking_id: id, amount: amtP, type: chargeType } })
     if (error || !data?.success) {
       setChargeError((data as { error?: string } | null)?.error ?? error?.message ?? 'Charge failed')
     } else {
-      setChargeSuccess(true)
-      updateLocal(id, { payment_status: 'paid_in_full' })
-      await refreshActivityLog(id)
+      setChargeSuccess(true); updateLocal(id, { payment_status: 'paid_in_full' }); await refreshActivityLog(id)
     }
     setCharging(false)
   }
 
-  async function handleMarkAsPaid(id: string) {
-    setCharging(true)
-    await supabase.from('bookings').update({ payment_status: 'paid_in_full', balance_charged_at: new Date().toISOString() }).eq('id', id)
-    updateLocal(id, { payment_status: 'paid_in_full' })
-    await refreshActivityLog(id)
-    setCharging(false)
+  async function handleAddBlock() {
+    if (!staffId || !blockForm.date || !blockForm.startTime || !blockForm.endTime) return
+    setBlockSaving(true)
+    const starts = new Date(`${blockForm.date}T${blockForm.startTime}`)
+    const ends = new Date(`${blockForm.date}T${blockForm.endTime}`)
+    const { data } = await supabase.from('blocked_times').insert({ staff_id: staffId, starts_at: starts.toISOString(), ends_at: ends.toISOString(), reason: blockForm.reason.trim() || null }).select().single()
+    if (data) { setCalBlocked(p => [...p, data as BlockedTime]); setBlockOpen(false); setBlockForm({ date: '', startTime: '09:00', endTime: '17:00', reason: '' }) }
+    setBlockSaving(false)
+  }
+  async function handleDeleteBlock(id: string) {
+    await supabase.from('blocked_times').delete().eq('id', id)
+    setCalBlocked(p => p.filter(b => b.id !== id))
   }
 
   if (loading) return <StaffLayout staffName=""><FullPageSpinner /></StaffLayout>
 
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(calDay, { weekStartsOn: 1 }), i))
+  const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => i + START_HOUR)
+  const dayAppts = calWeekAppts.filter(a => isSameDay(parseISO(a.starts_at), calDay))
+  const dayBlocked = calBlocked.filter(bt => {
+    const s = parseISO(bt.starts_at), e = parseISO(bt.ends_at)
+    return isSameDay(s, calDay) || isSameDay(e, calDay) || (s < startOfDay(calDay) && e > endOfDay(calDay))
+  })
+  const categoryColor = (status: string) => status === 'completed' ? '#6b7280' : 'var(--color-primary)'
+
   return (
     <StaffLayout staffName={staffName}>
-      <div className="mb-6">
+      <div className="mb-4">
         <h1 className="text-xl font-bold text-gray-900">Good {greeting()}, {staffName.split(' ')[0]}</h1>
-        <p className="text-sm text-gray-500 mt-0.5">{format(new Date(), 'EEEE, d MMMM yyyy')}</p>
+        <p className="text-sm text-gray-500">{format(new Date(), 'EEEE, d MMMM yyyy')}</p>
       </div>
 
-      {/* Today */}
-      <section className="mb-8">
-        <div className="flex items-center gap-2 mb-3">
-          <CalendarClock className="h-4 w-4 text-gray-400" />
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Today</h2>
-          <span className="text-xs text-gray-400 ml-auto">{todayAppts.length} appointment{todayAppts.length !== 1 ? 's' : ''}</span>
-        </div>
-        {todayAppts.length === 0 ? (
-          <Card padding="md" className="text-center py-10">
-            <p className="text-gray-400 text-sm">No appointments today — enjoy your day!</p>
-          </Card>
-        ) : (
-          <div className="space-y-2">
-            {todayAppts.map(a => (
-              <ApptCard key={a.id} appt={a} onClick={() => openDetail(a)} />
-            ))}
-          </div>
-        )}
-      </section>
+      {/* Tabs */}
+      <div className="flex border-b border-gray-200 mb-5">
+        {(['schedule', 'calendar'] as const).map(tab => (
+          <button key={tab} onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2.5 text-sm font-medium capitalize border-b-2 -mb-px transition-colors ${activeTab === tab ? 'border-(--color-primary) text-(--color-primary)' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+            {tab === 'schedule' ? <span className="flex items-center gap-1.5"><CalendarClock className="h-3.5 w-3.5" />Schedule</span> : <span className="flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" />Calendar</span>}
+          </button>
+        ))}
+      </div>
 
-      {/* Upcoming */}
-      {upcomingAppts.length > 0 && (
-        <section>
-          <div className="flex items-center gap-2 mb-3">
-            <Clock className="h-4 w-4 text-gray-400" />
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Coming up</h2>
+      {/* ── SCHEDULE TAB ── */}
+      {activeTab === 'schedule' && (
+        <>
+          <section className="mb-8">
+            <div className="flex items-center gap-2 mb-3">
+              <CalendarClock className="h-4 w-4 text-gray-400" />
+              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Today</h2>
+              <span className="text-xs text-gray-400 ml-auto">{todayAppts.length} appointment{todayAppts.length !== 1 ? 's' : ''}</span>
+            </div>
+            {todayAppts.length === 0 ? (
+              <Card padding="md" className="text-center py-10"><p className="text-gray-400 text-sm">No appointments today.</p></Card>
+            ) : (
+              <div className="space-y-2">{todayAppts.map(a => <ApptCard key={a.id} appt={a} onClick={() => openDetail(a)} />)}</div>
+            )}
+          </section>
+          {upcomingAppts.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <Clock className="h-4 w-4 text-gray-400" />
+                <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Coming up</h2>
+              </div>
+              <div className="space-y-2">{upcomingAppts.map(a => <ApptCard key={a.id} appt={a} onClick={() => openDetail(a)} compact />)}</div>
+            </section>
+          )}
+        </>
+      )}
+
+      {/* ── CALENDAR TAB ── */}
+      {activeTab === 'calendar' && (
+        <div>
+          {/* Week strip */}
+          <div className="flex items-center justify-between mb-3">
+            <button onClick={() => setCalDay(d => subDays(d, 7))} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronLeft className="h-4 w-4" /></button>
+            <span className="text-xs font-semibold text-gray-500">{format(weekDays[0], 'd MMM')} – {format(weekDays[6], 'd MMM yyyy')}</span>
+            <button onClick={() => setCalDay(d => addDays(d, 7))} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronRight className="h-4 w-4" /></button>
           </div>
-          <div className="space-y-2">
-            {upcomingAppts.map(a => (
-              <ApptCard key={a.id} appt={a} onClick={() => openDetail(a)} compact />
-            ))}
+          <div className="grid grid-cols-7 gap-1 mb-4">
+            {weekDays.map(d => {
+              const hasAppts = calWeekAppts.some(a => isSameDay(parseISO(a.starts_at), d))
+              const hasBlock = calBlocked.some(bt => isSameDay(parseISO(bt.starts_at), d))
+              const sel = isSameDay(d, calDay)
+              return (
+                <button key={d.toISOString()} onClick={() => setCalDay(d)}
+                  className={`flex flex-col items-center py-1.5 rounded-lg text-xs transition-colors ${sel ? 'text-white' : isToday(d) ? 'bg-gray-100 font-semibold text-gray-900' : 'text-gray-500 hover:bg-gray-50'}`}
+                  style={sel ? { backgroundColor: 'var(--color-primary)' } : {}}>
+                  <span>{format(d, 'EEE')[0]}</span>
+                  <span className="font-semibold">{format(d, 'd')}</span>
+                  {(hasAppts || hasBlock) && <span className={`h-1 w-1 rounded-full mt-0.5 ${sel ? 'bg-white/70' : 'bg-(--color-primary)'}`} />}
+                </button>
+              )
+            })}
           </div>
-        </section>
+
+          {/* Day header + add button */}
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-semibold text-gray-700">{format(calDay, 'EEEE d MMMM')}</p>
+            <Button size="sm" variant="secondary" onClick={() => { setBlockForm(f => ({ ...f, date: format(calDay, 'yyyy-MM-dd') })); setBlockOpen(true) }}>
+              <Plus className="h-3.5 w-3.5" /> Add Time Off
+            </Button>
+          </div>
+
+          {/* Time grid */}
+          <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+            {calLoading ? <div className="py-16 text-center text-sm text-gray-400">Loading…</div> : (
+              <div className="relative overflow-y-auto" style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}>
+                {hours.map(h => (
+                  <div key={h} className="absolute w-full flex" style={{ top: (h - START_HOUR) * HOUR_HEIGHT, height: HOUR_HEIGHT }}>
+                    <span className="text-xs text-gray-400 w-12 text-right pr-2 pt-0.5 shrink-0">{h}:00</span>
+                    <div className="flex-1 border-t border-gray-100" />
+                  </div>
+                ))}
+
+                {/* Blocked times */}
+                {dayBlocked.map(bt => {
+                  const { top, height } = positionBlock(bt.starts_at, bt.ends_at)
+                  return (
+                    <div key={bt.id} className="absolute rounded-md bg-red-50 border-l-4 border-red-400 px-2 py-1 group" style={{ top, height, left: '3.5rem', right: 4 }}>
+                      <p className="text-xs font-semibold text-red-700 truncate">Time off{bt.reason ? `: ${bt.reason}` : ''}</p>
+                      <button onClick={() => handleDeleteBlock(bt.id)} className="absolute top-1 right-1 hidden group-hover:block text-red-400 hover:text-red-600">
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )
+                })}
+
+                {/* Bookings */}
+                {dayAppts.map(a => {
+                  const { top, height } = positionBlock(a.starts_at, a.ends_at)
+                  const color = categoryColor(a.status)
+                  const isPaid = a.payment_status === 'paid_in_full'
+                  return (
+                    <div key={a.id} onClick={() => {
+                      const full = [...todayAppts, ...upcomingAppts].find(x => x.id === a.id)
+                      if (full) openDetail(full)
+                    }}
+                      className="absolute rounded-md px-2 py-1 cursor-pointer hover:brightness-95 transition-colors"
+                      style={{ top, height, left: '3.5rem', right: 4, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}>
+                      <p className="text-xs font-semibold truncate" style={{ color }}>{format(parseISO(a.starts_at), 'HH:mm')} {a.service?.name}</p>
+                      <p className="text-xs text-gray-600 truncate">{a.customer?.name}</p>
+                      {isPaid && <CheckCircle2 className="h-3 w-3 text-green-600 absolute top-1 right-1" />}
+                    </div>
+                  )
+                })}
+
+                {dayAppts.length === 0 && dayBlocked.length === 0 && (
+                  <p className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">No appointments</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Booking detail modal */}
       <Modal open={!!selected} onClose={() => { setSelected(null); setEditMode(false) }} title={selected?.service?.name ?? 'Appointment'} size="sm">
         {selected && (
           <div className="space-y-4">
-            {/* Info */}
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Customer</dt>
-                <dd className="font-medium text-gray-900">{selected.customer?.name}</dd>
-              </div>
-              {selected.customer?.phone && (
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Phone</dt>
-                  <dd className="text-gray-700">{selected.customer.phone}</dd>
-                </div>
-              )}
+              <div className="flex justify-between"><dt className="text-gray-500">Customer</dt><dd className="font-medium text-gray-900">{selected.customer?.name}</dd></div>
+              {selected.customer?.phone && <div className="flex justify-between"><dt className="text-gray-500">Phone</dt><dd className="text-gray-700">{selected.customer.phone}</dd></div>}
               <div className="flex justify-between">
                 <dt className="text-gray-500">Time</dt>
                 <dd className="font-medium" style={{ color: 'var(--color-primary)' }}>
                   {format(parseISO(selected.starts_at), 'EEE d MMM, HH:mm')} – {format(parseISO(selected.ends_at), 'HH:mm')}
                 </dd>
               </div>
-              {selected.resource && (
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Room</dt>
-                  <dd className="text-gray-700">{selected.resource.name}</dd>
-                </div>
-              )}
-              {selected.equipment_resource && (
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Equipment</dt>
-                  <dd className="text-gray-700">{selected.equipment_resource.name}</dd>
-                </div>
-              )}
-              {selected.notes && (
-                <div className="flex justify-between gap-4">
-                  <dt className="text-gray-500 shrink-0">Notes</dt>
-                  <dd className="text-gray-700 text-right text-xs">{selected.notes}</dd>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Status</dt>
-                <dd><Badge variant={statusBadgeVariant(selected.status as never)} className="capitalize">{selected.status}</Badge></dd>
+              {selected.resource && <div className="flex justify-between"><dt className="text-gray-500">Room</dt><dd className="text-gray-700">{selected.resource.name}</dd></div>}
+              {selected.equipment_resource && <div className="flex justify-between"><dt className="text-gray-500">Equipment</dt><dd className="text-gray-700">{selected.equipment_resource.name}</dd></div>}
+              {selected.notes && <div className="flex justify-between gap-4"><dt className="text-gray-500 shrink-0">Notes</dt><dd className="text-gray-700 text-right text-xs">{selected.notes}</dd></div>}
+              <div className="flex justify-between"><dt className="text-gray-500">Status</dt><dd><Badge variant={statusBadgeVariant(selected.status as never)} className="capitalize">{selected.status}</Badge></dd></div>
+              <div className="flex justify-between items-center">
+                <dt className="text-gray-500">Payment</dt>
+                <dd className="flex items-center gap-1.5">
+                  {selected.payment_status === 'paid_in_full' && <CheckCircle2 className="h-4 w-4 text-green-600" />}
+                  <span className={`text-xs capitalize font-medium ${selected.payment_status === 'paid_in_full' ? 'text-green-700' : 'text-gray-600'}`}>{selected.payment_status.replaceAll('_', ' ')}</span>
+                </dd>
               </div>
             </dl>
 
-            {/* Edit mode */}
             {editMode ? (
               <div className="space-y-3">
                 <Textarea label="Notes" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Add notes…" />
                 {resources.length > 0 && (
                   <div>
                     <label className="text-sm font-medium text-gray-700 mb-1 block">Room</label>
-                    <select
-                      value={editResourceId ?? ''}
-                      onChange={e => setEditResourceId(e.target.value || null)}
-                      className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
-                    >
+                    <select value={editResourceId ?? ''} onChange={e => setEditResourceId(e.target.value || null)} className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)">
                       <option value="">No room assigned</option>
                       {resources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
@@ -326,11 +384,7 @@ export default function StaffPortal() {
                 {equipmentResources.length > 0 && (
                   <div>
                     <label className="text-sm font-medium text-gray-700 mb-1 block">Equipment</label>
-                    <select
-                      value={editEquipmentResourceId ?? ''}
-                      onChange={e => setEditEquipmentResourceId(e.target.value || null)}
-                      className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
-                    >
+                    <select value={editEquipmentResourceId ?? ''} onChange={e => setEditEquipmentResourceId(e.target.value || null)} className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)">
                       <option value="">No equipment</option>
                       {equipmentResources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
@@ -343,65 +397,45 @@ export default function StaffPortal() {
               </div>
             ) : (
               <>
-                {/* Payment — show for any appointment that isn't fully paid */}
+                {/* Payment */}
                 {selected.payment_status !== 'paid_in_full' && (
                   <div className="border border-gray-100 rounded-lg p-3 space-y-2">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
                       <CreditCard className="h-3.5 w-3.5" /> Payment
-                      <span className="ml-auto font-normal capitalize text-gray-400">{selected.payment_status.replaceAll('_', ' ')}</span>
                     </p>
-
-                    {/* Charge saved card */}
                     {selected.customer?.sumup_card_token && (
                       <>
                         <div className="flex gap-2">
-                          <select
-                            value={chargeType}
-                            onChange={e => setChargeType(e.target.value as 'balance' | 'noshow')}
-                            className="h-9 flex-1 px-2 text-xs border border-gray-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-(--color-primary)"
-                          >
+                          <select value={chargeType} onChange={e => setChargeType(e.target.value as 'balance' | 'noshow')} className="h-9 flex-1 px-2 text-xs border border-gray-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-(--color-primary)">
                             <option value="balance">Balance</option>
                             <option value="noshow">No-show fee</option>
                           </select>
                           <div className="relative w-24 shrink-0">
                             <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-500">£</span>
-                            <input
-                              type="number" min="0" step="0.01" value={chargeAmount}
-                              onChange={e => setChargeAmount(e.target.value)}
-                              placeholder="0.00"
-                              className="w-full h-9 pl-5 pr-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
-                            />
+                            <input type="number" min="0" step="0.01" value={chargeAmount} onChange={e => setChargeAmount(e.target.value)} placeholder="0.00" className="w-full h-9 pl-5 pr-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)" />
                           </div>
                         </div>
-                        <Button fullWidth size="sm" loading={charging} disabled={!chargeAmount} onClick={() => handleChargeBalance(selected.id)}>
-                          Charge Saved Card
-                        </Button>
+                        <Button fullWidth size="sm" loading={charging} disabled={!chargeAmount} onClick={() => handleChargeBalance(selected.id)}>Charge Saved Card</Button>
                         {chargeError && <p className="text-xs text-red-600">{chargeError}</p>}
-                        {chargeSuccess && <p className="text-xs text-green-700 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Charged successfully</p>}
-                        <div className="relative">
-                          <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-100" /></div>
-                          <div className="relative flex justify-center"><span className="text-xs text-gray-400 bg-white px-2">or</span></div>
-                        </div>
+                        {chargeSuccess && <p className="text-xs text-green-700 flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" /> Charged</p>}
+                        <div className="relative"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-100" /></div><div className="relative flex justify-center"><span className="text-xs text-gray-400 bg-white px-2">or</span></div></div>
                       </>
                     )}
-
-                    {/* Mark as paid (cash / in-person card reader / other) */}
                     <Button fullWidth size="sm" variant="secondary" loading={charging} onClick={() => handleMarkAsPaid(selected.id)}>
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      Mark as Paid (Cash / Other)
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Mark as Paid (Cash / Other)
                     </Button>
                   </div>
                 )}
 
-                {/* Activity log */}
+                {/* Activity */}
                 {activityLog.length > 0 && (
                   <div className="border border-gray-100 rounded-lg p-3 space-y-2 max-h-36 overflow-y-auto">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">History</p>
-                    {activityLog.map(entry => (
-                      <div key={entry.id} className="text-xs border-l-2 border-gray-200 pl-2">
-                        <p className="text-gray-700">{entry.summary}</p>
-                        {entry.reason && <p className="text-gray-400 italic">"{entry.reason}"</p>}
-                        <p className="text-gray-400">{entry.actor_name} · {format(parseISO(entry.created_at), 'd MMM HH:mm')}</p>
+                    {activityLog.map(e => (
+                      <div key={e.id} className="text-xs border-l-2 border-gray-200 pl-2">
+                        <p className="text-gray-700">{e.summary}</p>
+                        {e.reason && <p className="text-gray-400 italic">"{e.reason}"</p>}
+                        <p className="text-gray-400">{e.actor_name} · {format(parseISO(e.created_at), 'd MMM HH:mm')}</p>
                       </div>
                     ))}
                   </div>
@@ -414,18 +448,14 @@ export default function StaffPortal() {
                     <Textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder="e.g. Customer requested…" rows={2} />
                     <div className="flex gap-2">
                       <Button variant="secondary" size="sm" onClick={() => { setCancelOpen(false); setCancelReason('') }} className="shrink-0">Back</Button>
-                      <Button fullWidth variant="danger" size="sm" loading={actionLoading} disabled={!cancelReason.trim()} onClick={() => handleCancelWithReason(selected.id)}>
-                        Confirm Cancellation
-                      </Button>
+                      <Button fullWidth variant="danger" size="sm" loading={actionLoading} disabled={!cancelReason.trim()} onClick={() => handleCancelWithReason(selected.id)}>Confirm</Button>
                     </div>
                   </div>
                 ) : (selected.status === 'confirmed' || selected.status === 'pending') && (
                   <div className="space-y-2">
-                    {/* Check-in */}
                     {selected.checked_in_at ? (
                       <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                        <UserCheck className="h-4 w-4 shrink-0" />
-                        Checked in at {format(parseISO(selected.checked_in_at), 'HH:mm')}
+                        <UserCheck className="h-4 w-4 shrink-0" /> Checked in at {format(parseISO(selected.checked_in_at), 'HH:mm')}
                       </div>
                     ) : (
                       <Button fullWidth size="sm" loading={actionLoading} onClick={() => handleCheckIn(selected.id)} style={{ backgroundColor: 'var(--color-primary)' }}>
@@ -433,15 +463,11 @@ export default function StaffPortal() {
                       </Button>
                     )}
                     <div className="flex gap-2">
-                      <Button size="sm" variant="secondary" onClick={() => setEditMode(true)} className="shrink-0">
-                        <Pencil className="h-3.5 w-3.5" /> Edit
-                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => setEditMode(true)} className="shrink-0"><Pencil className="h-3.5 w-3.5" /> Edit</Button>
                       <Button fullWidth size="sm" variant="secondary" loading={actionLoading} onClick={() => handleComplete(selected.id)} className="text-green-700! border-green-200! hover:bg-green-50!">
                         <CheckCircle2 className="h-4 w-4" /> Complete
                       </Button>
-                      <Button size="sm" variant="danger" onClick={() => setCancelOpen(true)}>
-                        <XCircle className="h-4 w-4" /> Cancel
-                      </Button>
+                      <Button size="sm" variant="danger" onClick={() => setCancelOpen(true)}><XCircle className="h-4 w-4" /> Cancel</Button>
                     </div>
                   </div>
                 )}
@@ -450,6 +476,21 @@ export default function StaffPortal() {
           </div>
         )}
       </Modal>
+
+      {/* Add Time Off modal */}
+      <Modal open={blockOpen} onClose={() => setBlockOpen(false)} title="Add Time Off" size="sm">
+        <div className="space-y-3">
+          <Input label="Date" type="date" value={blockForm.date} onChange={e => setBlockForm(f => ({ ...f, date: e.target.value }))} />
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="From" type="time" value={blockForm.startTime} onChange={e => setBlockForm(f => ({ ...f, startTime: e.target.value }))} />
+            <Input label="Until" type="time" value={blockForm.endTime} onChange={e => setBlockForm(f => ({ ...f, endTime: e.target.value }))} />
+          </div>
+          <Input label="Reason (optional)" value={blockForm.reason} onChange={e => setBlockForm(f => ({ ...f, reason: e.target.value }))} placeholder="e.g. Lunch break, training…" />
+          <Button fullWidth loading={blockSaving} disabled={!blockForm.date || !blockForm.startTime || !blockForm.endTime} onClick={handleAddBlock}>
+            Add Time Off
+          </Button>
+        </div>
+      </Modal>
     </StaffLayout>
   )
 }
@@ -457,7 +498,7 @@ export default function StaffPortal() {
 function ApptCard({ appt: a, onClick, compact }: { appt: Appt; onClick: () => void; compact?: boolean }) {
   const startsAt = parseISO(a.starts_at)
   const dateLabel = isToday(startsAt) ? null : isTomorrow(startsAt) ? 'Tomorrow' : format(startsAt, 'EEE d MMM')
-
+  const isPaid = a.payment_status === 'paid_in_full'
   return (
     <Card padding="sm" className="flex items-center gap-4 cursor-pointer hover:shadow-md transition-shadow" onClick={onClick}>
       <div className="w-16 text-center shrink-0">
@@ -472,14 +513,10 @@ function ApptCard({ appt: a, onClick, compact }: { appt: Appt; onClick: () => vo
           {!compact && a.service && ` · ${formatDuration(a.service.duration_minutes)}`}
           {a.resource && ` · ${a.resource.name}`}
         </p>
-        {a.customer?.phone && !compact && <p className="text-xs text-gray-400">{a.customer.phone}</p>}
       </div>
-      <div className="flex items-center gap-2 shrink-0">
-        {a.checked_in_at && (
-          <span className="text-white rounded-lg p-1.5" style={{ backgroundColor: 'var(--color-primary)' }}>
-            <UserCheck className="h-4 w-4" />
-          </span>
-        )}
+      <div className="flex items-center gap-1.5 shrink-0">
+        {isPaid && <CheckCircle2 className="h-4 w-4 text-green-600" />}
+        {a.checked_in_at && <span className="text-white rounded-lg p-1" style={{ backgroundColor: 'var(--color-primary)' }}><UserCheck className="h-3.5 w-3.5" /></span>}
         <Badge variant={statusBadgeVariant(a.status as never)} className="capitalize hidden sm:block">{a.status}</Badge>
         <span className="text-gray-300 text-xs">›</span>
       </div>
