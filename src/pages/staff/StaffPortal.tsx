@@ -89,7 +89,7 @@ export default function StaffPortal() {
   const [calBlocked, setCalBlocked] = useState<BlockedTime[]>([])
   const [calLoading, setCalLoading] = useState(false)
   const [blockOpen, setBlockOpen] = useState(false)
-  const [blockForm, setBlockForm] = useState({ date: '', startTime: '09:00', endTime: '17:00', reason: '' })
+  const [blockForm, setBlockForm] = useState({ startDate: '', endDate: '', allDay: false, startTime: '09:00', endTime: '17:00', reason: '' })
   const [blockSaving, setBlockSaving] = useState(false)
   const [blockError, setBlockError] = useState('')
 
@@ -269,20 +269,28 @@ export default function StaffPortal() {
     setCharging(false)
   }
   async function handleAddBlock() {
-    if (!staffId || !blockForm.date || !blockForm.startTime || !blockForm.endTime) return
+    if (!staffId || !blockForm.startDate) return
     setBlockSaving(true)
     setBlockError('')
-    const starts = new Date(`${blockForm.date}T${blockForm.startTime}`)
-    const ends = new Date(`${blockForm.date}T${blockForm.endTime}`)
-    const { data, error } = await supabase.from('blocked_times')
-      .insert({ staff_id: staffId, starts_at: starts.toISOString(), ends_at: ends.toISOString(), reason: blockForm.reason.trim() || null })
-      .select().single()
+    const reason = blockForm.reason.trim() || null
+    const endDate = blockForm.endDate || blockForm.startDate
+    const rows: { staff_id: string; starts_at: string; ends_at: string; reason: string | null }[] = []
+    const cursor = new Date(blockForm.startDate + 'T12:00:00') // noon to avoid DST edge cases
+    const last = new Date(endDate + 'T12:00:00')
+    while (cursor <= last) {
+      const d = format(cursor, 'yyyy-MM-dd')
+      const starts = new Date(`${d}T${blockForm.allDay ? '00:00' : blockForm.startTime}`)
+      const ends   = new Date(`${d}T${blockForm.allDay ? '23:59' : blockForm.endTime}`)
+      rows.push({ staff_id: staffId, starts_at: starts.toISOString(), ends_at: ends.toISOString(), reason })
+      cursor.setDate(cursor.getDate() + 1)
+    }
+    const { data, error } = await supabase.from('blocked_times').insert(rows).select()
     if (error) {
       setBlockError('Could not save — make sure you have permission to block time.')
     } else if (data) {
-      setCalBlocked(p => [...p, data as BlockedTime])
+      setCalBlocked(p => [...p, ...(data as BlockedTime[])])
       setBlockOpen(false)
-      setBlockForm({ date: '', startTime: '09:00', endTime: '17:00', reason: '' })
+      setBlockForm({ startDate: '', endDate: '', allDay: false, startTime: '09:00', endTime: '17:00', reason: '' })
     }
     setBlockSaving(false)
   }
@@ -363,7 +371,7 @@ export default function StaffPortal() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <h1 className="text-xl font-bold text-gray-900">Calendar</h1>
-            <Button size="sm" variant="secondary" onClick={() => { setBlockForm(f => ({ ...f, date: format(calDay, 'yyyy-MM-dd') })); setBlockOpen(true) }}>
+            <Button size="sm" variant="secondary" onClick={() => { setBlockForm(f => ({ ...f, startDate: format(calDay, 'yyyy-MM-dd'), endDate: format(calDay, 'yyyy-MM-dd') })); setBlockOpen(true) }}>
               <Plus className="h-3.5 w-3.5" /> Block Time
             </Button>
           </div>
@@ -623,14 +631,42 @@ export default function StaffPortal() {
       {/* Block Time modal */}
       <Modal open={blockOpen} onClose={() => { setBlockOpen(false); setBlockError('') }} title="Block Time" size="sm">
         <div className="space-y-3">
-          <Input label="Date" type="date" value={blockForm.date} onChange={e => setBlockForm(f => ({ ...f, date: e.target.value }))} />
           <div className="grid grid-cols-2 gap-3">
-            <Input label="From" type="time" value={blockForm.startTime} onChange={e => setBlockForm(f => ({ ...f, startTime: e.target.value }))} />
-            <Input label="Until" type="time" value={blockForm.endTime} onChange={e => setBlockForm(f => ({ ...f, endTime: e.target.value }))} />
+            <Input
+              label="Start date"
+              type="date"
+              value={blockForm.startDate}
+              onChange={e => setBlockForm(f => ({ ...f, startDate: e.target.value, endDate: f.endDate < e.target.value ? e.target.value : f.endDate }))}
+            />
+            <Input
+              label="End date"
+              type="date"
+              min={blockForm.startDate}
+              value={blockForm.endDate}
+              onChange={e => setBlockForm(f => ({ ...f, endDate: e.target.value }))}
+            />
           </div>
-          <Input label="Reason (optional)" value={blockForm.reason} onChange={e => setBlockForm(f => ({ ...f, reason: e.target.value }))} placeholder="e.g. Lunch break, training…" />
+
+          <label className="flex items-center gap-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={blockForm.allDay}
+              onChange={e => setBlockForm(f => ({ ...f, allDay: e.target.checked }))}
+              className="h-4 w-4 accent-(--color-primary)"
+            />
+            <span className="text-sm font-medium text-gray-700">All day</span>
+          </label>
+
+          {!blockForm.allDay && (
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="From" type="time" value={blockForm.startTime} onChange={e => setBlockForm(f => ({ ...f, startTime: e.target.value }))} />
+              <Input label="Until" type="time" value={blockForm.endTime} onChange={e => setBlockForm(f => ({ ...f, endTime: e.target.value }))} />
+            </div>
+          )}
+
+          <Input label="Reason (optional)" value={blockForm.reason} onChange={e => setBlockForm(f => ({ ...f, reason: e.target.value }))} placeholder="e.g. Holiday, training, lunch…" />
           {blockError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{blockError}</p>}
-          <Button fullWidth loading={blockSaving} disabled={!blockForm.date || !blockForm.startTime || !blockForm.endTime} onClick={handleAddBlock}>
+          <Button fullWidth loading={blockSaving} disabled={!blockForm.startDate} onClick={handleAddBlock}>
             Block Time
           </Button>
         </div>
