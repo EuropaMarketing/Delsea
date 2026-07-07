@@ -249,6 +249,11 @@ export default function StaffPortal() {
     await supabase.from('bookings').update({ checked_in_at: t }).eq('id', id)
     updateLocal(id, { checked_in_at: t }); await refreshActivityLog(id); setActionLoading(false)
   }
+  async function handleUnmarkCheckIn(id: string) {
+    setActionLoading(true)
+    await supabase.from('bookings').update({ checked_in_at: null }).eq('id', id)
+    updateLocal(id, { checked_in_at: null }); await refreshActivityLog(id); setActionLoading(false)
+  }
   async function handleComplete(id: string) {
     setActionLoading(true)
     await supabase.from('bookings').update({ status: 'completed' }).eq('id', id)
@@ -272,6 +277,12 @@ export default function StaffPortal() {
     setCharging(true)
     await supabase.from('bookings').update({ payment_status: 'paid_in_full', balance_charged_at: new Date().toISOString() }).eq('id', id)
     updateLocal(id, { payment_status: 'paid_in_full' }); await refreshActivityLog(id); setCharging(false)
+  }
+  async function handleUnmarkPaid(id: string, depositCharged: number) {
+    setCharging(true)
+    const status = depositCharged > 0 ? 'deposit_paid' : 'unpaid'
+    await supabase.from('bookings').update({ payment_status: status, balance_charged_at: null }).eq('id', id)
+    updateLocal(id, { payment_status: status }); await refreshActivityLog(id); setCharging(false)
   }
   async function handleChargeBalance(id: string) {
     const amtP = Math.round(parseFloat(chargeAmount) * 100)
@@ -646,6 +657,16 @@ export default function StaffPortal() {
               </div>
             ) : (
               <>
+                {selected.payment_status === 'paid_in_full' && (
+                  <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                    <span className="flex items-center gap-1.5 text-xs text-green-700 font-medium">
+                      <CheckCircle2 className="h-4 w-4" /> Paid in full
+                    </span>
+                    <button onClick={() => handleUnmarkPaid(selected.id, selected.deposit_charged)} className="text-xs text-gray-400 hover:text-red-600 transition-colors" disabled={charging}>
+                      Undo
+                    </button>
+                  </div>
+                )}
                 {selected.payment_status !== 'paid_in_full' && (
                   <div className="border border-gray-100 rounded-lg p-3 space-y-2">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5"><CreditCard className="h-3.5 w-3.5" /> Payment</p>
@@ -695,8 +716,13 @@ export default function StaffPortal() {
                 ) : (selected.status === 'confirmed' || selected.status === 'pending') && (
                   <div className="space-y-2">
                     {selected.checked_in_at ? (
-                      <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                        <UserCheck className="h-4 w-4 shrink-0" /> Checked in at {format(parseISO(selected.checked_in_at), 'HH:mm')}
+                      <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                        <span className="flex items-center gap-2 text-xs text-green-700">
+                          <UserCheck className="h-4 w-4 shrink-0" /> Checked in at {format(parseISO(selected.checked_in_at), 'HH:mm')}
+                        </span>
+                        <button onClick={() => handleUnmarkCheckIn(selected.id)} disabled={actionLoading} className="text-xs text-gray-400 hover:text-red-600 transition-colors">
+                          Undo
+                        </button>
                       </div>
                     ) : (
                       <Button fullWidth size="sm" loading={actionLoading} onClick={() => handleCheckIn(selected.id)} style={{ backgroundColor: color }}>
