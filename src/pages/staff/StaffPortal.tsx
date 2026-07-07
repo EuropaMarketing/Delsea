@@ -66,6 +66,7 @@ export default function StaffPortal() {
   const [weekCancellations, setWeekCancellations] = useState(0)
   const [nextApptIn, setNextApptIn] = useState('—')
   const [loading, setLoading] = useState(true)
+  const [showCompleted, setShowCompleted] = useState(false)
 
   const [selected, setSelected] = useState<Appt | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
@@ -343,26 +344,54 @@ export default function StaffPortal() {
             ))}
           </div>
 
-          <section className="mb-8">
-            <div className="flex items-center gap-2 mb-3">
-              <CalendarClock className="h-4 w-4 text-gray-400" />
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Today</h2>
-              <span className="text-xs text-gray-400 ml-auto">{todayAppts.length} appointment{todayAppts.length !== 1 ? 's' : ''}</span>
-            </div>
-            {todayAppts.length === 0
-              ? <Card padding="md" className="text-center py-10"><p className="text-gray-400 text-sm">No appointments today.</p></Card>
-              : <div className="space-y-2">{todayAppts.map(a => <ApptCard key={a.id} appt={a} onClick={() => openDetail(a)} />)}</div>
-            }
-          </section>
-          {upcomingAppts.length > 0 && (
-            <section>
-              <div className="flex items-center gap-2 mb-3">
-                <Clock className="h-4 w-4 text-gray-400" />
-                <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Coming up</h2>
-              </div>
-              <div className="space-y-2">{upcomingAppts.map(a => <ApptCard key={a.id} appt={a} onClick={() => openDetail(a)} compact />)}</div>
-            </section>
-          )}
+          {(() => {
+            const active = todayAppts.filter(a => a.status === 'confirmed' || a.status === 'pending')
+            const completed = todayAppts.filter(a => a.status === 'completed')
+            return (
+              <>
+                <section className="mb-8">
+                  <div className="flex items-center gap-2 mb-3">
+                    <CalendarClock className="h-4 w-4 text-gray-400" />
+                    <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Today</h2>
+                    <span className="text-xs text-gray-400 ml-auto">{active.length} remaining</span>
+                  </div>
+                  {active.length === 0
+                    ? <Card padding="md" className="text-center py-10"><p className="text-gray-400 text-sm">No remaining appointments today.</p></Card>
+                    : <div className="space-y-2">{active.map(a => <ApptCard key={a.id} appt={a} onClick={() => openDetail(a)} />)}</div>
+                  }
+                </section>
+
+                {upcomingAppts.length > 0 && (
+                  <section className="mb-8">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Clock className="h-4 w-4 text-gray-400" />
+                      <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Coming up</h2>
+                    </div>
+                    <div className="space-y-2">{upcomingAppts.map(a => <ApptCard key={a.id} appt={a} onClick={() => openDetail(a)} compact />)}</div>
+                  </section>
+                )}
+
+                {completed.length > 0 && (
+                  <section>
+                    <button
+                      onClick={() => setShowCompleted(v => !v)}
+                      className="flex items-center gap-2 w-full mb-3 group"
+                    >
+                      <CheckCircle2 className="h-4 w-4 text-gray-300" />
+                      <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Completed Today</h2>
+                      <span className="text-xs text-gray-400 ml-auto">{completed.length}</span>
+                      <ChevronRight className={`h-4 w-4 text-gray-400 transition-transform ${showCompleted ? 'rotate-90' : ''}`} />
+                    </button>
+                    {showCompleted && (
+                      <div className="space-y-2 opacity-60">
+                        {completed.map(a => <ApptCard key={a.id} appt={a} onClick={() => openDetail(a)} compact />)}
+                      </div>
+                    )}
+                  </section>
+                )}
+              </>
+            )
+          })()}
         </>
       )}
 
