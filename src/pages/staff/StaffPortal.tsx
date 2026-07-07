@@ -72,6 +72,8 @@ export default function StaffPortal() {
   const [actionLoading, setActionLoading] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const [editNotes, setEditNotes] = useState('')
+  const [editEndTime, setEditEndTime] = useState('')
+  const [activityLogOpen, setActivityLogOpen] = useState(false)
   const [editResourceId, setEditResourceId] = useState<string | null>(null)
   const [editEquipmentResourceId, setEditEquipmentResourceId] = useState<string | null>(null)
   const [editSaving, setEditSaving] = useState(false)
@@ -231,6 +233,8 @@ export default function StaffPortal() {
 
   function openDetail(a: Appt) {
     setSelected(a); setEditMode(false); setEditNotes(a.notes ?? ''); setEditResourceId(a.resource_id ?? null)
+    setEditEndTime(format(parseISO(a.ends_at), 'HH:mm'))
+    setActivityLogOpen(false)
     setEditEquipmentResourceId(a.equipment_resource_id ?? null)
     setCancelOpen(false); setCancelReason('')
     const remaining = (a.service?.price ?? 0) - (a.discount_amount ?? 0) - (a.gift_voucher_amount ?? 0) - (a.deposit_charged ?? 0)
@@ -269,8 +273,14 @@ export default function StaffPortal() {
     setEditSaving(true)
     const mr = resources.find(r => r.id === editResourceId) ?? null
     const me = equipmentResources.find(r => r.id === editEquipmentResourceId) ?? null
-    await supabase.from('bookings').update({ notes: editNotes.trim() || null, resource_id: editResourceId, equipment_resource_id: editEquipmentResourceId }).eq('id', id)
-    updateLocal(id, { notes: editNotes.trim() || null, resource_id: editResourceId, resource: mr ? { name: mr.name } : null, equipment_resource_id: editEquipmentResourceId, equipment_resource: me ? { name: me.name } : null })
+    const newEndsAt = selected ? (() => {
+      const d = parseISO(selected.starts_at)
+      const [h, m] = editEndTime.split(':').map(Number)
+      d.setHours(h, m, 0, 0)
+      return d.toISOString()
+    })() : undefined
+    await supabase.from('bookings').update({ notes: editNotes.trim() || null, resource_id: editResourceId, equipment_resource_id: editEquipmentResourceId, ...(newEndsAt ? { ends_at: newEndsAt } : {}) }).eq('id', id)
+    updateLocal(id, { notes: editNotes.trim() || null, resource_id: editResourceId, resource: mr ? { name: mr.name } : null, equipment_resource_id: editEquipmentResourceId, equipment_resource: me ? { name: me.name } : null, ...(newEndsAt ? { ends_at: newEndsAt } : {}) })
     await refreshActivityLog(id); setEditMode(false); setEditSaving(false)
   }
   async function handleMarkAsPaid(id: string) {
@@ -522,7 +532,15 @@ export default function StaffPortal() {
                   const c = a.status === 'completed' ? '#6b7280' : color
                   const isPaid = a.payment_status === 'paid_in_full'
                   return (
-                    <div key={a.id} onClick={() => { const full = [...todayAppts, ...upcomingAppts].find(x => x.id === a.id); if (full) openDetail(full) }}
+                    <div key={a.id} onClick={async () => {
+                        const full = [...todayAppts, ...upcomingAppts].find(x => x.id === a.id)
+                        if (full) { openDetail(full); return }
+                        // Booking not in schedule list (e.g. past appointment) — fetch on demand
+                        const { data } = await supabase.from('bookings')
+                          .select('id, starts_at, ends_at, status, notes, resource_id, equipment_resource_id, checked_in_at, payment_status, deposit_charged, discount_amount, gift_voucher_amount, customer:customers(name,phone,email,sumup_card_token), service:services(name,duration_minutes,price), resource:resources!resource_id(name), equipment_resource:resources!equipment_resource_id(name)')
+                          .eq('id', a.id).single()
+                        if (data) openDetail(data as unknown as Appt)
+                      }}
                       data-block
                       className="absolute rounded-md px-2 py-1 cursor-pointer hover:brightness-95 transition-colors"
                       style={{ top, height, left: '3.5rem', right: 4, backgroundColor: `${c}22`, borderLeft: `3px solid ${c}` }}>
@@ -633,6 +651,25 @@ export default function StaffPortal() {
             </dl>
             {editMode ? (
               <div className="space-y-3">
+                {/* Extend appointment */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">Start time</label>
+                    <p className="h-10 px-3 text-sm border border-gray-100 bg-gray-50 rounded-lg flex items-center text-gray-500">
+                      {format(parseISO(selected.starts_at), 'HH:mm')}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">End time</label>
+                    <input
+                      type="time"
+                      value={editEndTime}
+                      min={format(parseISO(selected.starts_at), 'HH:mm')}
+                      onChange={e => setEditEndTime(e.target.value)}
+                      className="w-full h-10 px-3 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                    />
+                  </div>
+                </div>
                 <Textarea label="Notes" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Add notes…" />
                 {resources.length > 0 && (
                   <div><label className="text-sm font-medium text-gray-700 mb-1 block">Room</label>
@@ -693,16 +730,16 @@ export default function StaffPortal() {
                   </div>
                 )}
                 {activityLog.length > 0 && (
-                  <div className="border border-gray-100 rounded-lg p-3 space-y-2 max-h-36 overflow-y-auto">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">History</p>
-                    {activityLog.map(e => (
-                      <div key={e.id} className="text-xs border-l-2 border-gray-200 pl-2">
-                        <p className="text-gray-700">{e.summary}</p>
-                        {e.reason && <p className="text-gray-400 italic">"{e.reason}"</p>}
-                        <p className="text-gray-400">{e.actor_name} · {format(parseISO(e.created_at), 'd MMM HH:mm')}</p>
-                      </div>
-                    ))}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActivityLogOpen(true)}
+                    className="w-full flex items-center justify-between border border-gray-100 rounded-lg px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hover:bg-gray-50 transition-colors"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Clock className="h-3.5 w-3.5" /> Activity ({activityLog.length})
+                    </span>
+                    <span className="text-gray-400 normal-case font-normal">View →</span>
+                  </button>
                 )}
                 {cancelOpen ? (
                   <div className="border border-red-200 bg-red-50 rounded-lg p-3 space-y-2">
@@ -742,6 +779,19 @@ export default function StaffPortal() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* Activity Log modal */}
+      <Modal open={activityLogOpen} onClose={() => setActivityLogOpen(false)} title="Activity Log" size="sm">
+        <ul className="space-y-3">
+          {activityLog.map(e => (
+            <li key={e.id} className="text-sm border-l-2 border-gray-200 pl-3">
+              <p className="text-gray-800">{e.summary}</p>
+              {e.reason && <p className="text-gray-500 italic mt-0.5">"{e.reason}"</p>}
+              <p className="text-xs text-gray-400 mt-0.5">{e.actor_name} · {format(parseISO(e.created_at), 'd MMM yyyy, HH:mm')}</p>
+            </li>
+          ))}
+        </ul>
       </Modal>
 
       {/* Cell click popover */}
