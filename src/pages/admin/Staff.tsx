@@ -58,6 +58,11 @@ export default function AdminStaff() {
   const [portfolioPhotos, setPortfolioPhotos] = useState<{ id: string; url: string; caption: string | null }[]>([])
   const [portfolioPickerOpen, setPortfolioPickerOpen] = useState(false)
 
+  // Resource assignments (rooms + equipment)
+  const [allResources, setAllResources] = useState<{ id: string; name: string; resource_type: string }[]>([])
+  const [assignedResourceIds, setAssignedResourceIds] = useState<Set<string>>(new Set())
+  const [togglingResourceId, setTogglingResourceId] = useState<string | null>(null)
+
   // Login setup
   const [loginEmail, setLoginEmail] = useState('')
   const [loginPassword, setLoginPassword] = useState('')
@@ -104,9 +109,11 @@ export default function AdminStaff() {
     setLoginPassword('')
     setLoginMessage(null)
 
-    const [availRes, portfolioRes] = await Promise.all([
+    const [availRes, portfolioRes, resourcesRes, staffResRes] = await Promise.all([
       supabase.from('availability').select('*').eq('staff_id', member.id),
       supabase.from('portfolio_photos').select('id, url, caption').eq('business_id', BUSINESS_ID).eq('is_active', true).order('sort_order'),
+      supabase.from('resources').select('id, name, resource_type').eq('business_id', BUSINESS_ID).eq('is_active', true).order('name'),
+      supabase.from('staff_resources').select('resource_id').eq('staff_id', member.id),
     ])
     // Start with ALL days disabled so that days the member doesn't work are
     // not shown as ticked. Only enable days that actually exist in the DB.
@@ -120,6 +127,8 @@ export default function AdminStaff() {
     }
     setSchedule(sched)
     if (portfolioRes.data) setPortfolioPhotos(portfolioRes.data as typeof portfolioPhotos)
+    setAllResources((resourcesRes.data ?? []) as { id: string; name: string; resource_type: string }[])
+    setAssignedResourceIds(new Set((staffResRes.data ?? []).map(r => r.resource_id)))
     setModalOpen(true)
   }
 
@@ -135,10 +144,26 @@ export default function AdminStaff() {
     setErrors({})
     setPortfolioPickerOpen(false)
     setPortfolioPhotos([])
+    setAllResources([])
+    setAssignedResourceIds(new Set())
     setLoginEmail('')
     setLoginPassword('')
     setLoginMessage(null)
     setModalOpen(true)
+  }
+
+  async function handleToggleResource(resourceId: string) {
+    if (!editTarget) return
+    setTogglingResourceId(resourceId)
+    const isAssigned = assignedResourceIds.has(resourceId)
+    if (isAssigned) {
+      await supabase.from('staff_resources').delete().eq('staff_id', editTarget.id).eq('resource_id', resourceId)
+      setAssignedResourceIds(prev => { const n = new Set(prev); n.delete(resourceId); return n })
+    } else {
+      await supabase.from('staff_resources').insert({ staff_id: editTarget.id, resource_id: resourceId })
+      setAssignedResourceIds(prev => new Set(prev).add(resourceId))
+    }
+    setTogglingResourceId(null)
   }
 
   async function handleCreateLogin() {
@@ -534,6 +559,39 @@ export default function AdminStaff() {
               ))}
             </div>
           </div>
+
+          {/* Rooms and Equipment — only when editing an existing staff member */}
+          {editTarget && allResources.length > 0 && (
+            <>
+              {(['room', 'equipment'] as const).map(type => {
+                const group = allResources.filter(r => r.resource_type === type)
+                if (group.length === 0) return null
+                const label = type === 'room' ? 'Rooms' : 'Equipment'
+                return (
+                  <div key={type} className="border border-gray-100 rounded-xl p-4 space-y-2 bg-gray-50">
+                    <p className="text-sm font-semibold text-gray-700">{label}</p>
+                    <p className="text-xs text-gray-500">
+                      Tick the {label.toLowerCase()} this team member works with.
+                    </p>
+                    <div className="space-y-1.5">
+                      {group.map(r => (
+                        <label key={r.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-2 cursor-pointer hover:border-gray-300 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={assignedResourceIds.has(r.id)}
+                            disabled={togglingResourceId === r.id}
+                            onChange={() => handleToggleResource(r.id)}
+                            className="accent-(--color-primary)"
+                          />
+                          <span className="text-sm text-gray-900">{r.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </>
+          )}
 
           {/* Login setup — only for existing staff members */}
           {editTarget && (
