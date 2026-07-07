@@ -90,8 +90,9 @@ export function StaffLayout({ children, staffName, activeSection, onSection }: P
   const Sidebar = ({ onClose }: { onClose?: () => void }) => (
     <div className="flex flex-col h-full">
       <div className="px-4 py-5 border-b border-gray-100">
-        <span className="font-bold text-base" style={{ color: 'var(--color-primary)' }}>{config.brandName}</span>
-        <p className="text-xs text-gray-400 mt-0.5 truncate">{staffName}</p>
+        <span className="font-bold text-sm whitespace-nowrap" style={{ color: 'var(--color-primary)' }}>{config.brandName}</span>
+        <p className="text-xs text-gray-400 mt-0.5">Staff Panel</p>
+        <p className="text-xs font-medium text-gray-600 mt-0.5 truncate">{staffName}</p>
       </div>
       <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
         <NavLinks onClose={onClose} />
@@ -109,7 +110,7 @@ export function StaffLayout({ children, staffName, activeSection, onSection }: P
       <CheckInToasts alerts={checkInAlerts} onDismiss={dismissAlert} />
 
       {/* Desktop sidebar */}
-      <aside className="hidden lg:flex flex-col w-52 bg-white border-r border-gray-100 shrink-0">
+      <aside className="hidden lg:flex flex-col w-56 bg-white border-r border-gray-100 shrink-0">
         <Sidebar />
       </aside>
 
@@ -117,7 +118,7 @@ export function StaffLayout({ children, staffName, activeSection, onSection }: P
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
-          <aside className="relative w-52 h-full bg-white border-r border-gray-100 flex flex-col">
+          <aside className="relative w-56 h-full bg-white border-r border-gray-100 flex flex-col">
             <div className="absolute top-3 right-3">
               <button onClick={() => setMobileOpen(false)} className="p-1 rounded text-gray-400 hover:text-gray-600">
                 <X className="h-5 w-5" />
