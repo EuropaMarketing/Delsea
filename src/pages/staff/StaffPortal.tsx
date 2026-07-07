@@ -585,43 +585,47 @@ export default function StaffPortal() {
 
       {/* ── CALENDAR ── */}
       {activeSection === 'calendar' && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h1 className="text-xl font-bold text-gray-900">Calendar</h1>
-            <Button size="sm" variant="secondary" onClick={() => { setBlockForm(f => ({ ...f, startDate: format(calDay, 'yyyy-MM-dd'), endDate: format(calDay, 'yyyy-MM-dd') })); setBlockOpen(true) }}>
-              <Plus className="h-3.5 w-3.5" /> Block Time
-            </Button>
+        /* On mobile: flex column filling screen height minus sticky header (56px) + page padding (32px) */
+        <div className="flex flex-col lg:block" style={{ height: 'calc(100svh - 88px)' }}>
+
+          {/* Fixed controls — don't scroll */}
+          <div className="shrink-0">
+            <div className="flex items-center justify-between mb-2">
+              <h1 className="text-base font-bold text-gray-900 lg:text-xl">Calendar</h1>
+              <Button size="sm" variant="secondary" onClick={() => { setBlockForm(f => ({ ...f, startDate: format(calDay, 'yyyy-MM-dd'), endDate: format(calDay, 'yyyy-MM-dd') })); setBlockOpen(true) }}>
+                <Plus className="h-3.5 w-3.5" /> Block Time
+              </Button>
+            </div>
+            <div className="flex items-center justify-between mb-2">
+              <button onClick={() => setCalDay(d => subDays(d, 7))} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronLeft className="h-4 w-4" /></button>
+              <span className="text-xs font-semibold text-gray-500">
+                {format(weekDays[0], 'd MMM')} – {format(weekDays[6], 'd MMM')}
+              </span>
+              <button onClick={() => setCalDay(d => addDays(d, 7))} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronRight className="h-4 w-4" /></button>
+            </div>
+            <div className="grid grid-cols-7 gap-1 mb-2">
+              {weekDays.map(d => {
+                const hasAppts = calWeekAppts.some(a => isSameDay(parseISO(a.starts_at), d))
+                const hasBlock = calBlocked.some(bt => isSameDay(parseISO(bt.starts_at), d))
+                const sel = isSameDay(d, calDay)
+                return (
+                  <button key={d.toISOString()} onClick={() => setCalDay(d)}
+                    className={`flex flex-col items-center py-1.5 rounded-lg text-xs transition-colors ${sel ? 'text-white' : isToday(d) ? 'bg-gray-100 font-semibold text-gray-900' : 'text-gray-500 hover:bg-gray-50'}`}
+                    style={sel ? { backgroundColor: color } : {}}>
+                    <span>{format(d, 'EEE')[0]}</span>
+                    <span className="font-semibold">{format(d, 'd')}</span>
+                    {(hasAppts || hasBlock) && <span className={`h-1 w-1 rounded-full mt-0.5 ${sel ? 'bg-white/70' : 'bg-(--color-primary)'}`} />}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-xs font-semibold text-gray-700 mb-2">{format(calDay, 'EEE d MMMM')}</p>
           </div>
-          <div className="flex items-center justify-between mb-3">
-            <button onClick={() => setCalDay(d => subDays(d, 7))} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronLeft className="h-4 w-4" /></button>
-            <span className="text-xs font-semibold text-gray-500 truncate">
-              <span className="hidden sm:inline">{format(weekDays[0], 'd MMM')} – {format(weekDays[6], 'd MMM yyyy')}</span>
-              <span className="sm:hidden">{format(weekDays[0], 'd MMM')} – {format(weekDays[6], 'd MMM')}</span>
-            </span>
-            <button onClick={() => setCalDay(d => addDays(d, 7))} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronRight className="h-4 w-4" /></button>
-          </div>
-          <div className="grid grid-cols-7 gap-1 mb-4">
-            {weekDays.map(d => {
-              const hasAppts = calWeekAppts.some(a => isSameDay(parseISO(a.starts_at), d))
-              const hasBlock = calBlocked.some(bt => isSameDay(parseISO(bt.starts_at), d))
-              const sel = isSameDay(d, calDay)
-              return (
-                <button key={d.toISOString()} onClick={() => setCalDay(d)}
-                  className={`flex flex-col items-center py-1.5 rounded-lg text-xs transition-colors ${sel ? 'text-white' : isToday(d) ? 'bg-gray-100 font-semibold text-gray-900' : 'text-gray-500 hover:bg-gray-50'}`}
-                  style={sel ? { backgroundColor: color } : {}}>
-                  <span>{format(d, 'EEE')[0]}</span>
-                  <span className="font-semibold">{format(d, 'd')}</span>
-                  {(hasAppts || hasBlock) && <span className={`h-1 w-1 rounded-full mt-0.5 ${sel ? 'bg-white/70' : 'bg-(--color-primary)'}`} />}
-                </button>
-              )
-            })}
-          </div>
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-semibold text-gray-700">{format(calDay, 'EEEE d MMMM')}</p>
-          </div>
+
+          {/* Time grid — fills remaining height, scrolls only vertically */}
           <div
-            className="border border-gray-200 rounded-xl bg-white overflow-auto"
-            style={{ maxHeight: 'calc(100svh - 220px)', overscrollBehavior: 'contain' }}
+            className="flex-1 min-h-0 border border-gray-200 rounded-xl bg-white overflow-y-auto overflow-x-hidden"
+            style={{ overscrollBehavior: 'contain' }}
           >
             {calLoading ? <div className="py-16 text-center text-sm text-gray-400">Loading…</div> : (
               <div
@@ -1104,27 +1108,27 @@ function ApptCard({ appt: a, onClick, compact }: { appt: Appt; onClick: () => vo
   const startsAt = parseISO(a.starts_at)
   const isPaid = a.payment_status === 'paid_in_full'
   const dateLabel = isToday(startsAt) ? null : isTomorrow(startsAt) ? 'Tomorrow' : format(startsAt, 'EEE d MMM')
+  // Small coloured dot for status — saves space on mobile
+  const statusDot: Record<string, string> = { confirmed: '#22c55e', pending: '#f59e0b', completed: '#6b7280', cancelled: '#ef4444' }
+  const dot = statusDot[a.status] ?? '#6b7280'
   return (
     <Card padding="sm" className="cursor-pointer hover:bg-gray-50 transition-colors" onClick={onClick}>
-      {/* Top row: customer + status indicators */}
-      <div className="flex items-start justify-between gap-2 mb-1">
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-gray-900 text-sm truncate">{a.customer?.name ?? 'Customer'}</p>
-          <p className="text-xs text-gray-500 truncate">
-            {a.service?.name}{a.resource ? ` · ${a.resource.name}` : ''}{!compact && a.service && <span className="hidden sm:inline"> · {formatDuration(a.service.duration_minutes)}</span>}
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          {isPaid && <CheckCircle2 className="h-4 w-4 text-green-600" />}
-          {a.checked_in_at && (
-            <span className="text-white rounded-md p-0.5" style={{ backgroundColor: 'var(--color-primary)' }}>
-              <UserCheck className="h-3.5 w-3.5" />
-            </span>
-          )}
-          <Badge variant={statusBadgeVariant(a.status as never)} className="capitalize">{a.status}</Badge>
+      {/* Row 1: customer name + compact indicators */}
+      <div className="flex items-center justify-between gap-2 mb-0.5">
+        <p className="font-semibold text-gray-900 text-sm truncate flex-1 min-w-0">{a.customer?.name ?? 'Customer'}</p>
+        <div className="flex items-center gap-1 shrink-0">
+          {isPaid && <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />}
+          {a.checked_in_at && <UserCheck className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />}
+          {/* Dot on mobile, full badge on desktop */}
+          <span className="h-2.5 w-2.5 rounded-full sm:hidden shrink-0" style={{ backgroundColor: dot }} />
+          <Badge variant={statusBadgeVariant(a.status as never)} className="capitalize hidden sm:flex">{a.status}</Badge>
         </div>
       </div>
-      {/* Bottom row: time */}
+      {/* Row 2: service name — allowed to wrap, no truncation */}
+      <p className="text-xs text-gray-500 mb-1 leading-snug">
+        {a.service?.name}{a.resource ? ` · ${a.resource.name}` : ''}{!compact && a.service && <span className="hidden sm:inline"> · {formatDuration(a.service.duration_minutes)}</span>}
+      </p>
+      {/* Row 3: time */}
       <p className="text-xs text-gray-400">
         {dateLabel ? `${dateLabel} · ` : ''}{format(startsAt, 'HH:mm')} – {format(parseISO(a.ends_at), 'HH:mm')}
       </p>
