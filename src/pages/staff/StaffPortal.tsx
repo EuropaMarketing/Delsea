@@ -93,7 +93,7 @@ export default function StaffPortal() {
   // New booking from calendar
   const [nbOpen, setNbOpen] = useState(false)
   const [nbTime, setNbTime] = useState('')
-  const [nbForm, setNbForm] = useState({ name: '', email: '', phone: '', serviceId: '', notes: '' })
+  const [nbForm, setNbForm] = useState({ name: '', email: '', phone: '', serviceId: '', resourceId: '', equipmentResourceId: '', notes: '' })
   const [nbSaving, setNbSaving] = useState(false)
   const [nbError, setNbError] = useState('')
   const [calServices, setCalServices] = useState<{ id: string; name: string; duration_minutes: number }[]>([])
@@ -345,9 +345,16 @@ export default function StaffPortal() {
     if (error) {
       setNbError(error.message)
     } else {
+      // Apply room / equipment overrides if staff selected them
+      const overrides: Record<string, string | null> = {}
+      if (nbForm.resourceId) overrides.resource_id = nbForm.resourceId
+      if (nbForm.equipmentResourceId) overrides.equipment_resource_id = nbForm.equipmentResourceId
+      if (Object.keys(overrides).length && bookingId) {
+        await supabase.from('bookings').update(overrides).eq('id', bookingId as string)
+      }
       setNbOpen(false)
-      setNbForm({ name: '', email: '', phone: '', serviceId: '', notes: '' })
-      loadCalWeek(calDay) // refresh calendar
+      setNbForm({ name: '', email: '', phone: '', serviceId: '', resourceId: '', equipmentResourceId: '', notes: '' })
+      loadCalWeek(calDay)
     }
     setNbSaving(false)
     void bookingId
@@ -722,7 +729,7 @@ export default function StaffPortal() {
             </p>
             <button
               className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-              onClick={() => { setNbTime(cellPopover.time); setNbForm({ name: '', email: '', phone: '', serviceId: calServices[0]?.id ?? '', notes: '' }); setNbError(''); setNbOpen(true); setCellPopover(null) }}
+              onClick={() => { setNbTime(cellPopover.time); setNbForm({ name: '', email: '', phone: '', serviceId: calServices[0]?.id ?? '', resourceId: '', equipmentResourceId: '', notes: '' }); setNbError(''); setNbOpen(true); setCellPopover(null) }}
             >
               <CalendarClock className="h-4 w-4 text-gray-400" /> New Booking
             </button>
@@ -749,6 +756,24 @@ export default function StaffPortal() {
               {calServices.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
+          {resources.length > 0 && (
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1 block">Room</label>
+              <select value={nbForm.resourceId} onChange={e => setNbForm(f => ({ ...f, resourceId: e.target.value }))} className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)">
+                <option value="">Auto-assign room</option>
+                {resources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </div>
+          )}
+          {equipmentResources.length > 0 && (
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1 block">Equipment</label>
+              <select value={nbForm.equipmentResourceId} onChange={e => setNbForm(f => ({ ...f, equipmentResourceId: e.target.value }))} className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)">
+                <option value="">No equipment</option>
+                {equipmentResources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </div>
+          )}
           <Textarea label="Notes (optional)" value={nbForm.notes} onChange={e => setNbForm(f => ({ ...f, notes: e.target.value }))} placeholder="Any relevant notes…" />
           {nbError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{nbError}</p>}
           <Button fullWidth loading={nbSaving} onClick={handleCreateBooking}>Confirm Booking</Button>
