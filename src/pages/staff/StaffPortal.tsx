@@ -594,7 +594,10 @@ export default function StaffPortal() {
           </div>
           <div className="flex items-center justify-between mb-3">
             <button onClick={() => setCalDay(d => subDays(d, 7))} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronLeft className="h-4 w-4" /></button>
-            <span className="text-xs font-semibold text-gray-500">{format(weekDays[0], 'd MMM')} – {format(weekDays[6], 'd MMM yyyy')}</span>
+            <span className="text-xs font-semibold text-gray-500 truncate">
+              <span className="hidden sm:inline">{format(weekDays[0], 'd MMM')} – {format(weekDays[6], 'd MMM yyyy')}</span>
+              <span className="sm:hidden">{format(weekDays[0], 'd MMM')} – {format(weekDays[6], 'd MMM')}</span>
+            </span>
             <button onClick={() => setCalDay(d => addDays(d, 7))} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronRight className="h-4 w-4" /></button>
           </div>
           <div className="grid grid-cols-7 gap-1 mb-4">
@@ -616,11 +619,14 @@ export default function StaffPortal() {
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm font-semibold text-gray-700">{format(calDay, 'EEEE d MMMM')}</p>
           </div>
-          <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+          <div
+            className="border border-gray-200 rounded-xl bg-white overflow-auto"
+            style={{ maxHeight: 'calc(100svh - 220px)', overscrollBehavior: 'contain' }}
+          >
             {calLoading ? <div className="py-16 text-center text-sm text-gray-400">Loading…</div> : (
               <div
                 className="relative cursor-pointer"
-                style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR), userSelect: drag ? 'none' : 'auto' }}
+                style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR), minWidth: 280, userSelect: drag ? 'none' : 'auto' }}
                 onClick={handleGridClick}
                 onMouseMove={handleDragMove}
                 onMouseUp={handleDragEnd}
@@ -1099,25 +1105,29 @@ function ApptCard({ appt: a, onClick, compact }: { appt: Appt; onClick: () => vo
   const isPaid = a.payment_status === 'paid_in_full'
   const dateLabel = isToday(startsAt) ? null : isTomorrow(startsAt) ? 'Tomorrow' : format(startsAt, 'EEE d MMM')
   return (
-    <Card padding="sm" className="flex items-center gap-3 cursor-pointer hover:shadow-md transition-shadow" onClick={onClick}>
-      <div className="w-12 sm:w-16 text-center shrink-0">
-        {dateLabel && <p className="text-xs text-gray-400 mb-0.5 hidden sm:block">{dateLabel}</p>}
-        {dateLabel && <p className="text-xs text-gray-400 mb-0.5 sm:hidden">{format(startsAt, 'd MMM')}</p>}
-        <p className="font-bold text-xs sm:text-sm" style={{ color: 'var(--color-primary)' }}>{format(startsAt, 'HH:mm')}</p>
-        {!compact && <p className="text-xs text-gray-400">{format(parseISO(a.ends_at), 'HH:mm')}</p>}
+    <Card padding="sm" className="cursor-pointer hover:bg-gray-50 transition-colors" onClick={onClick}>
+      {/* Top row: customer + status indicators */}
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-gray-900 text-sm truncate">{a.customer?.name ?? 'Customer'}</p>
+          <p className="text-xs text-gray-500 truncate">
+            {a.service?.name}{a.resource ? ` · ${a.resource.name}` : ''}{!compact && a.service && <span className="hidden sm:inline"> · {formatDuration(a.service.duration_minutes)}</span>}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {isPaid && <CheckCircle2 className="h-4 w-4 text-green-600" />}
+          {a.checked_in_at && (
+            <span className="text-white rounded-md p-0.5" style={{ backgroundColor: 'var(--color-primary)' }}>
+              <UserCheck className="h-3.5 w-3.5" />
+            </span>
+          )}
+          <Badge variant={statusBadgeVariant(a.status as never)} className="capitalize">{a.status}</Badge>
+        </div>
       </div>
-      <div className="flex-1 min-w-0">
-        <p className="font-medium text-gray-900 text-sm leading-snug line-clamp-1">{a.customer?.name ?? 'Customer'}</p>
-        <p className="text-xs text-gray-500 line-clamp-1">
-          {a.service?.name}{!compact && a.service && <span className="hidden sm:inline"> · {formatDuration(a.service.duration_minutes)}</span>}{a.resource && ` · ${a.resource.name}`}
-        </p>
-      </div>
-      <div className="flex items-center gap-1.5 shrink-0">
-        {isPaid && <CheckCircle2 className="h-4 w-4 text-green-600" />}
-        {a.checked_in_at && <span className="text-white rounded-lg p-1" style={{ backgroundColor: 'var(--color-primary)' }}><UserCheck className="h-3.5 w-3.5" /></span>}
-        <Badge variant={statusBadgeVariant(a.status as never)} className="capitalize hidden sm:block">{a.status}</Badge>
-        <span className="text-gray-300 text-xs">›</span>
-      </div>
+      {/* Bottom row: time */}
+      <p className="text-xs text-gray-400">
+        {dateLabel ? `${dateLabel} · ` : ''}{format(startsAt, 'HH:mm')} – {format(parseISO(a.ends_at), 'HH:mm')}
+      </p>
     </Card>
   )
 }
