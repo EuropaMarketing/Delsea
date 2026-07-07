@@ -287,7 +287,7 @@ export default function StaffPortal() {
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm font-semibold text-gray-700">{format(calDay, 'EEEE d MMMM')}</p>
             <Button size="sm" variant="secondary" onClick={() => { setBlockForm(f => ({ ...f, date: format(calDay, 'yyyy-MM-dd') })); setBlockOpen(true) }}>
-              <Plus className="h-3.5 w-3.5" /> Add Time Off
+              <Plus className="h-3.5 w-3.5" /> Block Time
             </Button>
           </div>
 
@@ -477,8 +477,8 @@ export default function StaffPortal() {
         )}
       </Modal>
 
-      {/* Add Time Off modal */}
-      <Modal open={blockOpen} onClose={() => setBlockOpen(false)} title="Add Time Off" size="sm">
+      {/* Block Time modal */}
+      <Modal open={blockOpen} onClose={() => setBlockOpen(false)} title="Block Time" size="sm">
         <div className="space-y-3">
           <Input label="Date" type="date" value={blockForm.date} onChange={e => setBlockForm(f => ({ ...f, date: e.target.value }))} />
           <div className="grid grid-cols-2 gap-3">
@@ -487,7 +487,7 @@ export default function StaffPortal() {
           </div>
           <Input label="Reason (optional)" value={blockForm.reason} onChange={e => setBlockForm(f => ({ ...f, reason: e.target.value }))} placeholder="e.g. Lunch break, training…" />
           <Button fullWidth loading={blockSaving} disabled={!blockForm.date || !blockForm.startTime || !blockForm.endTime} onClick={handleAddBlock}>
-            Add Time Off
+            Block Time
           </Button>
         </div>
       </Modal>
