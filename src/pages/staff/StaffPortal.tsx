@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  format, startOfDay, endOfDay, addDays, subDays,
+  format, startOfDay, endOfDay, addDays, subDays, addMinutes,
   isToday, isTomorrow, isSameDay, parseISO, startOfWeek, endOfWeek, differenceInMinutes,
 } from 'date-fns'
 import {
@@ -88,6 +88,15 @@ export default function StaffPortal() {
   const [calDay, setCalDay] = useState(() => new Date())
   const [calWeekAppts, setCalWeekAppts] = useState<CalAppt[]>([])
   const [calBlocked, setCalBlocked] = useState<BlockedTime[]>([])
+  // Cell click popover
+  const [cellPopover, setCellPopover] = useState<{ x: number; y: number; time: string } | null>(null)
+  // New booking from calendar
+  const [nbOpen, setNbOpen] = useState(false)
+  const [nbTime, setNbTime] = useState('')
+  const [nbForm, setNbForm] = useState({ name: '', email: '', phone: '', serviceId: '', notes: '' })
+  const [nbSaving, setNbSaving] = useState(false)
+  const [nbError, setNbError] = useState('')
+  const [calServices, setCalServices] = useState<{ id: string; name: string; duration_minutes: number }[]>([])
   const [calLoading, setCalLoading] = useState(false)
   const [blockOpen, setBlockOpen] = useState(false)
   const [blockForm, setBlockForm] = useState({ startDate: '', endDate: '', allDay: false, startTime: '09:00', endTime: '17:00', reason: '' })
@@ -170,7 +179,14 @@ export default function StaffPortal() {
     setCalLoading(false)
   }, [staffId])
 
-  useEffect(() => { if (activeSection === 'calendar') loadCalWeek(calDay) }, [activeSection, calDay, loadCalWeek])
+  useEffect(() => {
+    if (activeSection !== 'calendar') return
+    loadCalWeek(calDay)
+    if (calServices.length === 0) {
+      supabase.from('services').select('id, name, duration_minutes').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('is_group_session', false).neq('is_self_service', true).order('name')
+        .then(({ data }) => { if (data) setCalServices(data as { id: string; name: string; duration_minutes: number }[]) })
+    }
+  }, [activeSection, calDay, loadCalWeek])
 
   // Reviews loader (lazy)
   useEffect(() => {
@@ -298,6 +314,43 @@ export default function StaffPortal() {
   async function handleDeleteBlock(id: string) {
     const { error } = await supabase.from('blocked_times').delete().eq('id', id)
     if (!error) setCalBlocked(p => p.filter(b => b.id !== id))
+  }
+
+  function handleGridClick(e: React.MouseEvent<HTMLDivElement>) {
+    if ((e.target as HTMLElement).closest('[data-block]')) return
+    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+    const relY = e.clientY - rect.top
+    const rawHours = START_HOUR + relY / HOUR_HEIGHT
+    const hour = Math.floor(rawHours)
+    const mins = Math.round((rawHours % 1) * 60 / 15) * 15
+    const time = `${String(hour).padStart(2, '0')}:${String(mins === 60 ? 0 : mins).padStart(2, '0')}`
+    setCellPopover({ x: e.clientX, y: e.clientY, time })
+  }
+
+  async function handleCreateBooking() {
+    if (!staffId || !nbForm.name || !nbForm.email || !nbForm.serviceId) { setNbError('Name, email and service are required'); return }
+    const svc = calServices.find(s => s.id === nbForm.serviceId)
+    if (!svc) return
+    const [h, m] = nbTime.split(':').map(Number)
+    const startsAt = new Date(calDay); startsAt.setHours(h, m, 0, 0)
+    const endsAt = addMinutes(startsAt, svc.duration_minutes)
+    setNbSaving(true); setNbError('')
+    const { data: bookingId, error } = await supabase.rpc('create_booking', {
+      p_business_id: BUSINESS_ID, p_user_id: null,
+      p_name: nbForm.name.trim(), p_email: nbForm.email.trim(), p_phone: nbForm.phone.trim() || null,
+      p_staff_id: staffId, p_service_id: nbForm.serviceId,
+      p_starts_at: startsAt.toISOString(), p_ends_at: endsAt.toISOString(),
+      p_notes: nbForm.notes.trim() || null,
+    })
+    if (error) {
+      setNbError(error.message)
+    } else {
+      setNbOpen(false)
+      setNbForm({ name: '', email: '', phone: '', serviceId: '', notes: '' })
+      loadCalWeek(calDay) // refresh calendar
+    }
+    setNbSaving(false)
+    void bookingId
   }
 
   if (loading) return <StaffLayout staffName="" activeSection={activeSection} onSection={setActiveSection}><FullPageSpinner /></StaffLayout>
@@ -430,7 +483,7 @@ export default function StaffPortal() {
           </div>
           <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
             {calLoading ? <div className="py-16 text-center text-sm text-gray-400">Loading…</div> : (
-              <div className="relative overflow-y-auto" style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}>
+              <div className="relative overflow-y-auto cursor-pointer" style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }} onClick={handleGridClick}>
                 {hours.map(h => (
                   <div key={h} className="absolute w-full flex" style={{ top: (h - START_HOUR) * HOUR_HEIGHT, height: HOUR_HEIGHT }}>
                     <span className="text-xs text-gray-400 w-12 text-right pr-2 pt-0.5 shrink-0">{h}:00</span>
@@ -440,7 +493,7 @@ export default function StaffPortal() {
                 {dayBlocked.map(bt => {
                   const { top, height } = positionBlock(bt.starts_at, bt.ends_at)
                   return (
-                    <div key={bt.id} className="absolute rounded-md bg-red-50 border-l-4 border-red-400 px-2 py-1 group" style={{ top, height, left: '3.5rem', right: 4 }}>
+                    <div key={bt.id} data-block className="absolute rounded-md bg-red-50 border-l-4 border-red-400 px-2 py-1 group" style={{ top, height, left: '3.5rem', right: 4 }}>
                       <p className="text-xs font-semibold text-red-700 truncate">{format(parseISO(bt.starts_at), 'HH:mm')}–{format(parseISO(bt.ends_at), 'HH:mm')} Block Time{bt.reason ? `: ${bt.reason}` : ''}</p>
                       <button onClick={() => handleDeleteBlock(bt.id)} className="absolute top-1 right-1 hidden group-hover:block text-red-400 hover:text-red-600"><Trash2 className="h-3 w-3" /></button>
                     </div>
@@ -452,6 +505,7 @@ export default function StaffPortal() {
                   const isPaid = a.payment_status === 'paid_in_full'
                   return (
                     <div key={a.id} onClick={() => { const full = [...todayAppts, ...upcomingAppts].find(x => x.id === a.id); if (full) openDetail(full) }}
+                      data-block
                       className="absolute rounded-md px-2 py-1 cursor-pointer hover:brightness-95 transition-colors"
                       style={{ top, height, left: '3.5rem', right: 4, backgroundColor: `${c}22`, borderLeft: `3px solid ${c}` }}>
                       <p className="text-xs font-semibold truncate" style={{ color: c }}>{format(parseISO(a.starts_at), 'HH:mm')}–{format(parseISO(a.ends_at), 'HH:mm')} {a.service?.name}</p>
@@ -655,6 +709,50 @@ export default function StaffPortal() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* Cell click popover */}
+      {cellPopover && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setCellPopover(null)} />
+          <div className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 min-w-44"
+            style={{ top: cellPopover.y + 6, left: Math.min(cellPopover.x, window.innerWidth - 180) }}>
+            <p className="px-3 py-1.5 text-xs font-semibold text-gray-400 border-b border-gray-100 mb-1">
+              {cellPopover.time} · {format(calDay, 'd MMM')}
+            </p>
+            <button
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+              onClick={() => { setNbTime(cellPopover.time); setNbForm({ name: '', email: '', phone: '', serviceId: calServices[0]?.id ?? '', notes: '' }); setNbError(''); setNbOpen(true); setCellPopover(null) }}
+            >
+              <CalendarClock className="h-4 w-4 text-gray-400" /> New Booking
+            </button>
+            <button
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+              onClick={() => { setBlockForm(f => ({ ...f, startDate: format(calDay, 'yyyy-MM-dd'), endDate: format(calDay, 'yyyy-MM-dd'), startTime: cellPopover.time })); setBlockError(''); setBlockOpen(true); setCellPopover(null) }}
+            >
+              <XCircle className="h-4 w-4 text-gray-400" /> Block Time
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* New Booking modal */}
+      <Modal open={nbOpen} onClose={() => setNbOpen(false)} title={`New Booking · ${nbTime}`} size="sm">
+        <div className="space-y-3">
+          <Input label="Customer name" value={nbForm.name} onChange={e => setNbForm(f => ({ ...f, name: e.target.value }))} placeholder="Full name" required />
+          <Input label="Email" type="email" value={nbForm.email} onChange={e => setNbForm(f => ({ ...f, email: e.target.value }))} placeholder="email@example.com" required />
+          <Input label="Phone (optional)" value={nbForm.phone} onChange={e => setNbForm(f => ({ ...f, phone: e.target.value }))} placeholder="+44..." />
+          <div>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">Service</label>
+            <select value={nbForm.serviceId} onChange={e => setNbForm(f => ({ ...f, serviceId: e.target.value }))} className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)">
+              <option value="">Select a service…</option>
+              {calServices.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+          <Textarea label="Notes (optional)" value={nbForm.notes} onChange={e => setNbForm(f => ({ ...f, notes: e.target.value }))} placeholder="Any relevant notes…" />
+          {nbError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{nbError}</p>}
+          <Button fullWidth loading={nbSaving} onClick={handleCreateBooking}>Confirm Booking</Button>
+        </div>
       </Modal>
 
       {/* Block Time modal */}
