@@ -109,7 +109,11 @@ export default function AdminStaff() {
       supabase.from('availability').select('*').eq('staff_id', member.id),
       supabase.from('portfolio_photos').select('id, url, caption').eq('business_id', BUSINESS_ID).eq('is_active', true).order('sort_order'),
     ])
-    const sched = defaultSchedule()
+    // Start with ALL days disabled so that days the member doesn't work are
+    // not shown as ticked. Only enable days that actually exist in the DB.
+    const sched: Record<number, DaySchedule> = Object.fromEntries(
+      DAYS.map((_, i) => [i, { enabled: false, start_time: '09:00', end_time: '18:00' }])
+    )
     if (availRes.data) {
       availRes.data.forEach((a: Availability) => {
         sched[a.day_of_week] = { enabled: true, start_time: a.start_time, end_time: a.end_time }
