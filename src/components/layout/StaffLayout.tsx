@@ -106,7 +106,7 @@ export function StaffLayout({ children, staffName, activeSection, onSection }: P
   )
 
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
+    <div className="flex bg-gray-50 overflow-hidden" style={{ height: '100dvh' }}>
       <CheckInToasts alerts={checkInAlerts} onDismiss={dismissAlert} />
 
       {/* Desktop sidebar */}

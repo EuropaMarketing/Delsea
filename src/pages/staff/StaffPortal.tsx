@@ -427,7 +427,7 @@ export default function StaffPortal() {
     setDrag(d => d ? { ...d, currentEndsAt: newEnd.toISOString() } : null)
   }
   function handleDragMove(e: React.MouseEvent<HTMLDivElement>) { applyDragDelta(e.clientY) }
-  function handleTouchMove(e: React.TouchEvent<HTMLDivElement>) { if (drag) { e.preventDefault(); applyDragDelta(e.touches[0].clientY) } }
+  function handleTouchMove(e: React.TouchEvent<HTMLDivElement>) { if (drag) applyDragDelta(e.touches[0].clientY) }
 
   async function handleDragEnd() {
     if (!drag || drag.currentEndsAt === drag.originalEndsAt) { setDrag(null); return }
@@ -619,7 +619,7 @@ export default function StaffPortal() {
           <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
             {calLoading ? <div className="py-16 text-center text-sm text-gray-400">Loading…</div> : (
               <div
-                className="relative overflow-y-auto cursor-pointer"
+                className="relative cursor-pointer"
                 style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR), userSelect: drag ? 'none' : 'auto' }}
                 onClick={handleGridClick}
                 onMouseMove={handleDragMove}
@@ -645,7 +645,7 @@ export default function StaffPortal() {
                       {/* Drag handle */}
                       <div
                         data-block
-                        className="absolute bottom-0 left-0 right-0 h-5 cursor-s-resize flex items-end justify-center pb-1"
+                        className="absolute bottom-0 left-0 right-0 h-5 cursor-s-resize flex items-end justify-center pb-1" style={{ touchAction: "none" }}
                         onMouseDown={e => { e.stopPropagation(); e.preventDefault(); setDrag({ id: bt.id, type: 'block', startY: e.clientY, originalEndsAt: bt.ends_at, currentEndsAt: bt.ends_at }) }}
                         onTouchStart={e => { e.stopPropagation(); setDrag({ id: bt.id, type: 'block', startY: e.touches[0].clientY, originalEndsAt: bt.ends_at, currentEndsAt: bt.ends_at }) }}
                       >
@@ -679,7 +679,7 @@ export default function StaffPortal() {
                       {/* Drag handle */}
                       <div
                         data-block
-                        className="absolute bottom-0 left-0 right-0 h-5 cursor-s-resize flex items-end justify-center pb-1"
+                        className="absolute bottom-0 left-0 right-0 h-5 cursor-s-resize flex items-end justify-center pb-1" style={{ touchAction: "none" }}
                         onMouseDown={e => { e.stopPropagation(); e.preventDefault(); setDrag({ id: a.id, type: 'booking', startY: e.clientY, originalEndsAt: a.ends_at, currentEndsAt: a.ends_at }) }}
                         onTouchStart={e => { e.stopPropagation(); setDrag({ id: a.id, type: 'booking', startY: e.touches[0].clientY, originalEndsAt: a.ends_at, currentEndsAt: a.ends_at }) }}
                       >
