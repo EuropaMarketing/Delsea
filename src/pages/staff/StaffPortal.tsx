@@ -5,11 +5,11 @@ import {
 } from 'date-fns'
 import {
   CalendarClock, Clock, UserCheck, CheckCircle2, XCircle, Pencil, CreditCard,
-  ChevronLeft, ChevronRight, Plus, Trash2, Star,
+  ChevronLeft, ChevronRight, Plus, Trash2, Star, Tag, Gift, Ticket,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
-import { formatDuration } from '@/lib/currency'
+import { formatCurrency, formatDuration } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -77,6 +77,23 @@ export default function StaffPortal() {
   const [editResourceId, setEditResourceId] = useState<string | null>(null)
   const [editEquipmentResourceId, setEditEquipmentResourceId] = useState<string | null>(null)
   const [editSaving, setEditSaving] = useState(false)
+  // Discount
+  const [editDiscountCode, setEditDiscountCode] = useState('')
+  const [editDiscountApplying, setEditDiscountApplying] = useState(false)
+  const [editDiscountError, setEditDiscountError] = useState('')
+  const [editDiscountApplied, setEditDiscountApplied] = useState(false)
+  const [editDiscountAmount, setEditDiscountAmount] = useState(0)
+  // Gift voucher
+  const [editVoucherCode, setEditVoucherCode] = useState('')
+  const [editVoucherApplying, setEditVoucherApplying] = useState(false)
+  const [editVoucherRemoving, setEditVoucherRemoving] = useState(false)
+  const [editVoucherApplied, setEditVoucherApplied] = useState(false)
+  const [editVoucherAmount, setEditVoucherAmount] = useState(0)
+  const [editVoucherError, setEditVoucherError] = useState('')
+  // Membership token
+  const [editTokenInfo, setEditTokenInfo] = useState<{ membershipId: string; planName: string; tokens: number } | null>(null)
+  const [editTokenApplied, setEditTokenApplied] = useState(false)
+  const [editTokenLoading, setEditTokenLoading] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
   const [chargeAmount, setChargeAmount] = useState('')
@@ -233,11 +250,31 @@ export default function StaffPortal() {
     if (data) setActivityLog(data as ActivityEntry[])
   }, [])
 
-  function openDetail(a: Appt) {
+  async function openDetail(a: Appt) {
     setSelected(a); setEditMode(false); setEditNotes(a.notes ?? ''); setEditResourceId(a.resource_id ?? null)
     setEditEndTime(format(parseISO(a.ends_at), 'HH:mm'))
     setActivityLogOpen(false)
     setEditEquipmentResourceId(a.equipment_resource_id ?? null)
+    // Discount / voucher state
+    setEditDiscountCode(''); setEditDiscountError('')
+    setEditDiscountApplied((a.discount_amount ?? 0) > 0); setEditDiscountAmount(a.discount_amount ?? 0)
+    setEditVoucherCode(''); setEditVoucherError('')
+    setEditVoucherApplied((a.gift_voucher_amount ?? 0) > 0); setEditVoucherAmount(a.gift_voucher_amount ?? 0)
+    // Membership token
+    setEditTokenInfo(null); setEditTokenApplied(false)
+    const email = a.customer?.email
+    if (email) {
+      const svcCat = (a as unknown as { service: { category?: string } | null }).service?.category ?? null
+      const [tokenRes, txRes] = await Promise.all([
+        supabase.rpc('get_customer_token_balance', { p_email: email, p_business_id: BUSINESS_ID, p_category: svcCat }),
+        supabase.from('membership_transactions').select('id').eq('booking_id', a.id).eq('type', 'redeem').maybeSingle(),
+      ])
+      if (tokenRes.data?.length > 0) {
+        const row = tokenRes.data[0] as { membership_id: string; plan_name: string; tokens_remaining: number }
+        setEditTokenInfo({ membershipId: row.membership_id, planName: row.plan_name, tokens: row.tokens_remaining })
+      }
+      if (txRes.data) setEditTokenApplied(true)
+    }
     setCancelOpen(false); setCancelReason('')
     const remaining = (a.service?.price ?? 0) - (a.discount_amount ?? 0) - (a.gift_voucher_amount ?? 0) - (a.deposit_charged ?? 0)
     setChargeAmount(remaining > 0 ? (remaining / 100).toFixed(2) : '')
@@ -271,6 +308,45 @@ export default function StaffPortal() {
     setTodayAppts(p => p.filter(a => a.id !== id)); setUpcomingAppts(p => p.filter(a => a.id !== id))
     setSelected(null); setCancelOpen(false); setCancelReason(''); setActionLoading(false)
   }
+  async function handleEditApplyDiscount(id: string) {
+    if (!editDiscountCode.trim()) return
+    setEditDiscountApplying(true); setEditDiscountError('')
+    const { data, error } = await supabase.rpc('apply_discount_to_booking', { p_booking_id: id, p_code: editDiscountCode.trim(), p_business_id: BUSINESS_ID })
+    if (error) { setEditDiscountError(error.message) }
+    else { const r = data as { discount_amount: number }; setEditDiscountApplied(true); setEditDiscountAmount(r.discount_amount); updateLocal(id, { discount_amount: r.discount_amount }); await refreshActivityLog(id) }
+    setEditDiscountApplying(false)
+  }
+
+  async function handleEditApplyVoucher(id: string) {
+    if (!editVoucherCode.trim()) return
+    setEditVoucherApplying(true); setEditVoucherError('')
+    const { data, error } = await supabase.rpc('apply_gift_voucher_to_booking', { p_booking_id: id, p_code: editVoucherCode.trim(), p_business_id: BUSINESS_ID })
+    if (error) { setEditVoucherError(error.message) }
+    else { const r = data as { voucher_amount: number }; setEditVoucherApplied(true); setEditVoucherAmount(r.voucher_amount); updateLocal(id, { gift_voucher_amount: r.voucher_amount }); await refreshActivityLog(id) }
+    setEditVoucherApplying(false)
+  }
+
+  async function handleEditRemoveVoucher(id: string) {
+    setEditVoucherRemoving(true)
+    await supabase.rpc('remove_gift_voucher_from_booking', { p_booking_id: id })
+    setEditVoucherApplied(false); setEditVoucherAmount(0); setEditVoucherCode(''); updateLocal(id, { gift_voucher_amount: 0 }); await refreshActivityLog(id)
+    setEditVoucherRemoving(false)
+  }
+
+  async function handleEditApplyToken(membershipId: string, id: string) {
+    setEditTokenLoading(true)
+    const { error } = await supabase.rpc('redeem_token', { p_booking_id: id, p_membership_id: membershipId })
+    if (!error) { setEditTokenApplied(true); await refreshActivityLog(id) }
+    setEditTokenLoading(false)
+  }
+
+  async function handleEditRemoveToken(id: string) {
+    setEditTokenLoading(true)
+    await supabase.rpc('refund_token_for_booking', { p_booking_id: id })
+    setEditTokenApplied(false); await refreshActivityLog(id)
+    setEditTokenLoading(false)
+  }
+
   async function handleSaveEdit(id: string) {
     setEditSaving(true)
     const mr = resources.find(r => r.id === editResourceId) ?? null
@@ -339,19 +415,19 @@ export default function StaffPortal() {
     if (!error) setCalBlocked(p => p.filter(b => b.id !== id))
   }
 
-  function handleDragMove(e: React.MouseEvent<HTMLDivElement>) {
+  function applyDragDelta(clientY: number) {
     if (!drag) return
-    const deltaY = e.clientY - drag.startY
-    const rawDeltaMins = (deltaY / HOUR_HEIGHT) * 60
-    const snappedDeltaMins = Math.round(rawDeltaMins / 15) * 15
+    const deltaY = clientY - drag.startY
+    const snappedDeltaMins = Math.round((deltaY / HOUR_HEIGHT) * 60 / 15) * 15
     const newEnd = addMinutes(parseISO(drag.originalEndsAt), snappedDeltaMins)
-    // Prevent dragging end before start
     const item = drag.type === 'booking'
       ? calWeekAppts.find(b => b.id === drag.id)
       : calBlocked.find(b => b.id === drag.id)
     if (item && newEnd <= parseISO(item.starts_at)) return
     setDrag(d => d ? { ...d, currentEndsAt: newEnd.toISOString() } : null)
   }
+  function handleDragMove(e: React.MouseEvent<HTMLDivElement>) { applyDragDelta(e.clientY) }
+  function handleTouchMove(e: React.TouchEvent<HTMLDivElement>) { if (drag) { e.preventDefault(); applyDragDelta(e.touches[0].clientY) } }
 
   async function handleDragEnd() {
     if (!drag || drag.currentEndsAt === drag.originalEndsAt) { setDrag(null); return }
@@ -549,6 +625,8 @@ export default function StaffPortal() {
                 onMouseMove={handleDragMove}
                 onMouseUp={handleDragEnd}
                 onMouseLeave={() => { if (drag) setDrag(null) }}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleDragEnd}
               >
                 {hours.map(h => (
                   <div key={h} className="absolute w-full flex" style={{ top: (h - START_HOUR) * HOUR_HEIGHT, height: HOUR_HEIGHT }}>
@@ -567,8 +645,9 @@ export default function StaffPortal() {
                       {/* Drag handle */}
                       <div
                         data-block
-                        className="absolute bottom-0 left-0 right-0 h-3 cursor-s-resize flex items-end justify-center pb-0.5"
+                        className="absolute bottom-0 left-0 right-0 h-5 cursor-s-resize flex items-end justify-center pb-1"
                         onMouseDown={e => { e.stopPropagation(); e.preventDefault(); setDrag({ id: bt.id, type: 'block', startY: e.clientY, originalEndsAt: bt.ends_at, currentEndsAt: bt.ends_at }) }}
+                        onTouchStart={e => { e.stopPropagation(); setDrag({ id: bt.id, type: 'block', startY: e.touches[0].clientY, originalEndsAt: bt.ends_at, currentEndsAt: bt.ends_at }) }}
                       >
                         <div className="w-8 h-1 rounded-full bg-red-300 opacity-60" />
                       </div>
@@ -600,8 +679,9 @@ export default function StaffPortal() {
                       {/* Drag handle */}
                       <div
                         data-block
-                        className="absolute bottom-0 left-0 right-0 h-3 cursor-s-resize flex items-end justify-center pb-0.5"
+                        className="absolute bottom-0 left-0 right-0 h-5 cursor-s-resize flex items-end justify-center pb-1"
                         onMouseDown={e => { e.stopPropagation(); e.preventDefault(); setDrag({ id: a.id, type: 'booking', startY: e.clientY, originalEndsAt: a.ends_at, currentEndsAt: a.ends_at }) }}
+                        onTouchStart={e => { e.stopPropagation(); setDrag({ id: a.id, type: 'booking', startY: e.touches[0].clientY, originalEndsAt: a.ends_at, currentEndsAt: a.ends_at }) }}
                       >
                         <div className="w-8 h-1 rounded-full opacity-40" style={{ backgroundColor: c }} />
                       </div>
@@ -698,6 +778,8 @@ export default function StaffPortal() {
               {selected.resource && <div className="flex justify-between"><dt className="text-gray-500">Room</dt><dd className="text-gray-700">{selected.resource.name}</dd></div>}
               {selected.equipment_resource && <div className="flex justify-between"><dt className="text-gray-500">Equipment</dt><dd className="text-gray-700">{selected.equipment_resource.name}</dd></div>}
               {selected.notes && <div className="flex justify-between gap-4"><dt className="text-gray-500 shrink-0">Notes</dt><dd className="text-gray-700 text-right text-xs">{selected.notes}</dd></div>}
+              {(selected.discount_amount ?? 0) > 0 && <div className="flex justify-between"><dt className="text-gray-500 flex items-center gap-1"><Tag className="h-3.5 w-3.5" /> Discount</dt><dd className="text-green-700 font-semibold">−{formatCurrency(selected.discount_amount ?? 0)}</dd></div>}
+              {(selected.gift_voucher_amount ?? 0) > 0 && <div className="flex justify-between"><dt className="text-gray-500 flex items-center gap-1"><Gift className="h-3.5 w-3.5" /> Voucher</dt><dd className="text-green-700 font-semibold">−{formatCurrency(selected.gift_voucher_amount ?? 0)}</dd></div>}
               <div className="flex justify-between"><dt className="text-gray-500">Status</dt><dd><Badge variant={statusBadgeVariant(selected.status as never)} className="capitalize">{selected.status}</Badge></dd></div>
               <div className="flex justify-between items-center">
                 <dt className="text-gray-500">Payment</dt>
@@ -745,6 +827,57 @@ export default function StaffPortal() {
                     </select>
                   </div>
                 )}
+                {/* Membership token */}
+                <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5"><Ticket className="h-3.5 w-3.5" /> Membership Token</p>
+                  {editTokenApplied ? (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-green-700 font-medium">Token applied to this booking</span>
+                      <button onClick={() => handleEditRemoveToken(selected.id)} disabled={editTokenLoading} className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50">{editTokenLoading ? 'Removing…' : 'Remove'}</button>
+                    </div>
+                  ) : editTokenInfo ? (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-600">{editTokenInfo.planName} · {editTokenInfo.tokens} session{editTokenInfo.tokens !== 1 ? 's' : ''} left</span>
+                      <Button size="sm" loading={editTokenLoading} onClick={() => handleEditApplyToken(editTokenInfo.membershipId, selected.id)}>Apply Token</Button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-400">No membership tokens available for this customer.</p>
+                  )}
+                </div>
+
+                {/* Discount code */}
+                <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5"><Tag className="h-3.5 w-3.5" /> Discount Code</p>
+                  {editDiscountApplied ? (
+                    <div className="flex items-center gap-2 text-green-700"><CheckCircle2 className="h-4 w-4 shrink-0" /><span className="text-xs font-medium">Applied: −{formatCurrency(editDiscountAmount)}</span></div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input type="text" value={editDiscountCode} onChange={e => { setEditDiscountCode(e.target.value.toUpperCase()); setEditDiscountError('') }} placeholder="ENTER CODE"
+                        className="flex-1 h-9 px-3 text-sm font-mono border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) uppercase" />
+                      <Button size="sm" loading={editDiscountApplying} onClick={() => handleEditApplyDiscount(selected.id)} disabled={!editDiscountCode.trim()}>Apply</Button>
+                    </div>
+                  )}
+                  {editDiscountError && <p className="text-xs text-red-600">{editDiscountError}</p>}
+                </div>
+
+                {/* Gift voucher */}
+                <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5"><Gift className="h-3.5 w-3.5" /> Gift Voucher</p>
+                  {editVoucherApplied ? (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-green-700 font-medium">Applied: −{formatCurrency(editVoucherAmount)}</span>
+                      <button onClick={() => handleEditRemoveVoucher(selected.id)} disabled={editVoucherRemoving} className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50">{editVoucherRemoving ? 'Removing…' : 'Remove'}</button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input type="text" value={editVoucherCode} onChange={e => { setEditVoucherCode(e.target.value.toUpperCase()); setEditVoucherError('') }} placeholder="VOUCHER CODE"
+                        className="flex-1 h-9 px-3 text-sm font-mono border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) uppercase" />
+                      <Button size="sm" loading={editVoucherApplying} onClick={() => handleEditApplyVoucher(selected.id)} disabled={!editVoucherCode.trim()}>Apply</Button>
+                    </div>
+                  )}
+                  {editVoucherError && <p className="text-xs text-red-600">{editVoucherError}</p>}
+                </div>
+
                 <div className="flex gap-2">
                   <Button variant="secondary" size="sm" onClick={() => setEditMode(false)} className="shrink-0">Cancel</Button>
                   <Button fullWidth size="sm" loading={editSaving} onClick={() => handleSaveEdit(selected.id)}>Save Changes</Button>
