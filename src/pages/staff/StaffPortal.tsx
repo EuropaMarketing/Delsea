@@ -307,7 +307,7 @@ export default function StaffPortal() {
                   const { top, height } = positionBlock(bt.starts_at, bt.ends_at)
                   return (
                     <div key={bt.id} className="absolute rounded-md bg-red-50 border-l-4 border-red-400 px-2 py-1 group" style={{ top, height, left: '3.5rem', right: 4 }}>
-                      <p className="text-xs font-semibold text-red-700 truncate">Time off{bt.reason ? `: ${bt.reason}` : ''}</p>
+                      <p className="text-xs font-semibold text-red-700 truncate">{format(parseISO(bt.starts_at), 'HH:mm')}–{format(parseISO(bt.ends_at), 'HH:mm')} Block Time{bt.reason ? `: ${bt.reason}` : ''}</p>
                       <button onClick={() => handleDeleteBlock(bt.id)} className="absolute top-1 right-1 hidden group-hover:block text-red-400 hover:text-red-600">
                         <Trash2 className="h-3 w-3" />
                       </button>
@@ -327,7 +327,7 @@ export default function StaffPortal() {
                     }}
                       className="absolute rounded-md px-2 py-1 cursor-pointer hover:brightness-95 transition-colors"
                       style={{ top, height, left: '3.5rem', right: 4, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}>
-                      <p className="text-xs font-semibold truncate" style={{ color }}>{format(parseISO(a.starts_at), 'HH:mm')} {a.service?.name}</p>
+                      <p className="text-xs font-semibold truncate" style={{ color }}>{format(parseISO(a.starts_at), 'HH:mm')}–{format(parseISO(a.ends_at), 'HH:mm')} {a.service?.name}</p>
                       <p className="text-xs text-gray-600 truncate">{a.customer?.name}</p>
                       {isPaid && <CheckCircle2 className="h-3 w-3 text-green-600 absolute top-1 right-1" />}
                     </div>
