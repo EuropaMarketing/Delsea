@@ -71,7 +71,7 @@ export default function AdminEvents() {
       .then(({ data }) => { if (data) setGroupServices(data as Service[]) })
     supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name')
       .then(({ data }) => { if (data) setStaffList(data as Staff[]) })
-    supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).order('name')
+    supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'room').order('name')
       .then(({ data }) => { if (data) setResources(data as Resource[]) })
   }, [])
 

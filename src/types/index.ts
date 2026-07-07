@@ -151,12 +151,15 @@ export interface BlockedTime {
   reason: string | null
 }
 
+export type ResourceType = 'room' | 'equipment' | 'other'
+
 export interface Resource {
   id: string
   business_id: string
   name: string
   description: string | null
   is_active: boolean
+  resource_type: ResourceType
   created_at: string
 }
 

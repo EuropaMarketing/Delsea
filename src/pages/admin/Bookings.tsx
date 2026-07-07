@@ -70,6 +70,7 @@ export default function AdminBookings() {
       .select('*')
       .eq('business_id', BUSINESS_ID)
       .eq('is_active', true)
+      .eq('resource_type', 'room')
       .order('name')
       .then(({ data }) => { if (data) setResources(data as Resource[]) })
   }, [])

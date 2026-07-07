@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { DoorOpen, Plus, Pencil, ToggleLeft, ToggleRight } from 'lucide-react'
+import { DoorOpen, Wrench, LayoutGrid, Plus, Pencil, ToggleLeft, ToggleRight } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -7,11 +7,17 @@ import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { Resource } from '@/types'
+import type { Resource, ResourceType } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
-const emptyForm = { name: '', description: '' }
+const TYPE_LABELS: Record<ResourceType, { label: string; icon: typeof DoorOpen; colour: string }> = {
+  room:      { label: 'Room',      icon: DoorOpen,    colour: 'text-blue-600 bg-blue-50' },
+  equipment: { label: 'Equipment', icon: Wrench,       colour: 'text-amber-600 bg-amber-50' },
+  other:     { label: 'Other',     icon: LayoutGrid,   colour: 'text-gray-600 bg-gray-100' },
+}
+
+const emptyForm = { name: '', description: '', resource_type: 'room' as ResourceType }
 
 export default function AdminResources() {
   const [resources, setResources] = useState<Resource[]>([])
@@ -36,7 +42,7 @@ export default function AdminResources() {
 
   function openEdit(resource: Resource) {
     setEditTarget(resource)
-    setForm({ name: resource.name, description: resource.description ?? '' })
+    setForm({ name: resource.name, description: resource.description ?? '', resource_type: resource.resource_type ?? 'room' })
     setError('')
   }
 
@@ -55,14 +61,14 @@ export default function AdminResources() {
     if (editTarget && editTarget.id) {
       const { error: err } = await supabase
         .from('resources')
-        .update({ name: form.name.trim(), description: form.description.trim() || null })
+        .update({ name: form.name.trim(), description: form.description.trim() || null, resource_type: form.resource_type })
         .eq('id', editTarget.id)
       if (err) { setError(err.message); setSaving(false); return }
-      setResources(prev => prev.map(r => r.id === editTarget.id ? { ...r, name: form.name.trim(), description: form.description.trim() || null } : r))
+      setResources(prev => prev.map(r => r.id === editTarget.id ? { ...r, name: form.name.trim(), description: form.description.trim() || null, resource_type: form.resource_type } : r))
     } else {
       const { data, error: err } = await supabase
         .from('resources')
-        .insert({ business_id: BUSINESS_ID, name: form.name.trim(), description: form.description.trim() || null })
+        .insert({ business_id: BUSINESS_ID, name: form.name.trim(), description: form.description.trim() || null, resource_type: form.resource_type })
         .select()
         .single()
       if (err) { setError(err.message); setSaving(false); return }
@@ -111,8 +117,11 @@ export default function AdminResources() {
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <DoorOpen className="h-4 w-4 text-gray-400 shrink-0" />
+                    {(() => { const t = TYPE_LABELS[resource.resource_type ?? 'room']; return <t.icon className={`h-4 w-4 shrink-0 ${t.colour.split(' ')[0]}`} /> })()}
                     <p className="font-semibold text-gray-900">{resource.name}</p>
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${TYPE_LABELS[resource.resource_type ?? 'room'].colour}`}>
+                      {TYPE_LABELS[resource.resource_type ?? 'room'].label}
+                    </span>
                     <Badge variant={resource.is_active ? 'success' : 'default'}>
                       {resource.is_active ? 'Active' : 'Inactive'}
                     </Badge>
@@ -152,6 +161,18 @@ export default function AdminResources() {
             placeholder="e.g. Treatment Room 1"
             required
           />
+          <div>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">Type</label>
+            <select
+              value={form.resource_type}
+              onChange={e => setForm(f => ({ ...f, resource_type: e.target.value as ResourceType }))}
+              className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+            >
+              <option value="room">Room — treatment rooms, spaces</option>
+              <option value="equipment">Equipment — hot stones, specialist kit</option>
+              <option value="other">Other — anything else</option>
+            </select>
+          </div>
           <Input
             label="Description (optional)"
             value={form.description}

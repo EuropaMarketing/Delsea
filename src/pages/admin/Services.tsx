@@ -1012,7 +1012,7 @@ export default function AdminServices() {
                 )}
 
                 {(() => {
-                  const available = resources.filter(r => !serviceResources.find(sr => sr.resource_id === r.id))
+                  const available = resources.filter(r => r.resource_type === 'room' && !serviceResources.find(sr => sr.resource_id === r.id))
                   if (available.length === 0) return null
                   // Default to first available room so the button is always clickable immediately.
                   const effectiveId = addResourceId || available[0].id

@@ -207,7 +207,7 @@ export default function AdminCalendar() {
           .select('id, staff_id, starts_at, ends_at, reason')
           .lt('starts_at', dayEnd)
           .gt('ends_at', dayStart),
-        supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).order('name'),
+        supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'room').order('name'),
       ])
       if (staffRes.data) setStaff(staffRes.data as Staff[])
       if (bookRes.data) setBookings(bookRes.data as RichBooking[])
