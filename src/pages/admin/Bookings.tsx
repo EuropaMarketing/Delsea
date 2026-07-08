@@ -113,6 +113,23 @@ export default function AdminBookings() {
     setSelectedBooking((b) => (b ? { ...b, checked_in_at: checkedInAt } : b))
   }
 
+  async function handleUnmarkCheckIn(bookingId: string) {
+    await supabase.from('bookings').update({ checked_in_at: null }).eq('id', bookingId)
+    setBookings((prev) => prev.map((b) => (b.id === bookingId ? { ...b, checked_in_at: null } : b)))
+    setSelectedBooking((b) => (b ? { ...b, checked_in_at: null } : b))
+    await refreshActivityLog(bookingId)
+  }
+
+  async function handleUnmarkPaid(bookingId: string, depositCharged: number) {
+    setCharging(true)
+    const status = depositCharged > 0 ? 'deposit_paid' : 'unpaid'
+    await supabase.from('bookings').update({ payment_status: status, balance_charged_at: null }).eq('id', bookingId)
+    setBookings((prev) => prev.map((b) => (b.id === bookingId ? { ...b, payment_status: status } : b)))
+    setSelectedBooking((b) => (b ? { ...b, payment_status: status } : b))
+    await refreshActivityLog(bookingId)
+    setCharging(false)
+  }
+
   async function handleCancelWithReason(bookingId: string) {
     if (!cancelReason.trim()) return
     setUpdating(true)
@@ -453,7 +470,14 @@ export default function AdminBookings() {
               </p>
               {selectedBooking.customer?.sumup_card_token ? (
                 selectedBooking.payment_status === 'paid_in_full' ? (
-                  <p className="text-xs text-green-700 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Paid in full</p>
+                  <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                    <span className="flex items-center gap-1.5 text-xs text-green-700 font-medium">
+                      <CheckCircle2 className="h-4 w-4" /> Paid in full
+                    </span>
+                    <button onClick={() => handleUnmarkPaid(selectedBooking.id, selectedBooking.deposit_charged)} disabled={charging} className="text-xs text-gray-400 hover:text-red-600 transition-colors">
+                      Undo
+                    </button>
+                  </div>
                 ) : (
                   <div className="space-y-2">
                     <div className="flex gap-2">
@@ -527,9 +551,14 @@ export default function AdminBookings() {
                 {/* Check In */}
                 {(selectedBooking.status === 'confirmed' || selectedBooking.status === 'pending') && (
                   selectedBooking.checked_in_at ? (
-                    <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                      <UserCheck className="h-4 w-4 shrink-0" />
-                      Checked in at {format(parseISO(selectedBooking.checked_in_at), 'HH:mm')}
+                    <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                      <span className="flex items-center gap-2 text-xs text-green-700">
+                        <UserCheck className="h-4 w-4 shrink-0" />
+                        Checked in at {format(parseISO(selectedBooking.checked_in_at), 'HH:mm')}
+                      </span>
+                      <button onClick={() => handleUnmarkCheckIn(selectedBooking.id)} className="text-xs text-gray-400 hover:text-red-600 transition-colors">
+                        Undo
+                      </button>
                     </div>
                   ) : (
                     <Button fullWidth size="sm" onClick={() => handleCheckIn(selectedBooking.id)} style={{ backgroundColor: 'var(--color-primary)' }}>
