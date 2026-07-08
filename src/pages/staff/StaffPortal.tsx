@@ -366,12 +366,6 @@ export default function StaffPortal() {
     await supabase.from('bookings').update({ payment_status: 'paid_in_full', balance_charged_at: new Date().toISOString() }).eq('id', id)
     updateLocal(id, { payment_status: 'paid_in_full' }); await refreshActivityLog(id); setCharging(false)
   }
-  async function handleUnmarkPaid(id: string, depositCharged: number) {
-    setCharging(true)
-    const status = depositCharged > 0 ? 'deposit_paid' : 'unpaid'
-    await supabase.from('bookings').update({ payment_status: status, balance_charged_at: null }).eq('id', id)
-    updateLocal(id, { payment_status: status }); await refreshActivityLog(id); setCharging(false)
-  }
   async function handleChargeBalance(id: string) {
     const amtP = Math.round(parseFloat(chargeAmount) * 100)
     if (!amtP || amtP <= 0) { setChargeError('Enter a valid amount'); return }
@@ -907,13 +901,8 @@ export default function StaffPortal() {
             ) : (
               <>
                 {selected.payment_status === 'paid_in_full' && (
-                  <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                    <span className="flex items-center gap-1.5 text-xs text-green-700 font-medium">
-                      <CheckCircle2 className="h-4 w-4" /> Paid in full
-                    </span>
-                    <button onClick={() => handleUnmarkPaid(selected.id, selected.deposit_charged)} className="text-xs text-gray-400 hover:text-red-600 transition-colors" disabled={charging}>
-                      Undo
-                    </button>
+                  <div className="flex items-center gap-1.5 bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs text-green-700 font-medium">
+                    <CheckCircle2 className="h-4 w-4" /> Paid in full
                   </div>
                 )}
                 {selected.payment_status !== 'paid_in_full' && (
