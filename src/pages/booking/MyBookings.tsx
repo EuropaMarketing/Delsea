@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { format, parseISO, isBefore, addHours } from 'date-fns'
-import { CalendarClock, AlertTriangle, LogIn, CalendarRange, Phone, Ticket, Gift, Star, CheckCircle2, ExternalLink } from 'lucide-react'
+import { CalendarClock, AlertTriangle, LogIn, CalendarRange, Phone, Ticket, Gift, Star, CheckCircle2, ExternalLink, History, ChevronDown, ChevronUp } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { useBookingStore } from '@/store/bookingStore'
@@ -23,6 +23,16 @@ type MyMembership = {
   purchased_at: string
   expires_at: string | null
   plan: { name: string; description: string | null; token_count: number } | null
+}
+
+type ActivityLogEntry = {
+  id: string
+  actor_type: string
+  actor_name: string
+  action: string
+  summary: string
+  reason: string | null
+  created_at: string
 }
 
 type MyBooking = {
@@ -158,6 +168,9 @@ export default function MyBookings() {
   const [reviewSubmitting, setReviewSubmitting] = useState(false)
   const [reviewError, setReviewError] = useState('')
   const [showGooglePrompt, setShowGooglePrompt] = useState(false)
+  const [activityLogs, setActivityLogs] = useState<Record<string, ActivityLogEntry[]>>({})
+  const [logsOpen, setLogsOpen] = useState<Set<string>>(new Set())
+  const [logsLoading, setLogsLoading] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!user) { setLoading(false); return }
@@ -224,6 +237,24 @@ export default function MyBookings() {
     }
     load()
   }, [user])
+
+  async function toggleLog(bookingId: string) {
+    if (logsOpen.has(bookingId)) {
+      setLogsOpen(prev => { const s = new Set(prev); s.delete(bookingId); return s })
+      return
+    }
+    if (!activityLogs[bookingId]) {
+      setLogsLoading(prev => new Set(prev).add(bookingId))
+      const { data } = await supabase
+        .from('booking_activity_log')
+        .select('id, actor_type, actor_name, action, summary, reason, created_at')
+        .eq('booking_id', bookingId)
+        .order('created_at', { ascending: false })
+      setActivityLogs(prev => ({ ...prev, [bookingId]: (data ?? []) as ActivityLogEntry[] }))
+      setLogsLoading(prev => { const s = new Set(prev); s.delete(bookingId); return s })
+    }
+    setLogsOpen(prev => new Set(prev).add(bookingId))
+  }
 
   async function handleCancel(bookingId: string) {
     setCancelling(bookingId)
@@ -378,6 +409,44 @@ export default function MyBookings() {
               Leave a Review
             </Button>
           )
+        )}
+
+        {/* Activity history */}
+        <button
+          onClick={() => toggleLog(booking.id)}
+          className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors self-start"
+        >
+          <History className="h-3.5 w-3.5" />
+          {logsOpen.has(booking.id) ? 'Hide history' : 'View history'}
+          {logsOpen.has(booking.id) ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        </button>
+
+        {logsOpen.has(booking.id) && (
+          <div className="border-t border-gray-100 pt-3">
+            {logsLoading.has(booking.id) ? (
+              <p className="text-xs text-gray-400">Loading…</p>
+            ) : (activityLogs[booking.id] ?? []).length === 0 ? (
+              <p className="text-xs text-gray-400">No history recorded yet.</p>
+            ) : (
+              <ol className="space-y-2.5">
+                {(activityLogs[booking.id] ?? []).map((entry) => (
+                  <li key={entry.id} className="flex gap-2.5 text-xs">
+                    <div className="flex flex-col items-center pt-0.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-gray-300 shrink-0" />
+                      <span className="flex-1 w-px bg-gray-100 mt-1" />
+                    </div>
+                    <div className="pb-2 flex-1 min-w-0">
+                      <p className="text-gray-700 leading-snug">{entry.summary}</p>
+                      {entry.reason && <p className="text-gray-400 mt-0.5 italic">{entry.reason}</p>}
+                      <p className="text-gray-400 mt-0.5">
+                        {entry.actor_name} · {format(parseISO(entry.created_at), 'd MMM yyyy, HH:mm')}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
         )}
       </Card>
     )

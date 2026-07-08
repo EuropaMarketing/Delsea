@@ -17,7 +17,7 @@ export default function Landing() {
   const { user, isAdmin } = useAuthStore()
   const [logoFailed, setLogoFailed] = useState(false)
   const [slotsToday, setSlotsToday] = useState<'loading' | 'available' | 'none'>('loading')
-  const [slotCount, setSlotCount] = useState(0)
+
 
   // Compute open/closed from today's opening hours entry
   const todayName = new Date().toLocaleDateString('en-GB', { weekday: 'long' })
@@ -76,7 +76,6 @@ export default function Landing() {
           slotSet.add(slot)
         }
       }
-      setSlotCount(slotSet.size)
       setSlotsToday(slotSet.size > 0 ? 'available' : 'none')
     }
 
@@ -183,7 +182,7 @@ export default function Landing() {
                   : <CalendarX className="h-3.5 w-3.5" />
                 }
                 {slotsToday === 'available'
-                  ? <>{slotCount} appointment{slotCount !== 1 ? 's' : ''} available today</>
+                  ? 'Appointments available today'
                   : 'Fully booked today'
                 }
               </div>
