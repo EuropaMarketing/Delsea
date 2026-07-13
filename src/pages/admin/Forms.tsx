@@ -224,23 +224,7 @@ function PreviewModal({ form, sections, fields, onClose }: {
     setErrors(p => { const s = new Set(p); s.delete(id); return s })
   }
 
-  function validate() {
-    const errs = new Set<string>()
-    for (const f of currentFields) {
-      if (!f.required || f.field_type === 'heading') continue
-      const v = responses[f.id]
-      if (f.field_type === 'yes_no') { if (v !== 'yes' && v !== 'no') errs.add(f.id) }
-      else if (f.field_type === 'checkbox') { if (!v) errs.add(f.id) }
-      else if (f.field_type === 'emergency_contact') {
-        const ec = v as { ec_name?: string; ec_phone?: string } | undefined
-        if (!ec?.ec_name?.trim() || !ec?.ec_phone?.trim()) errs.add(f.id)
-      } else { if (!String(v ?? '').trim()) errs.add(f.id) }
-    }
-    setErrors(errs)
-    return errs.size === 0
-  }
-
-  function next() { if (validate()) { if (isLast) setDone(true); else setStep(s => s + 1); setErrors(new Set()) } }
+  function next() { if (isLast) setDone(true); else { setStep(s => s + 1); setErrors(new Set()) } }
   function prev() { setStep(s => s - 1); setErrors(new Set()) }
 
   return (
