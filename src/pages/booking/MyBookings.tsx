@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { format, parseISO, isBefore, addHours } from 'date-fns'
-import { CalendarClock, AlertTriangle, LogIn, CalendarRange, Phone, Ticket, Gift, Star, CheckCircle2, ExternalLink, History, ChevronDown, ChevronUp } from 'lucide-react'
+import { CalendarClock, AlertTriangle, LogIn, CalendarRange, Phone, Ticket, Gift, Star, CheckCircle2, ExternalLink, History, ChevronDown, ChevronUp, ClipboardList } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { useBookingStore } from '@/store/bookingStore'
@@ -171,6 +171,8 @@ export default function MyBookings() {
   const [activityLogs, setActivityLogs] = useState<Record<string, ActivityLogEntry[]>>({})
   const [logsOpen, setLogsOpen] = useState<Set<string>>(new Set())
   const [logsLoading, setLogsLoading] = useState<Set<string>>(new Set())
+  // formRequired[bookingId] = formId if a form is required and not yet completed
+  const [formRequired, setFormRequired] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!user) { setLoading(false); return }
@@ -229,6 +231,45 @@ export default function MyBookings() {
             .in('booking_id', ids)
           if (reviewed) {
             setReviewedIds(new Set(reviewed.filter((r) => r.booking_id).map((r) => r.booking_id as string)))
+          }
+        }
+
+        // Check form requirements for upcoming confirmed bookings
+        if (bRes.data) {
+          type Row = MyBooking & { service_name: string; service_price: number; staff_name: string | null }
+          const allMapped = (bRes.data as Row[]).map((b) => ({
+            ...b,
+            service: { name: b.service_name, price: b.service_price },
+            staff: b.staff_name ? { name: b.staff_name } : null,
+          }))
+          const upcomingConfirmed = allMapped.filter(
+            b => b.status === 'confirmed' && isBefore(new Date(), parseISO(b.starts_at))
+          )
+          if (upcomingConfirmed.length && customerIds.length) {
+            const serviceIds = [...new Set(upcomingConfirmed.map(b => b.service_id))]
+            const { data: forms } = await supabase
+              .from('service_forms')
+              .select('id, service_id')
+              .in('service_id', serviceIds)
+              .eq('is_active', true)
+            if (forms && forms.length) {
+              const formIds = forms.map((f: { id: string }) => f.id)
+              const { data: validResponses } = await supabase
+                .from('form_responses')
+                .select('form_id')
+                .in('customer_id', customerIds)
+                .in('form_id', formIds)
+                .gt('expires_at', new Date().toISOString())
+              const completedFormIds = new Set((validResponses ?? []).map((r: { form_id: string }) => r.form_id))
+              const required: Record<string, string> = {}
+              for (const booking of upcomingConfirmed) {
+                const form = (forms as { id: string; service_id: string }[]).find(f => f.service_id === booking.service_id)
+                if (form && !completedFormIds.has(form.id)) {
+                  required[booking.id] = form.id
+                }
+              }
+              setFormRequired(required)
+            }
           }
         }
       }
@@ -409,6 +450,23 @@ export default function MyBookings() {
               Leave a Review
             </Button>
           )
+        )}
+
+        {/* Health form prompt */}
+        {formRequired[booking.id] && (
+          <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+            <ClipboardList className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-amber-800">Health form required</p>
+              <p className="text-xs text-amber-600 mt-0.5">Please complete your health questionnaire before this appointment.</p>
+            </div>
+            <a
+              href={`/forms/${formRequired[booking.id]}?bookingId=${booking.id}`}
+              className="text-xs font-semibold text-amber-700 hover:text-amber-900 shrink-0 underline underline-offset-2"
+            >
+              Complete →
+            </a>
+          </div>
         )}
 
         {/* Activity history */}

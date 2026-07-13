@@ -49,6 +49,8 @@ import AdminDiscounts from '@/pages/admin/Discounts'
 import AdminGiftVouchers from '@/pages/admin/GiftVouchers'
 import AdminResources from '@/pages/admin/Resources'
 import AdminEvents from '@/pages/admin/Events'
+import AdminForms from '@/pages/admin/Forms'
+import FormPage from '@/pages/booking/FormPage'
 import StaffPortal from '@/pages/staff/StaffPortal'
 import { useAuthStore } from '@/store/authStore'
 
@@ -356,6 +358,26 @@ function AppRoutes() {
               <AdminSettings />
             </AdminLayout>
           </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/forms"
+        element={
+          <ProtectedRoute adminOnly>
+            <AdminLayout>
+              <AdminForms />
+            </AdminLayout>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Customer health form completion */}
+      <Route
+        path="/forms/:formId"
+        element={
+          <BookingLayout>
+            <FormPage />
+          </BookingLayout>
         }
       />
 
