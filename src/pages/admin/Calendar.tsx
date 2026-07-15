@@ -5,9 +5,10 @@ import {
 } from 'date-fns'
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck,
+  Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck, ClipboardList,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
@@ -106,6 +107,8 @@ export default function AdminCalendar() {
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([])
   const [activityLogOpen, setActivityLogOpen] = useState(false)
   const [editMode, setEditMode] = useState(false)
+  const [formAlerts, setFormAlerts] = useState<Set<string>>(new Set())
+  const [selectedBookingForm, setSelectedBookingForm] = useState<BookingFormStatus | null>(null)
   const [editNotes, setEditNotes] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
@@ -213,7 +216,11 @@ export default function AdminCalendar() {
           supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'equipment').order('name'),
       ])
       if (staffRes.data) setStaff(staffRes.data as Staff[])
-      if (bookRes.data) setBookings(bookRes.data as RichBooking[])
+      if (bookRes.data) {
+        const bks = bookRes.data as RichBooking[]
+        setBookings(bks)
+        loadFormAlertSet(BUSINESS_ID, bks as Array<{ id: string; service_id: string; customer_id: string }>).then(setFormAlerts)
+      }
       if (svcRes.data) setServices(svcRes.data as Service[])
       if (blockRes.data) setBlockedTimes(blockRes.data as BlockedTime[])
       if (resRes.data) setResources(resRes.data as Resource[])
@@ -453,6 +460,7 @@ export default function AdminCalendar() {
 
   function openBookingDetail(b: RichBooking) {
     setSelectedBooking(b)
+    setSelectedBookingForm(null)
     const remaining = (b.service?.price ?? 0) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0) - (b.deposit_charged ?? 0)
     setChargeAmount(remaining > 0 ? (remaining / 100).toFixed(2) : '')
     setChargeType('balance')
@@ -463,6 +471,7 @@ export default function AdminCalendar() {
     setActivityLog([])
     setActivityLogOpen(false)
     refreshActivityLog(b.id)
+    checkBookingForm(b.service_id, b.customer_id).then(setSelectedBookingForm)
   }
 
   async function handleCancelWithReason(bookingId: string) {
@@ -850,6 +859,7 @@ export default function AdminCalendar() {
                       >
                         <p className="text-xs font-semibold truncate leading-tight flex items-center gap-1" style={{ color }}>
                           {booking.checked_in_at && <UserCheck className="h-3 w-3 shrink-0" />}
+                          {formAlerts.has(booking.id) && <ClipboardList className="h-3 w-3 shrink-0 text-amber-500" />}
                           {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
                         </p>
                         <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
@@ -888,7 +898,8 @@ export default function AdminCalendar() {
                     style={{ top, height, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
                     title={`${booking.customer?.name} — ${booking.service?.name}`}
                   >
-                    <p className="text-xs font-semibold truncate leading-tight" style={{ color }}>
+                    <p className="text-xs font-semibold truncate leading-tight flex items-center gap-1" style={{ color }}>
+                      {formAlerts.has(booking.id) && <ClipboardList className="h-3 w-3 shrink-0 text-amber-500" />}
                       {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
                     </p>
                     <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
@@ -1042,6 +1053,17 @@ export default function AdminCalendar() {
       >
         {selectedBooking && !editMode && (
           <div className="space-y-4">
+            {selectedBookingForm?.needsForm && (
+              <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+                <ClipboardList className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-semibold text-amber-800">Health form not completed</p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    Customer must complete <span className="font-medium">{selectedBookingForm.formTitle}</span> before this session can take place.
+                  </p>
+                </div>
+              </div>
+            )}
             <dl className="space-y-2.5 text-sm">
               <div className="flex justify-between">
                 <dt className="text-gray-500">Service</dt>

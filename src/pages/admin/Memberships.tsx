@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Plus, Pencil, Ticket, Users, Search, PlusCircle, MinusCircle } from 'lucide-react'
+import { Plus, Pencil, Ticket, Users, Search, PlusCircle, MinusCircle, Clock } from 'lucide-react'
+import { addMonths, format, isPast, parseISO } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge } from '@/components/ui/Badge'
@@ -8,12 +9,32 @@ import { Card } from '@/components/ui/Card'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { MembershipPlan, CustomerMembership } from '@/types'
+import type { MembershipPlan, CustomerMembership, MembershipExpiryType } from '@/types'
+
+const EXPIRY_OPTIONS: { value: MembershipExpiryType; label: string }[] = [
+  { value: 'none',            label: 'No expiry' },
+  { value: 'until_cancelled', label: 'Until cancelled' },
+  { value: '6_months',        label: '6 months' },
+  { value: '12_months',       label: '12 months' },
+  { value: '18_months',       label: '18 months' },
+]
+
+function expiryLabel(type: MembershipExpiryType): string {
+  return EXPIRY_OPTIONS.find(o => o.value === type)?.label ?? 'No expiry'
+}
+
+function computeExpiresAt(type: MembershipExpiryType): string | null {
+  const now = new Date()
+  if (type === '6_months')  return addMonths(now, 6).toISOString()
+  if (type === '12_months') return addMonths(now, 12).toISOString()
+  if (type === '18_months') return addMonths(now, 18).toISOString()
+  return null
+}
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
-interface PlanForm { name: string; description: string; price: string; token_count: string; service_category: string }
-const emptyPlanForm: PlanForm = { name: '', description: '', price: '', token_count: '1', service_category: '' }
+interface PlanForm { name: string; description: string; price: string; token_count: string; service_category: string; expiry_type: MembershipExpiryType }
+const emptyPlanForm: PlanForm = { name: '', description: '', price: '', token_count: '1', service_category: '', expiry_type: 'none' }
 
 export default function AdminMemberships() {
   const [tab, setTab] = useState<'plans' | 'members'>('plans')
@@ -94,6 +115,7 @@ export default function AdminMemberships() {
       price: String(plan.price / 100),
       token_count: String(plan.token_count),
       service_category: plan.service_category ?? '',
+      expiry_type: plan.expiry_type ?? 'none',
     })
     setPlanErrors({})
     setPlanModal(true)
@@ -118,6 +140,7 @@ export default function AdminMemberships() {
       price: Math.round(parseFloat(planForm.price) * 100) || 0,
       token_count: Number(planForm.token_count),
       service_category: planForm.service_category.trim() || null,
+      expiry_type: planForm.expiry_type,
     }
     if (editPlan) {
       const { data, error } = await supabase.from('membership_plans').update(payload).eq('id', editPlan.id).select().single()
@@ -162,7 +185,12 @@ export default function AdminMemberships() {
     const plan = plans.find((p) => p.id === assignPlanId)!
     const { data: membership, error } = await supabase
       .from('customer_memberships')
-      .insert({ customer_id: customer.id, plan_id: assignPlanId, tokens_remaining: plan.token_count })
+      .insert({
+        customer_id: customer.id,
+        plan_id: assignPlanId,
+        tokens_remaining: plan.token_count,
+        expires_at: computeExpiresAt(plan.expiry_type),
+      })
       .select('*, customer:customers(id, name, email), plan:membership_plans(name, token_count)')
       .single()
 
@@ -279,6 +307,11 @@ export default function AdminMemberships() {
                       <Ticket className="h-3.5 w-3.5" />
                       {plan.token_count} {plan.token_count === 1 ? 'session' : 'sessions'}
                     </span>
+                    <span className="text-gray-400">·</span>
+                    <span className="flex items-center gap-1 text-gray-500">
+                      <Clock className="h-3.5 w-3.5" />
+                      {expiryLabel(plan.expiry_type)}
+                    </span>
                     {plan.service_category && (
                       <>
                         <span className="text-gray-400">·</span>
@@ -345,6 +378,16 @@ export default function AdminMemberships() {
                     <p className="text-xs text-gray-400">Plan</p>
                     <p className="text-sm font-medium text-gray-700">{m.plan?.name}</p>
                   </div>
+                  <div className="text-center shrink-0 hidden sm:block">
+                    <p className="text-xs text-gray-400">Expires</p>
+                    {m.expires_at ? (
+                      <p className={`text-sm font-medium ${isPast(parseISO(m.expires_at)) ? 'text-red-500' : 'text-gray-700'}`}>
+                        {format(parseISO(m.expires_at), 'd MMM yyyy')}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-gray-400">—</p>
+                    )}
+                  </div>
                   <div className="text-center shrink-0">
                     <p className="text-xs text-gray-400">Tokens</p>
                     <p className={`text-lg font-bold ${m.tokens_remaining === 0 ? 'text-red-500' : 'text-gray-900'}`}>
@@ -404,6 +447,22 @@ export default function AdminMemberships() {
             </select>
             <p className="text-xs text-gray-400">
               Restrict this membership so tokens can only be redeemed against services in this category.
+            </p>
+          </div>
+          {/* Expiry */}
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700">Expiry</label>
+            <select
+              value={planForm.expiry_type}
+              onChange={(e) => setPlanForm((f) => ({ ...f, expiry_type: e.target.value as MembershipExpiryType }))}
+              className="h-10 px-3 text-sm border border-gray-200 bg-white rounded-(--border-radius-sm) outline-none focus:ring-2 focus:ring-(--color-primary)"
+            >
+              {EXPIRY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400">
+              How long the membership is valid for after purchase. "Until cancelled" and "No expiry" both have no end date — the difference is intent.
             </p>
           </div>
 

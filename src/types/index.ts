@@ -120,6 +120,8 @@ export interface Customer {
   created_at: string
 }
 
+export type MembershipExpiryType = '6_months' | '12_months' | '18_months' | 'until_cancelled' | 'none'
+
 export interface MembershipPlan {
   id: string
   business_id: string
@@ -129,6 +131,7 @@ export interface MembershipPlan {
   token_count: number
   is_active: boolean
   service_category: string | null
+  expiry_type: MembershipExpiryType
   created_at: string
 }
 

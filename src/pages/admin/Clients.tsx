@@ -1,13 +1,34 @@
 import { useEffect, useState, useMemo } from 'react'
-import { format, parseISO, isBefore } from 'date-fns'
-import { Search, CalendarClock, User, Mail, Phone, TrendingUp } from 'lucide-react'
+import { format, parseISO, isBefore, isPast } from 'date-fns'
+import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { Customer } from '@/types'
+import type { Customer, MembershipExpiryType } from '@/types'
+
+type ClientFormResponse = {
+  id: string
+  completed_at: string
+  expires_at: string
+  form: { title: string } | null
+}
+
+type ClientMembership = {
+  id: string
+  tokens_remaining: number
+  purchased_at: string
+  expires_at: string | null
+  plan: { name: string; expiry_type: MembershipExpiryType } | null
+}
+
+function membershipExpiryText(m: ClientMembership): string {
+  if (m.expires_at) return format(parseISO(m.expires_at), 'd MMM yyyy')
+  if (m.plan?.expiry_type === 'until_cancelled') return 'Until cancelled'
+  return 'No expiry'
+}
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
@@ -33,6 +54,11 @@ export default function AdminClients() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<ClientRow | null>(null)
+  const [memberships, setMemberships] = useState<ClientMembership[]>([])
+  const [membershipsLoading, setMembershipsLoading] = useState(false)
+  const [detailTab, setDetailTab] = useState<'overview' | 'forms'>('overview')
+  const [clientForms, setClientForms] = useState<ClientFormResponse[]>([])
+  const [formsLoading, setFormsLoading] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -75,6 +101,39 @@ export default function AdminClients() {
     }
     load()
   }, [])
+
+  useEffect(() => {
+    if (!selected) {
+      setMemberships([])
+      setClientForms([])
+      setDetailTab('overview')
+      return
+    }
+    setMembershipsLoading(true)
+    supabase
+      .from('customer_memberships')
+      .select('id, tokens_remaining, purchased_at, expires_at, plan:membership_plans(name, expiry_type)')
+      .eq('customer_id', selected.id)
+      .order('purchased_at', { ascending: false })
+      .then(({ data }) => {
+        setMemberships((data ?? []) as unknown as ClientMembership[])
+        setMembershipsLoading(false)
+      })
+  }, [selected?.id])
+
+  useEffect(() => {
+    if (!selected || detailTab !== 'forms') return
+    setFormsLoading(true)
+    supabase
+      .from('form_responses')
+      .select('id, completed_at, expires_at, form:service_forms(title)')
+      .eq('customer_id', selected.id)
+      .order('completed_at', { ascending: false })
+      .then(({ data }) => {
+        setClientForms((data ?? []) as unknown as ClientFormResponse[])
+        setFormsLoading(false)
+      })
+  }, [selected?.id, detailTab])
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
@@ -179,6 +238,64 @@ export default function AdminClients() {
       >
         {selected && (
           <div className="space-y-5">
+            {/* Tabs */}
+            <div className="flex gap-1 border-b border-gray-200 -mt-1">
+              {(['overview', 'forms'] as const).map(t => (
+                <button
+                  key={t}
+                  onClick={() => setDetailTab(t)}
+                  className={`px-4 py-2 text-sm font-medium capitalize border-b-2 -mb-px transition-colors ${
+                    detailTab === t
+                      ? 'border-(--color-primary) text-(--color-primary)'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {t === 'overview' ? 'Overview' : 'Completed Forms'}
+                </button>
+              ))}
+            </div>
+
+            {/* Forms tab */}
+            {detailTab === 'forms' && (
+              formsLoading ? (
+                <p className="text-xs text-gray-400 py-4 text-center">Loading…</p>
+              ) : clientForms.length === 0 ? (
+                <div className="text-center py-8">
+                  <ClipboardList className="h-8 w-8 text-gray-200 mx-auto mb-2" />
+                  <p className="text-sm text-gray-400">No forms completed yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {clientForms.map(fr => {
+                    const valid = !isPast(parseISO(fr.expires_at))
+                    return (
+                      <div key={fr.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-gray-200 bg-white">
+                        {valid
+                          ? <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                          : <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{fr.form?.title ?? '—'}</p>
+                          <p className="text-xs text-gray-500">
+                            Completed {format(parseISO(fr.completed_at), 'd MMM yyyy')}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className={`text-xs font-medium ${valid ? 'text-green-600' : 'text-amber-600'}`}>
+                            {valid ? 'Valid' : 'Expired'}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            {valid ? 'until' : 'was'} {format(parseISO(fr.expires_at), 'd MMM yyyy')}
+                          </p>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            )}
+
+            {/* Overview tab */}
+            {detailTab === 'overview' && <>
             {/* Contact info */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="flex items-center gap-2 text-sm text-gray-600">
@@ -211,6 +328,40 @@ export default function AdminClients() {
               ))}
             </div>
 
+            {/* Memberships */}
+            {membershipsLoading ? (
+              <p className="text-xs text-gray-400">Loading memberships…</p>
+            ) : memberships.length > 0 && (
+              <div>
+                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                  Memberships
+                </h3>
+                <div className="space-y-2">
+                  {memberships.map((m) => {
+                    const expired = !!m.expires_at && isPast(parseISO(m.expires_at))
+                    return (
+                      <div key={m.id} className={`flex items-center gap-4 px-3 py-2.5 rounded-lg border ${expired ? 'bg-gray-50 border-gray-200 opacity-60' : 'bg-white border-gray-200'}`}>
+                        <Ticket className="h-4 w-4 text-gray-400 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{m.plan?.name ?? '—'}</p>
+                          <p className="text-xs text-gray-500">
+                            {expired ? 'Expired' : 'Expires'}: {membershipExpiryText(m)}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className={`text-lg font-bold ${m.tokens_remaining === 0 ? 'text-red-500' : expired ? 'text-gray-400' : 'text-gray-900'}`}>
+                            {m.tokens_remaining}
+                          </p>
+                          <p className="text-xs text-gray-400">sessions left</p>
+                        </div>
+                        {expired && <Badge variant="default">Expired</Badge>}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Upcoming bookings */}
             {selectedUpcoming.length > 0 && (
               <div>
@@ -242,6 +393,7 @@ export default function AdminClients() {
             {selected.bookings.length === 0 && (
               <p className="text-sm text-gray-400 text-center py-4">No bookings yet.</p>
             )}
+            </>}
           </div>
         )}
       </Modal>

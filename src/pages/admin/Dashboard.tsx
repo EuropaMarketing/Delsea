@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { format, startOfWeek, endOfWeek, startOfDay, endOfDay } from 'date-fns'
-import { CalendarClock, XCircle, PoundSterling, CheckCircle2, X, Loader2, CheckCheck, UserCheck } from 'lucide-react'
+import { CalendarClock, XCircle, PoundSterling, CheckCircle2, X, Loader2, CheckCheck, UserCheck, ClipboardList } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { FullPageSpinner } from '@/components/ui/Spinner'
+import { loadFormAlertSet } from '@/lib/formAlerts'
 import type { Booking, BookingStatus } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
@@ -24,6 +25,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Stats>({ todayCount: 0, todayCompleted: 0, weekCount: 0, weekRevenue: 0, weekCancellations: 0 })
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState<string | null>(null)
+  const [formAlerts, setFormAlerts] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     async function load() {
@@ -52,7 +54,9 @@ export default function Dashboard() {
 
       if (todayRes.data) {
         const all = todayRes.data as typeof todayBookings
-        setTodayBookings(all.filter((b) => b.status === 'confirmed' || b.status === 'pending'))
+        const visible = all.filter((b) => b.status === 'confirmed' || b.status === 'pending')
+        setTodayBookings(visible)
+        loadFormAlertSet(BUSINESS_ID, visible as Array<{ id: string; service_id: string; customer_id: string }>).then(setFormAlerts)
         const todayCompleted = all.filter((b) => b.status === 'completed').length
         if (weekRes.data) {
           const week = weekRes.data as unknown as Array<{ status: string; discount_amount: number; gift_voucher_amount: number; service: { price: number } | null }>
@@ -147,6 +151,7 @@ export default function Dashboard() {
                     <div className="flex items-start justify-between gap-2 mb-0.5">
                       <p className="font-semibold text-gray-900 text-sm leading-snug flex-1">{b.service?.name}</p>
                       <div className="flex items-center gap-1 shrink-0">
+                        {formAlerts.has(b.id) && <ClipboardList className="h-3.5 w-3.5 text-amber-500" />}
                         {b.checked_in_at && <UserCheck className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />}
                         <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${b.status === 'confirmed' ? 'bg-green-500' : b.status === 'pending' ? 'bg-amber-400' : 'bg-gray-400'}`} />
                       </div>
@@ -186,7 +191,10 @@ export default function Dashboard() {
                       <p className="text-xs text-gray-400">{format(new Date(b.ends_at), 'HH:mm')}</p>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-gray-900 truncate">{b.service?.name}</p>
+                      <p className="font-medium text-gray-900 truncate flex items-center gap-1.5">
+                        {b.service?.name}
+                        {formAlerts.has(b.id) && <ClipboardList className="h-3.5 w-3.5 text-amber-500 shrink-0" />}
+                      </p>
                       <p className="text-xs text-gray-500 truncate">{b.customer?.name ?? 'Unknown'} · {b.staff?.name ?? 'Any'}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
