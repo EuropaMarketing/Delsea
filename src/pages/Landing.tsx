@@ -99,7 +99,7 @@ export default function Landing() {
       }}
     >
       {/* Header */}
-      <header className="bg-white border-b border-gray-100">
+      <header className={config.heroImage ? 'bg-white/60 backdrop-blur-sm border-b border-white/30' : 'bg-white border-b border-gray-100'}>
         <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
           <span className="font-bold text-lg" style={{ color: 'var(--color-primary)' }}>
             {config.brandName}
