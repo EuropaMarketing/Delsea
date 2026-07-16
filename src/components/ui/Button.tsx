@@ -18,9 +18,9 @@ const base =
 const variants: Record<Variant, string> = {
   primary: 'btn-primary focus-visible:ring-[var(--color-primary)]',
   secondary:
-    'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 [border-radius:var(--border-radius)]',
-  ghost: 'bg-transparent text-gray-600 hover:bg-gray-100 [border-radius:var(--border-radius)]',
-  danger: 'bg-red-600 text-white hover:bg-red-700 [border-radius:var(--border-radius)] focus-visible:ring-red-600',
+    'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 [border-radius:var(--button-radius)]',
+  ghost: 'bg-transparent text-gray-600 hover:bg-gray-100 [border-radius:var(--button-radius)]',
+  danger: 'bg-red-600 text-white hover:bg-red-700 [border-radius:var(--button-radius)] focus-visible:ring-red-600',
 }
 
 const sizes: Record<Size, string> = {

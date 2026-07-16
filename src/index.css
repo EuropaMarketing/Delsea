@@ -33,7 +33,7 @@ body {
 .btn-primary {
   background-color: var(--color-primary);
   color: #fff;
-  border-radius: var(--border-radius);
+  border-radius: var(--button-radius);
   transition: filter 0.15s;
 }
 .btn-primary:hover {
@@ -42,7 +42,7 @@ body {
 .btn-secondary {
   background-color: var(--color-secondary);
   color: #fff;
-  border-radius: var(--border-radius);
+  border-radius: var(--button-radius);
 }
 .brand-card {
   border-radius: var(--border-radius);

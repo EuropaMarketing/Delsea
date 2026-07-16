@@ -12,6 +12,14 @@ import { Badge } from '@/components/ui/Badge'
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 const RADIUS_OPTIONS: BorderRadius[] = ['none', 'sm', 'md', 'lg', 'full']
 
+const BUTTON_SHAPE_OPTIONS: { value: BorderRadius; label: string; radius: string }[] = [
+  { value: 'none', label: 'Square',  radius: '0px' },
+  { value: 'sm',   label: 'Subtle',  radius: '4px' },
+  { value: 'md',   label: 'Rounded', radius: '8px' },
+  { value: 'lg',   label: 'Soft',    radius: '12px' },
+  { value: 'full', label: 'Pill',    radius: '9999px' },
+]
+
 export default function AdminSettings() {
   const [config, setConfig] = useState<BrandConfig>({ ...brand })
   const [saving, setSaving] = useState(false)
@@ -271,6 +279,30 @@ export default function AdminSettings() {
                   </button>
                 ))}
               </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">Button Shape</label>
+              <div className="flex gap-2 flex-wrap items-center">
+                {BUTTON_SHAPE_OPTIONS.map(({ value, label, radius }) => {
+                  const active = (config.buttonRadius ?? config.borderRadius) === value
+                  return (
+                    <button
+                      key={value}
+                      onClick={() => handleChange('buttonRadius', value)}
+                      style={{
+                        borderRadius: radius,
+                        backgroundColor: active ? 'var(--color-primary)' : '#fff',
+                        borderColor: active ? 'var(--color-primary)' : '#e5e7eb',
+                        color: active ? '#fff' : '#4b5563',
+                      }}
+                      className="px-4 py-1.5 text-xs font-medium border transition-colors hover:opacity-90"
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-xs text-gray-400">Controls the shape of buttons throughout the site, independently of the general border radius.</p>
             </div>
           </div>
         </Card>

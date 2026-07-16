@@ -32,6 +32,7 @@ export interface BrandConfig {
   textColour: string
   fontFamily: string
   borderRadius: BorderRadius
+  buttonRadius?: BorderRadius
   currency: string
   locale: string
   businessEmail: string

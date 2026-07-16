@@ -19,6 +19,7 @@ export function applyBrandTheme(config: BrandConfig) {
   root.style.setProperty('--border-radius', radiusMap[config.borderRadius])
   root.style.setProperty('--border-radius-sm', `calc(${radiusMap[config.borderRadius]} * 0.5)`)
   root.style.setProperty('--border-radius-lg', `calc(${radiusMap[config.borderRadius]} * 1.5)`)
+  root.style.setProperty('--button-radius', radiusMap[config.buttonRadius ?? config.borderRadius])
 
   // Inject Google Font if needed
   const fontName = config.fontFamily.match(/'([^']+)'/)?.[1]
