@@ -88,7 +88,15 @@ export default function Landing() {
   return (
     <div
       className="min-h-screen flex flex-col"
-      style={{ backgroundColor: 'var(--color-background)' }}
+      style={{
+        backgroundColor: 'var(--color-background)',
+        ...(config.heroImage && {
+          backgroundImage: `url(${config.heroImage})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundAttachment: 'fixed',
+        }),
+      }}
     >
       {/* Header */}
       <header className="bg-white border-b border-gray-100">
@@ -131,7 +139,11 @@ export default function Landing() {
       </header>
 
       {/* Hero */}
-      <main className="flex-1 flex flex-col items-center justify-center px-4 text-center py-20">
+      <main className="flex-1 flex flex-col items-center justify-center px-4 text-center py-20 relative">
+        {config.heroImage && (
+          <div className="absolute inset-0 bg-white/55 pointer-events-none" />
+        )}
+        <div className="relative z-10 flex flex-col items-center w-full">
         {showLogo ? (
           <img
             src={config.logo}
@@ -201,6 +213,7 @@ export default function Landing() {
               My Bookings
             </Button>
           </Link>
+        </div>
         </div>
       </main>
 

@@ -20,6 +20,9 @@ export default function AdminSettings() {
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoError, setLogoError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [heroUploading, setHeroUploading] = useState(false)
+  const [heroError, setHeroError] = useState('')
+  const heroInputRef = useRef<HTMLInputElement>(null)
 
   // Load saved config from the database on mount
   useEffect(() => {
@@ -70,6 +73,30 @@ export default function AdminSettings() {
     // Cache-bust so the browser fetches the freshly uploaded file rather than serving the old one
     handleChange('logo', `${data.publicUrl}?t=${Date.now()}`)
     setLogoUploading(false)
+  }
+
+  async function handleHeroUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setHeroUploading(true)
+    setHeroError('')
+
+    const ext = file.name.split('.').pop()
+    const path = `heroes/${BUSINESS_ID}/hero.${ext}`
+
+    const { error: uploadError } = await supabase.storage
+      .from('assets')
+      .upload(path, file, { upsert: true })
+
+    if (uploadError) {
+      setHeroError(`Upload failed: ${uploadError.message}`)
+      setHeroUploading(false)
+      return
+    }
+
+    const { data } = supabase.storage.from('assets').getPublicUrl(path)
+    handleChange('heroImage', `${data.publicUrl}?t=${Date.now()}`)
+    setHeroUploading(false)
   }
 
   async function handleSave() {
@@ -141,6 +168,52 @@ export default function AdminSettings() {
                 onChange={handleLogoUpload}
               />
             </div>
+
+            {/* Hero / background image */}
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">Homepage Background Image</label>
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-20 border border-gray-200 rounded-lg flex items-center justify-center bg-gray-50 shrink-0 overflow-hidden">
+                  {config.heroImage ? (
+                    <img key={config.heroImage} src={config.heroImage} alt="Background" className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                  ) : (
+                    <ImageIcon className="h-5 w-5 text-gray-300" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => heroInputRef.current?.click()}
+                      disabled={heroUploading}
+                      className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:border-gray-400 hover:text-gray-800 transition-colors disabled:opacity-50"
+                    >
+                      <Upload className="h-4 w-4" />
+                      {heroUploading ? 'Uploading…' : 'Choose image'}
+                    </button>
+                    {config.heroImage && (
+                      <button
+                        type="button"
+                        onClick={() => handleChange('heroImage', undefined)}
+                        className="text-xs text-red-400 hover:text-red-600 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">Displayed as the full-page background on your booking homepage. Use a high-resolution landscape image.</p>
+                  {heroError && <p className="text-xs text-red-500 mt-1">{heroError}</p>}
+                </div>
+              </div>
+              <input
+                ref={heroInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleHeroUpload}
+              />
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <Input label="Currency" value={config.currency} onChange={(e) => handleChange('currency', e.target.value)} placeholder="GBP" />
               <Input label="Locale" value={config.locale} onChange={(e) => handleChange('locale', e.target.value)} placeholder="en-GB" />

@@ -35,6 +35,7 @@ export interface BrandConfig {
   currency: string
   locale: string
   businessEmail: string
+  heroImage?: string
   socialLinks?: SocialLinks
   cancellationPolicy?: string
   importantInfo?: string
