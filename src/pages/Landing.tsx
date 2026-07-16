@@ -160,7 +160,7 @@ export default function Landing() {
           </div>
         )}
 
-        <h1 className="text-4xl font-semibold text-gray-900 mb-3">{config.brandName}</h1>
+        <h1 className="text-4xl font-medium text-gray-900 mb-3">{config.brandName}</h1>
         <p className="text-gray-500 text-lg mb-6 max-w-sm">
           Book your appointment online in under a minute.
         </p>
