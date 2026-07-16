@@ -139,7 +139,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
   )
 
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
+    <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
       <CheckInToasts alerts={checkInAlerts} onDismiss={dismissAlert} />
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex flex-col w-56 bg-white border-r border-gray-100 shrink-0">
