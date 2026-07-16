@@ -23,7 +23,7 @@ export function BookingLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--color-background)' }}>
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 sticky top-0 z-30">
+      <header className="border-b border-gray-200 sticky top-0 z-30" style={{ backgroundColor: 'var(--color-background)' }}>
         <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
           {/* Brand */}
           <Link to="/" className="flex items-center gap-2 shrink-0">
@@ -72,7 +72,7 @@ export function BookingLayout({ children }: { children: React.ReactNode }) {
 
       {/* Progress stepper */}
       {currentIdx >= 0 && (
-        <div className="bg-white border-b border-gray-100">
+        <div className="border-b border-gray-200" style={{ backgroundColor: 'var(--color-background)' }}>
           <div className="max-w-4xl mx-auto px-4 py-3 overflow-x-auto">
             <ol className="flex items-center gap-1 min-w-max">
               {steps.map((step, i) => {
