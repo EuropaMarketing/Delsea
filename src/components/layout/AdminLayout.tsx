@@ -142,7 +142,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
       <CheckInToasts alerts={checkInAlerts} onDismiss={dismissAlert} />
       {/* Desktop sidebar */}
-      <aside className="hidden lg:flex flex-col w-56 bg-white border-r border-gray-100 shrink-0">
+      <aside className="hidden lg:flex flex-col w-56 border-r border-gray-200 shrink-0" style={{ backgroundColor: 'var(--color-background)' }}>
         <Sidebar />
       </aside>
 
@@ -150,7 +150,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
-          <aside className="relative w-56 h-full bg-white border-r border-gray-100 flex flex-col">
+          <aside className="relative w-56 h-full border-r border-gray-200 flex flex-col" style={{ backgroundColor: 'var(--color-background)' }}>
             <div className="absolute top-3 right-3">
               <button onClick={() => setMobileOpen(false)} className="p-1 rounded text-gray-400 hover:text-gray-600">
                 <X className="h-5 w-5" />
@@ -164,7 +164,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
       {/* Main area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar (mobile) */}
-        <header className="lg:hidden flex items-center gap-3 px-4 h-14 bg-white border-b border-gray-100">
+        <header className="lg:hidden flex items-center gap-3 px-4 h-14 border-b border-gray-200" style={{ backgroundColor: 'var(--color-background)' }}>
           <button onClick={() => setMobileOpen(true)} className="p-1.5 rounded text-gray-500 hover:bg-gray-100">
             <Menu className="h-5 w-5" />
           </button>
