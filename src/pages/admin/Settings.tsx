@@ -67,7 +67,8 @@ export default function AdminSettings() {
     }
 
     const { data } = supabase.storage.from('assets').getPublicUrl(path)
-    handleChange('logo', data.publicUrl)
+    // Cache-bust so the browser fetches the freshly uploaded file rather than serving the old one
+    handleChange('logo', `${data.publicUrl}?t=${Date.now()}`)
     setLogoUploading(false)
   }
 
@@ -111,7 +112,7 @@ export default function AdminSettings() {
               <div className="flex items-center gap-3">
                 <div className="h-12 w-20 border border-gray-200 rounded-lg flex items-center justify-center bg-gray-50 shrink-0 overflow-hidden">
                   {config.logo ? (
-                    <img src={config.logo} alt="Logo" className="h-full w-full object-contain p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                    <img key={config.logo} src={config.logo} alt="Logo" className="h-full w-full object-contain p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
                   ) : (
                     <ImageIcon className="h-5 w-5 text-gray-300" />
                   )}
