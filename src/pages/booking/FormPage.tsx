@@ -22,11 +22,11 @@ type Section = {
 type FormField = {
   id: string
   section_id: string
-  field_type: 'heading' | 'yes_no' | 'text' | 'textarea' | 'checkbox' | 'emergency_contact'
+  field_type: 'heading' | 'yes_no' | 'text' | 'textarea' | 'checkbox' | 'emergency_contact' | 'dropdown'
   label: string
   required: boolean
   position: number
-  options: { follow_up_label?: string; description?: string }
+  options: { follow_up_label?: string; description?: string; choices?: string[] }
 }
 
 type ResponseMap = Record<string, string | boolean | { ec_name?: string; ec_phone?: string; ec_relationship?: string }>
@@ -355,6 +355,23 @@ export default function FormPage() {
                 </label>
                 <textarea rows={3} value={(val as string) ?? ''} onChange={e => setResponse(field.id, e.target.value)}
                   className={`w-full px-3 py-2 text-sm border rounded-lg outline-none resize-none focus:ring-2 focus:ring-(--color-primary) ${hasError ? 'border-red-300' : 'border-gray-200'}`} />
+                {hasError && <p className="text-xs text-red-500 mt-1">This field is required</p>}
+              </div>
+            )
+          }
+
+          if (field.field_type === 'dropdown') {
+            const choices = field.options?.choices ?? []
+            return (
+              <div key={field.id} className="border-b border-gray-100 pb-5">
+                <label className="text-sm font-medium text-gray-800 block mb-2">
+                  {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
+                </label>
+                <select value={(val as string) ?? ''} onChange={e => setResponse(field.id, e.target.value)}
+                  className={`w-full h-10 px-3 text-sm border rounded-lg bg-white outline-none focus:ring-2 focus:ring-(--color-primary) ${hasError ? 'border-red-300' : 'border-gray-200'}`}>
+                  <option value="">Select…</option>
+                  {choices.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
                 {hasError && <p className="text-xs text-red-500 mt-1">This field is required</p>}
               </div>
             )

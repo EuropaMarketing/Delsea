@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Plus, Pencil, Trash2, ChevronUp, ChevronDown, ClipboardList,
   ToggleRight, Type, AlignLeft, CheckSquare, Phone, Heading1, X, Save, Eye, EyeOff,
-  ChevronRight, ChevronLeft, CheckCircle2,
+  ChevronRight, ChevronLeft, CheckCircle2, List,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/Button'
@@ -33,11 +33,11 @@ type FormField = {
   id: string
   form_id: string
   section_id: string
-  field_type: 'heading' | 'yes_no' | 'text' | 'textarea' | 'checkbox' | 'emergency_contact'
+  field_type: 'heading' | 'yes_no' | 'text' | 'textarea' | 'checkbox' | 'emergency_contact' | 'dropdown'
   label: string
   required: boolean
   position: number
-  options: { follow_up_label?: string; description?: string }
+  options: { follow_up_label?: string; description?: string; choices?: string[] }
 }
 
 type Service = { id: string; name: string }
@@ -48,6 +48,7 @@ const FIELD_TYPES: { type: FormField['field_type']; label: string; icon: typeof 
   { type: 'yes_no',            label: 'Yes / No',          icon: ToggleRight, color: 'text-blue-600 bg-blue-50' },
   { type: 'text',              label: 'Short Text',        icon: Type,        color: 'text-violet-600 bg-violet-50' },
   { type: 'textarea',          label: 'Long Text',         icon: AlignLeft,   color: 'text-orange-600 bg-orange-50' },
+  { type: 'dropdown',          label: 'Dropdown',          icon: List,        color: 'text-pink-600 bg-pink-50' },
   { type: 'checkbox',          label: 'Acknowledgement',   icon: CheckSquare, color: 'text-green-600 bg-green-50' },
   { type: 'emergency_contact', label: 'Emergency Contact', icon: Phone,       color: 'text-red-600 bg-red-50' },
 ]
@@ -195,6 +196,23 @@ function FieldRenderer({
     )
   }
 
+  if (field.field_type === 'dropdown') {
+    const choices = field.options?.choices ?? []
+    return (
+      <div>
+        <label className="text-sm font-medium text-gray-800 block mb-2">
+          {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+        <select value={(val as string) ?? ''} onChange={e => onChange(field.id, e.target.value)}
+          className={`w-full h-10 px-3 text-sm border rounded-lg bg-white outline-none focus:ring-2 focus:ring-(--color-primary) ${hasError ? 'border-red-300' : 'border-gray-200'}`}>
+          <option value="">Select…</option>
+          {choices.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        {hasError && <p className="text-xs text-red-500 mt-1">This field is required</p>}
+      </div>
+    )
+  }
+
   return null
 }
 
@@ -310,6 +328,7 @@ export default function AdminForms() {
   const [fieldFollowUp, setFieldFollowUp] = useState(false)
   const [fieldFollowUpLabel, setFieldFollowUpLabel] = useState('Please provide further details')
   const [fieldDescription, setFieldDescription] = useState('')
+  const [fieldChoices, setFieldChoices] = useState<string[]>([])
 
   // New form
   const [newFormOpen, setNewFormOpen] = useState(false)
@@ -439,11 +458,13 @@ export default function AdminForms() {
       type === 'yes_no'  ? 'New question?' :
       type === 'text'    ? 'Your answer' :
       type === 'textarea' ? 'Additional information' :
+      type === 'dropdown' ? 'Select an option' :
       type === 'checkbox' ? 'I confirm that I have read and understood the above' :
       'Emergency Contact'
+    const defaultOptions = type === 'dropdown' ? { choices: ['Option 1', 'Option 2'] } : {}
     const { data } = await supabase
       .from('form_fields')
-      .insert({ form_id: selectedForm.id, section_id: sectionId, field_type: type, label: defaultLabel, required: type !== 'heading', position: pos, options: {} })
+      .insert({ form_id: selectedForm.id, section_id: sectionId, field_type: type, label: defaultLabel, required: type !== 'heading', position: pos, options: defaultOptions })
       .select().single()
     if (data) {
       const f = data as FormField
@@ -460,6 +481,7 @@ export default function AdminForms() {
     setFieldFollowUp(!!field.options?.follow_up_label)
     setFieldFollowUpLabel(field.options?.follow_up_label ?? 'Please provide further details')
     setFieldDescription(field.options?.description ?? '')
+    setFieldChoices(field.options?.choices?.length ? field.options.choices : ['Option 1', 'Option 2'])
   }
 
   async function saveField(id: string) {
@@ -468,6 +490,7 @@ export default function AdminForms() {
     const options: FormField['options'] = {}
     if (field.field_type === 'yes_no' && fieldFollowUp) options.follow_up_label = fieldFollowUpLabel
     if (field.field_type === 'checkbox' && fieldDescription) options.description = fieldDescription
+    if (field.field_type === 'dropdown') options.choices = fieldChoices.map(c => c.trim()).filter(Boolean)
     const u = { label: fieldLabel.trim() || field.label, required: fieldRequired, options }
     await supabase.from('form_fields').update(u).eq('id', id)
     setFields(p => p.map(f => f.id === id ? { ...f, ...u } : f))
@@ -683,6 +706,32 @@ export default function AdminForms() {
                                   )}
                                   {field.field_type === 'checkbox' && (
                                     <Input label="Sub-text below checkbox (optional)" value={fieldDescription} onChange={e => setFieldDescription(e.target.value)} />
+                                  )}
+                                  {field.field_type === 'dropdown' && (
+                                    <div>
+                                      <label className="text-xs font-medium text-gray-600 block mb-1">Dropdown options</label>
+                                      <div className="space-y-1.5">
+                                        {fieldChoices.map((choice, i) => (
+                                          <div key={i} className="flex items-center gap-2">
+                                            <input
+                                              value={choice}
+                                              onChange={e => setFieldChoices(cs => cs.map((c, idx) => idx === i ? e.target.value : c))}
+                                              placeholder={`Option ${i + 1}`}
+                                              className="flex-1 h-9 px-3 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                                            />
+                                            <button type="button" onClick={() => setFieldChoices(cs => cs.filter((_, idx) => idx !== i))}
+                                              disabled={fieldChoices.length <= 1}
+                                              className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-30 shrink-0">
+                                              <X className="h-3.5 w-3.5" />
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                      <button type="button" onClick={() => setFieldChoices(cs => [...cs, ''])}
+                                        className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-700 mt-2">
+                                        <Plus className="h-3.5 w-3.5" /> Add option
+                                      </button>
+                                    </div>
                                   )}
                                   <Button size="sm" onClick={() => saveField(field.id)}>
                                     <Save className="h-3.5 w-3.5" /> Save field
