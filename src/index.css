@@ -15,6 +15,14 @@
   box-sizing: border-box;
 }
 
+/* iOS Safari auto-zooms the page on focus if a form field's font-size is under 16px,
+   and leaves it zoomed until the user pinches back out — force 16px on mobile only. */
+@media (max-width: 767px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
 body {
   font-family: var(--font-family);
   background-color: var(--color-background);
