@@ -171,6 +171,8 @@ export default function Confirmation() {
       const wasGuest = !user
       const confirmedState = {
         bookingRef: ref,
+        bookingId: bookingId as string,
+        serviceId: draft.serviceId,
         serviceName: service?.name ?? '',
         variantName: draft.variantName ?? null,
         serviceDuration: effectiveDuration,

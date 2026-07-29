@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { format } from 'date-fns'
-import { CheckCircle2, Calendar, CalendarClock, User, Clock, PoundSterling, CreditCard, Building2, Ticket } from 'lucide-react'
+import { CheckCircle2, Calendar, CalendarClock, User, Clock, PoundSterling, CreditCard, Building2, Ticket, ClipboardList } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/authStore'
 import { useBrandStore } from '@/store/brandStore'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -12,6 +13,8 @@ import { formatCurrency, formatDuration } from '@/lib/currency'
 
 interface ConfirmedState {
   bookingRef: string
+  bookingId?: string
+  serviceId?: string
   serviceName: string
   serviceDuration: number
   servicePrice: number
@@ -22,6 +25,50 @@ interface ConfirmedState {
   isNewUser: boolean
   depositAmount?: number
   paymentMethod?: 'membership' | 'card' | 'venue'
+}
+
+type RequiredForm = { id: string; title: string }
+
+function useRequiredForm(bookingId: string | undefined, serviceId: string | undefined) {
+  const { user } = useAuthStore()
+  const [form, setForm] = useState<RequiredForm | null>(null)
+
+  useEffect(() => {
+    if (!bookingId || !serviceId || !user) return
+    let cancelled = false
+
+    async function check() {
+      const { data: serviceForm } = await supabase
+        .from('service_forms')
+        .select('id, title')
+        .eq('service_id', serviceId as string)
+        .eq('is_active', true)
+        .maybeSingle()
+      if (!serviceForm || cancelled) return
+
+      const { data: booking } = await supabase
+        .from('bookings')
+        .select('customer_id')
+        .eq('id', bookingId as string)
+        .single()
+      if (!booking?.customer_id || cancelled) return
+
+      const { data: response } = await supabase
+        .from('form_responses')
+        .select('id')
+        .eq('customer_id', booking.customer_id)
+        .eq('form_id', serviceForm.id)
+        .gt('expires_at', new Date().toISOString())
+        .maybeSingle()
+
+      if (!response && !cancelled) setForm({ id: serviceForm.id, title: serviceForm.title })
+    }
+
+    check()
+    return () => { cancelled = true }
+  }, [bookingId, serviceId, user])
+
+  return form
 }
 
 function CreateAccountForm({ email }: { email: string }) {
@@ -111,13 +158,15 @@ export default function BookingConfirmed() {
   const { state } = useLocation()
   const navigate = useNavigate()
   const { config } = useBrandStore()
+  const locState = state as ConfirmedState | undefined
+  const requiredForm = useRequiredForm(locState?.bookingId, locState?.serviceId)
 
   if (!state?.bookingRef) {
     navigate('/book', { replace: true })
     return null
   }
 
-  const s = state as ConfirmedState
+  const s = locState as ConfirmedState
   const startsAt = new Date(s.startsAt)
   const endsAt = new Date(s.endsAt)
 
@@ -152,6 +201,23 @@ export default function BookingConfirmed() {
       {s.isNewUser && (
         <div className="mt-5 w-full max-w-sm">
           <CreateAccountForm email={s.customerEmail} />
+        </div>
+      )}
+
+      {/* Prompt to complete a form linked to the booked service */}
+      {requiredForm && (
+        <div className="mt-5 w-full max-w-sm flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3.5 text-left">
+          <ClipboardList className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800">{requiredForm.title} required</p>
+            <p className="text-xs text-amber-600 mt-0.5">Please complete this before your appointment.</p>
+          </div>
+          <Link
+            to={`/forms/${requiredForm.id}?bookingId=${s.bookingId}`}
+            className="text-xs font-semibold text-amber-700 hover:text-amber-900 shrink-0 underline underline-offset-2 mt-0.5"
+          >
+            Complete →
+          </Link>
         </div>
       )}
 
