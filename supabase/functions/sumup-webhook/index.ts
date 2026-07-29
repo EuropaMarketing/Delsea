@@ -1,7 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
-import { chargeWithToken, corsHeaders, sumupFetch, type SumupCheckout } from '../_shared/sumup.ts'
+import { chargeWithToken, corsHeaders, getBusinessSumupCredentials, sumupFetch, type SumupCheckout } from '../_shared/sumup.ts'
 
-const SUMUP_MERCHANT_CODE = Deno.env.get('SUMUP_MERCHANT_CODE')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const supabase = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
@@ -12,11 +11,6 @@ Deno.serve(async (req) => {
     const { id: checkoutId } = await req.json() as { event_type?: string; id?: string }
     if (!checkoutId) return new Response('ok', { status: 200 })
 
-    // Never trust the webhook payload's status — always re-fetch from SumUp.
-    const checkoutRes = await sumupFetch(`/v0.1/checkouts/${checkoutId}`)
-    if (!checkoutRes.ok) return new Response('ok', { status: 200 })
-    const checkout = await checkoutRes.json() as SumupCheckout
-
     const { data: payment } = await supabase
       .from('payments')
       .select('id, booking_id, type, status, amount, target_amount, target_type')
@@ -25,19 +19,28 @@ Deno.serve(async (req) => {
 
     if (!payment) return new Response('ok', { status: 200 })
 
+    const { data: booking } = await supabase
+      .from('bookings')
+      .select('id, business_id, customer_id, payment_status, deposit_charged')
+      .eq('id', payment.booking_id)
+      .single()
+    if (!booking) return new Response('ok', { status: 200 })
+
+    const credentials = await getBusinessSumupCredentials(supabase, booking.business_id as string)
+    // No credentials on file for this business — nothing we can verify or act on.
+    if (!credentials) return new Response('ok', { status: 200 })
+
+    // Never trust the webhook payload's status — always re-fetch from SumUp.
+    const checkoutRes = await sumupFetch(credentials.apiKey, `/v0.1/checkouts/${checkoutId}`)
+    if (!checkoutRes.ok) return new Response('ok', { status: 200 })
+    const checkout = await checkoutRes.json() as SumupCheckout
+
     const newStatus = checkout.status === 'PAID' ? 'paid' : checkout.status === 'FAILED' || checkout.status === 'EXPIRED' ? 'failed' : 'pending'
     if (newStatus === payment.status) return new Response('ok', { status: 200 })
 
     await supabase.from('payments').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', payment.id)
 
     if (newStatus === 'paid') {
-      const { data: booking } = await supabase
-        .from('bookings')
-        .select('id, customer_id, payment_status, deposit_charged')
-        .eq('id', payment.booking_id)
-        .single()
-      if (!booking) return new Response('ok', { status: 200 })
-
       const token = checkout.payment_instrument?.token
       if (token) {
         await supabase.from('customers').update({ sumup_card_token: token }).eq('id', booking.customer_id)
@@ -49,7 +52,8 @@ Deno.serve(async (req) => {
         if (token && payment.target_amount && payment.target_type) {
           // Card just got saved — immediately charge the real amount it was tokenized for.
           const charge = await chargeWithToken({
-            merchantCode: SUMUP_MERCHANT_CODE,
+            apiKey: credentials.apiKey,
+            merchantCode: credentials.merchantCode,
             customerId: booking.customer_id,
             token,
             amountPence: payment.target_amount,
@@ -89,8 +93,7 @@ Deno.serve(async (req) => {
         await supabase.from('bookings').update(bookingUpdate).eq('id', booking.id)
       }
     } else if (newStatus === 'failed' && (payment.type === 'deposit' || payment.type === 'full' || payment.type === 'tokenization')) {
-      const { data: booking } = await supabase.from('bookings').select('payment_status').eq('id', payment.booking_id).single()
-      if (booking?.payment_status === 'unpaid') {
+      if (booking.payment_status === 'unpaid') {
         await supabase.from('bookings').update({ payment_status: 'failed' }).eq('id', payment.booking_id)
       }
     }

@@ -1,3 +1,5 @@
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2'
+
 const SUMUP_API_BASE = 'https://api.sumup.com'
 
 export const corsHeaders = {
@@ -5,9 +7,30 @@ export const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-export function sumupFetch(path: string, init: RequestInit = {}) {
-  const apiKey = Deno.env.get('SUMUP_API_KEY')
-  if (!apiKey) throw new Error('SUMUP_API_KEY is not configured')
+export type SumupCredentials = {
+  apiKey: string
+  merchantCode: string
+}
+
+// Looks up the calling business's own SumUp credentials — never a global/shared key.
+// Returns null if the business hasn't connected SumUp (or connected a different provider).
+export async function getBusinessSumupCredentials(
+  supabase: SupabaseClient,
+  businessId: string,
+): Promise<SumupCredentials | null> {
+  const { data } = await supabase
+    .from('business_payment_settings')
+    .select('provider, sumup_api_key, sumup_merchant_code')
+    .eq('business_id', businessId)
+    .maybeSingle()
+
+  if (!data || data.provider !== 'sumup' || !data.sumup_api_key || !data.sumup_merchant_code) {
+    return null
+  }
+  return { apiKey: data.sumup_api_key, merchantCode: data.sumup_merchant_code }
+}
+
+export function sumupFetch(apiKey: string, path: string, init: RequestInit = {}) {
   return fetch(`${SUMUP_API_BASE}${path}`, {
     ...init,
     headers: {
@@ -27,10 +50,13 @@ export function majorToPence(major: number): number {
   return Math.round(major * 100)
 }
 
-export async function ensureSumupCustomer(customer: { id: string; name: string; email: string; phone: string | null }) {
+export async function ensureSumupCustomer(
+  apiKey: string,
+  customer: { id: string; name: string; email: string; phone: string | null },
+) {
   const [first_name, ...rest] = customer.name.trim().split(/\s+/)
   const last_name = rest.join(' ') || first_name
-  const res = await sumupFetch('/v0.1/customers', {
+  const res = await sumupFetch(apiKey, '/v0.1/customers', {
     method: 'POST',
     body: JSON.stringify({
       customer_id: customer.id,
@@ -57,6 +83,7 @@ export type SumupCheckout = {
 
 // Charges a saved card token with no customer present (merchant-initiated transaction).
 export async function chargeWithToken(opts: {
+  apiKey: string
   merchantCode: string
   customerId: string
   token: string
@@ -65,7 +92,7 @@ export async function chargeWithToken(opts: {
   returnUrl: string
   checkoutReference: string
 }): Promise<{ checkoutId: string; status: 'PENDING' | 'PAID' | 'FAILED' | 'EXPIRED' }> {
-  const checkoutRes = await sumupFetch('/v0.1/checkouts', {
+  const checkoutRes = await sumupFetch(opts.apiKey, '/v0.1/checkouts', {
     method: 'POST',
     body: JSON.stringify({
       checkout_reference: opts.checkoutReference,
@@ -81,7 +108,7 @@ export async function chargeWithToken(opts: {
   if (!checkoutRes.ok) throw new Error(`Failed to create follow-up checkout: ${checkoutRes.status} ${await checkoutRes.text()}`)
   const checkout = await checkoutRes.json() as { id: string }
 
-  const processRes = await sumupFetch(`/v0.1/checkouts/${checkout.id}`, {
+  const processRes = await sumupFetch(opts.apiKey, `/v0.1/checkouts/${checkout.id}`, {
     method: 'PUT',
     body: JSON.stringify({
       payment_type: 'card',

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Calendar, List, Scissors, Users, Settings,
-  LogOut, Menu, X, Ticket, UserRound, Banknote, Images, Star, Tag, DoorOpen, Gift, PartyPopper, ClipboardList,
+  LogOut, Menu, X, Ticket, UserRound, Banknote, Images, Star, Tag, DoorOpen, Gift, PartyPopper, ClipboardList, CreditCard,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
@@ -24,6 +24,7 @@ const navItems = [
   { label: 'Gift Vouchers', icon: Gift,      path: '/admin/gift-vouchers' },
   { label: 'Resources',    icon: DoorOpen,   path: '/admin/resources' },
   { label: 'Payroll',      icon: Banknote,   path: '/admin/payroll' },
+  { label: 'Payments',     icon: CreditCard, path: '/admin/payments' },
   { label: 'Portfolio',    icon: Images,     path: '/admin/portfolio' },
   { label: 'Reviews',      icon: Star,       path: '/admin/reviews' },
   { label: 'Settings',     icon: Settings,   path: '/admin/settings' },

@@ -24,7 +24,7 @@ interface ConfirmedState {
   customerEmail: string
   isNewUser: boolean
   depositAmount?: number
-  paymentMethod?: 'membership' | 'card' | 'venue'
+  paymentMethod?: 'membership' | 'card' | 'venue' | 'manual'
 }
 
 type RequiredForm = { id: string; title: string }
@@ -260,6 +260,8 @@ export default function BookingConfirmed() {
               <Building2 className="h-4 w-4 mt-0.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
             ) : s.paymentMethod === 'membership' ? (
               <Ticket className="h-4 w-4 mt-0.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
+            ) : s.paymentMethod === 'manual' ? (
+              <Building2 className="h-4 w-4 mt-0.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
             ) : (
               <CreditCard className="h-4 w-4 mt-0.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
             )}
@@ -272,6 +274,11 @@ export default function BookingConfirmed() {
                 </>
               ) : s.paymentMethod === 'membership' ? (
                 <p className="font-semibold text-gray-900 text-sm">Paid via membership</p>
+              ) : s.paymentMethod === 'manual' ? (
+                <>
+                  <p className="font-semibold text-gray-900 text-sm">To be arranged</p>
+                  <p className="text-xs text-gray-500">Payment will be taken directly by the business</p>
+                </>
               ) : s.depositAmount ? (
                 <>
                   <p className="font-semibold text-gray-900 text-sm">{formatCurrency(s.depositAmount)} deposit paid</p>

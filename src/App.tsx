@@ -43,6 +43,7 @@ import AdminSettings from '@/pages/admin/Settings'
 import AdminMemberships from '@/pages/admin/Memberships'
 import AdminClients from '@/pages/admin/Clients'
 import AdminPayroll from '@/pages/admin/Payroll'
+import AdminPayments from '@/pages/admin/Payments'
 import AdminPortfolio from '@/pages/admin/Portfolio'
 import AdminReviews from '@/pages/admin/Reviews'
 import AdminDiscounts from '@/pages/admin/Discounts'
@@ -286,6 +287,16 @@ function AppRoutes() {
           <ProtectedRoute adminOnly>
             <AdminLayout>
               <AdminPayroll />
+            </AdminLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/payments"
+        element={
+          <ProtectedRoute adminOnly>
+            <AdminLayout>
+              <AdminPayments />
             </AdminLayout>
           </ProtectedRoute>
         }

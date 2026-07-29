@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format, addMinutes } from 'date-fns'
 import { ShieldCheck, Ticket, AlertCircle, Info, Tag, Gift, CheckCircle2, X, CreditCard, Building2 } from 'lucide-react'
@@ -22,7 +22,13 @@ export default function Confirmation() {
   const [error, setError] = useState<string | null>(null)
   const [slotConflict, setSlotConflict] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'venue'>('card')
+  const [acceptsCard, setAcceptsCard] = useState(true)
   const confirmed = useRef(false)
+
+  useEffect(() => {
+    supabase.rpc('business_accepts_card_payments', { p_business_id: BUSINESS_ID })
+      .then(({ data }) => setAcceptsCard(data === true))
+  }, [])
 
   // Discount code state
   const [discountCode, setDiscountCode] = useState('')
@@ -183,11 +189,12 @@ export default function Confirmation() {
         customerEmail: draft.customerEmail,
         isNewUser: wasGuest,
         depositAmount,
-        paymentMethod: useToken ? 'membership' : paymentMethod,
+        paymentMethod: useToken ? 'membership' : !acceptsCard ? 'manual' : paymentMethod,
       }
 
-      // Membership covers cost — no payment page needed.
-      if (useToken) {
+      // Membership covers cost, or this business has no payment provider connected —
+      // no payment page needed, payment (if any) is arranged directly with the business.
+      if (useToken || !acceptsCard) {
         confirmed.current = true
         reset()
         navigate('/booking-confirmed', { replace: true, state: confirmedState })
@@ -457,7 +464,7 @@ export default function Confirmation() {
             )}
 
             {/* Payment method selector */}
-            {!useToken && (
+            {!useToken && acceptsCard && (
               <div className="grid grid-cols-2 gap-2 mb-3">
                 {(['card', 'venue'] as const).map((m) => (
                   <button
@@ -474,6 +481,13 @@ export default function Confirmation() {
                     {m === 'card' ? 'Card / Apple Pay / Google Pay' : 'Pay at Venue'}
                   </button>
                 ))}
+              </div>
+            )}
+
+            {!useToken && !acceptsCard && discountedPrice > 0 && (
+              <div className="flex items-start gap-2 mb-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+                <Info className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
+                <p className="text-xs text-gray-500">Online payment isn't available for this business yet — payment will be arranged directly with us.</p>
               </div>
             )}
 
@@ -498,7 +512,7 @@ export default function Confirmation() {
             )}
 
             <Button fullWidth size="lg" loading={loading} onClick={handleConfirm}>
-              {useToken
+              {useToken || !acceptsCard
                 ? 'Confirm Booking'
                 : paymentMethod === 'venue'
                 ? 'Continue to Card Verification →'
