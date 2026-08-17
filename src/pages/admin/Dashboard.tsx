@@ -20,7 +20,7 @@ interface Stats {
 }
 
 export default function Dashboard() {
-  type TodayBooking = Booking & { service: { name: string; price: number }; staff: { name: string } | null; customer: { name: string } | null; discount_amount: number; gift_voucher_amount: number; checked_in_at: string | null; price_override: number | null }
+  type TodayBooking = Omit<Booking, 'staff' | 'service' | 'customer' | 'price_override'> & { service: { name: string; price: number }; staff: { name: string } | null; customer: { name: string } | null; discount_amount: number; gift_voucher_amount: number; checked_in_at: string | null; price_override: number | null }
   const [todayBookings, setTodayBookings] = useState<TodayBooking[]>([])
   const [stats, setStats] = useState<Stats>({ todayCount: 0, todayCompleted: 0, weekCount: 0, weekRevenue: 0, weekCancellations: 0 })
   const [loading, setLoading] = useState(true)

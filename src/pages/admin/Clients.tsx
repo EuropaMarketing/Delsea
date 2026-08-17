@@ -39,6 +39,7 @@ type Booking = {
   status: string
   service: { name: string; price: number } | null
   staff: { name: string } | null
+  price_override: number | null
 }
 
 type ClientRow = Customer & {

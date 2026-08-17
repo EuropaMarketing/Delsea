@@ -676,6 +676,7 @@ export default function AdminCalendar() {
       setEditError(error.message)
     } else {
       const resourceObj = matchedResource ? { name: matchedResource.name } : null
+      const equipmentObj = matchedEquipment ? { name: matchedEquipment.name } : null
       const customerObj = {
         name: editCustomerName,
         email: editCustomerEmail,
@@ -698,6 +699,7 @@ export default function AdminCalendar() {
         resource_id: editResourceId,
         resource: resourceObj,
         equipment_resource_id: editEquipmentResourceId,
+        equipment_resource: equipmentObj,
       }
       setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, ...patch } : b))
       setSelectedBooking(prev => prev ? { ...prev, ...patch } : null)
