@@ -206,7 +206,7 @@ export default function AdminCalendar() {
   const [chargeSuccess, setChargeSuccess] = useState(false)
 
   // Cell click popover (new booking vs block time)
-  const [cellPopover, setCellPopover] = useState<{ staffId: string | null; date: Date; time: string; pageX: number; pageY: number } | null>(null)
+  const [cellPopover, setCellPopover] = useState<{ staffId: string | null; date: Date; time: string; pageX: number; pageY: number; keepUnassigned: boolean } | null>(null)
 
   // Resize drag
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -476,18 +476,18 @@ export default function AdminCalendar() {
     }
   }
 
-  function handleCellClick(e: React.MouseEvent<HTMLDivElement>, staffId: string | null, date: Date) {
+  function handleCellClick(e: React.MouseEvent<HTMLDivElement>, staffId: string | null, date: Date, keepUnassigned = false) {
     if ((e.target as HTMLElement).closest('[data-booking]')) return
     if (drag) return
     const member = staffId ? staff.find(s => s.id === staffId) : null
     if (member?.on_holiday) return
     const time = timeFromPointerY(e, e.currentTarget)
-    setCellPopover({ staffId, date, time, pageX: e.clientX, pageY: e.clientY })
+    setCellPopover({ staffId, date, time, pageX: e.clientX, pageY: e.clientY, keepUnassigned })
   }
 
   function openNewBookingFromPopover() {
     if (!cellPopover) return
-    setNbStaffId(cellPopover.staffId ?? staff.find(s => !s.on_holiday)?.id ?? null)
+    setNbStaffId(cellPopover.staffId ?? (cellPopover.keepUnassigned ? null : staff.find(s => !s.on_holiday)?.id ?? null))
     setNbDate(format(cellPopover.date, 'yyyy-MM-dd'))
     setNbTime(cellPopover.time)
     setNbServiceId(services[0]?.id ?? '')
@@ -1271,8 +1271,9 @@ export default function AdminCalendar() {
 
             {/* Unstaffed column */}
             <div
-              className="relative border-gray-100 bg-gray-50/30"
+              className="relative border-gray-100 bg-gray-50/30 cursor-crosshair"
               style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
+              onClick={e => handleCellClick(e, null, selectedDay, true)}
               onDragOver={e => e.preventDefault()}
               onDrop={e => handleDropBooking(e, selectedDay, null)}
             >
@@ -1427,7 +1428,10 @@ export default function AdminCalendar() {
             style={{ top: cellPopover.pageY + 6, left: cellPopover.pageX }}
           >
             <div className="px-3 py-1.5 text-xs font-semibold text-gray-400 border-b border-gray-100 mb-1">
-              {format(cellPopover.date, 'EEE d MMM')} · {cellPopover.time}{cellPopover.staffId ? ` · ${staff.find(s => s.id === cellPopover.staffId)?.name ?? ''}` : ''}
+              {format(cellPopover.date, 'EEE d MMM')} · {cellPopover.time}
+              {cellPopover.staffId
+                ? ` · ${staff.find(s => s.id === cellPopover.staffId)?.name ?? ''}`
+                : cellPopover.keepUnassigned ? ' · Unassigned' : ''}
             </div>
             <button
               onClick={openNewBookingFromPopover}
@@ -1436,13 +1440,15 @@ export default function AdminCalendar() {
               <CalendarPlus className="h-4 w-4 text-gray-400" />
               New Booking
             </button>
-            <button
-              onClick={openBlockTimeFromPopover}
-              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors"
-            >
-              <Lock className="h-4 w-4 text-gray-400" />
-              Block Time
-            </button>
+            {!cellPopover.keepUnassigned && (
+              <button
+                onClick={openBlockTimeFromPopover}
+                className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors"
+              >
+                <Lock className="h-4 w-4 text-gray-400" />
+                Block Time
+              </button>
+            )}
           </div>
         </>
       )}
