@@ -28,6 +28,7 @@ interface BookingStore {
   setSpotsBooked: (n: number) => void
   setTokenChoice: (use: boolean, membershipId: string | null, planName: string | null) => void
   setEventBooking: (params: { serviceId: string; staffId: string | null; date: Date; timeSlot: string; spotsBooked: number; sessionId: string }) => void
+  setSessionId: (id: string | null) => void
   reset: () => void
 }
 
@@ -117,6 +118,8 @@ export const useBookingStore = create<BookingStore>((set) => ({
       selectedAddons: [],
       eventSessionId: sessionId,
     })),
+
+  setSessionId: (id) => set({ eventSessionId: id }),
 
   reset: () => set({
     draft: { ...emptyDraft },

@@ -111,11 +111,28 @@ type AvailableAddon = {
   price: number
 }
 
+type SessionRow = {
+  id: string
+  service_id: string
+  event_date: string
+  start_time: string
+  staff_id: string | null
+  max_capacity_override: number | null
+  service: { name: string; category: string; max_capacity: number | null; duration_minutes: number } | null
+}
+
+type Attendee = {
+  id: string
+  spots_booked: number
+  customer: { name: string; email: string } | null
+}
+
 export default function AdminCalendar() {
   const [selectedDay, setSelectedDay] = useState(new Date())
   const [viewMode, setViewMode] = useState<'day' | 'week'>('day')
   const [bookings, setBookings] = useState<RichBooking[]>([])
   const [blockedTimes, setBlockedTimes] = useState<BlockedTime[]>([])
+  const [sessions, setSessions] = useState<SessionRow[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
   const [services, setServices] = useState<Service[]>([])
   const [resources, setResources] = useState<Resource[]>([])
@@ -136,8 +153,16 @@ export default function AdminCalendar() {
   const [shiftSaving, setShiftSaving] = useState(false)
   const [shiftError, setShiftError] = useState('')
 
+  // Session attendee modal (open group-session slots)
+  const [selectedSession, setSelectedSession] = useState<SessionRow | null>(null)
+  const [sessionAttendees, setSessionAttendees] = useState<Attendee[]>([])
+  const [sessionAttendeesLoading, setSessionAttendeesLoading] = useState(false)
+  const [sessionCancelOpen, setSessionCancelOpen] = useState(false)
+  const [sessionCanceling, setSessionCanceling] = useState(false)
+
   // New booking modal
   const [nbModalOpen, setNbModalOpen] = useState(false)
+  const [nbBookingMode, setNbBookingMode] = useState<'customer' | 'open'>('customer')
   const [nbStaffId, setNbStaffId] = useState<string | null>(null)
   const [nbServiceId, setNbServiceId] = useState('')
   const [nbDate, setNbDate] = useState('')
@@ -306,7 +331,7 @@ export default function AdminCalendar() {
       const dayStart = rangeStart.toISOString()
       const dayEnd = rangeEnd.toISOString()
 
-      const [staffRes, bookRes, svcRes, blockRes, resRes, equipRes] = await Promise.all([
+      const [staffRes, bookRes, svcRes, blockRes, resRes, equipRes, sessRes] = await Promise.all([
         supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name'),
         supabase
           .from('bookings')
@@ -323,6 +348,14 @@ export default function AdminCalendar() {
           .gt('ends_at', dayStart),
         supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'room').order('name'),
           supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'equipment').order('name'),
+        supabase
+          .from('service_sessions')
+          .select('id, service_id, event_date, start_time, staff_id, max_capacity_override, service:services(name,category,max_capacity,duration_minutes)')
+          .eq('business_id', BUSINESS_ID)
+          .eq('is_active', true)
+          .not('event_date', 'is', null)
+          .gte('event_date', format(rangeStart, 'yyyy-MM-dd'))
+          .lte('event_date', format(rangeEnd, 'yyyy-MM-dd')),
       ])
       if (staffRes.data) setStaff(staffRes.data as Staff[])
       if (bookRes.data) {
@@ -334,6 +367,7 @@ export default function AdminCalendar() {
       if (blockRes.data) setBlockedTimes(blockRes.data as BlockedTime[])
       if (resRes.data) setResources(resRes.data as Resource[])
       if (equipRes.data) setEquipmentResources(equipRes.data as Resource[])
+      if (sessRes.data) setSessions(sessRes.data as unknown as SessionRow[])
       setLoading(false)
     }
     load()
@@ -428,6 +462,21 @@ export default function AdminCalendar() {
     return map
   }, [bookings, services])
 
+  // Attendee capacity for open group-session slots — always has an entry per session,
+  // even with zero bookings so far, unlike slotCapacityMap above.
+  const sessionCapacityMap = useMemo(() => {
+    const map = new Map<string, { taken: number; max: number }>()
+    for (const session of sessions) {
+      const startsAt = new Date(`${session.event_date}T${session.start_time}`).toISOString()
+      const taken = bookings
+        .filter(b => b.service_id === session.service_id && b.starts_at === startsAt)
+        .reduce((sum, b) => sum + (b.spots_booked ?? 1), 0)
+      const max = session.max_capacity_override ?? session.service?.max_capacity ?? 8
+      map.set(session.id, { taken, max })
+    }
+    return map
+  }, [sessions, bookings])
+
   function positionBlock(startsAt: string, endsAt: string, refDay: Date = selectedDay) {
     const dayFloor = setMinutes(setHours(refDay, START_HOUR), 0)
     const dayCeil = setMinutes(setHours(refDay, END_HOUR), 0)
@@ -480,6 +529,52 @@ export default function AdminCalendar() {
       .select('addon_id, price, service_addon:service_addons(name, duration_minutes)')
       .eq('booking_id', bookingId)
     return (data ?? []) as unknown as BookingAddon[]
+  }
+
+  function sessionStartsAt(session: SessionRow): string {
+    return new Date(`${session.event_date}T${session.start_time}`).toISOString()
+  }
+
+  async function openSessionDetail(session: SessionRow) {
+    setSelectedSession(session)
+    setSessionCancelOpen(false)
+    setSessionAttendeesLoading(true)
+    const { data } = await supabase
+      .from('bookings')
+      .select('id, spots_booked, customer:customers(name,email)')
+      .eq('service_id', session.service_id)
+      .eq('starts_at', sessionStartsAt(session))
+      .neq('status', 'cancelled')
+    setSessionAttendees((data as unknown as Attendee[]) ?? [])
+    setSessionAttendeesLoading(false)
+  }
+
+  async function openAttendeeBooking(attendeeId: string) {
+    const { data } = await supabase
+      .from('bookings')
+      .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token), resource:resources!resource_id(name)')
+      .eq('id', attendeeId)
+      .single()
+    if (data) {
+      setSelectedSession(null)
+      openBookingDetail(data as RichBooking)
+    }
+  }
+
+  async function handleCancelSession(reason: string) {
+    if (!selectedSession || !reason.trim()) return
+    setSessionCanceling(true)
+    await supabase
+      .from('bookings')
+      .update({ status: 'cancelled', cancellation_reason: reason.trim() })
+      .eq('service_id', selectedSession.service_id)
+      .eq('starts_at', sessionStartsAt(selectedSession))
+      .neq('status', 'cancelled')
+    await supabase.from('service_sessions').update({ is_active: false }).eq('id', selectedSession.id)
+    setSessions(prev => prev.filter(s => s.id !== selectedSession.id))
+    setSelectedSession(null)
+    setSessionCancelOpen(false)
+    setSessionCanceling(false)
   }
 
   // A staff member's effective working window for a given day: their normal weekly
@@ -637,6 +732,7 @@ export default function AdminCalendar() {
 
   function openNewBookingFromPopover() {
     if (!cellPopover) return
+    setNbBookingMode('customer')
     setNbStaffId(cellPopover.staffId ?? (cellPopover.keepUnassigned ? null : staff.find(s => !s.on_holiday)?.id ?? null))
     setNbDate(format(cellPopover.date, 'yyyy-MM-dd'))
     setNbTime(cellPopover.time)
@@ -1096,7 +1192,55 @@ export default function AdminCalendar() {
     if (data) { setNbSuggestions(data as Customer[]); setNbShowSuggestions(true) }
   }
 
+  async function handleCreateOpenSessions() {
+    if (!nbServiceId || !nbDate || !nbTime) { setNbError('Service, date and time are required.'); return }
+    const service = services.find(s => s.id === nbServiceId)
+    if (!service) return
+    if (!service.is_group_session) { setNbError('Only group-session services can have open slots.'); return }
+    const baseStartsAt = new Date(`${nbDate}T${nbTime}:00`)
+    const occurrenceDates = computeOccurrenceDates(
+      baseStartsAt,
+      nbRepeat,
+      nbRepeatInterval,
+      nbRepeatEndType,
+      nbRepeatCount,
+      nbRepeatEndType === 'until' && nbRepeatUntil ? new Date(`${nbRepeatUntil}T23:59:59`) : null,
+    )
+    setNbSaving(true)
+    setNbError('')
+    try {
+      const rows = occurrenceDates.map(d => ({
+        business_id: BUSINESS_ID,
+        service_id: nbServiceId,
+        event_date: format(d, 'yyyy-MM-dd'),
+        start_time: nbTime,
+        staff_id: nbStaffId,
+        max_capacity_override: nbSpotsBooked,
+        resource_id: null,
+      }))
+      const { data, error } = await supabase
+        .from('service_sessions')
+        .insert(rows)
+        .select('id, service_id, event_date, start_time, staff_id, max_capacity_override, service:services(name,category,max_capacity,duration_minutes)')
+      if (error) throw error
+      const rangeStart = viewMode === 'week' ? startOfWeek(selectedDay, { weekStartsOn: 1 }) : startOfDay(selectedDay)
+      const rangeEnd = viewMode === 'week' ? endOfWeek(selectedDay, { weekStartsOn: 1 }) : endOfDay(selectedDay)
+      const created = (data ?? []) as unknown as SessionRow[]
+      const inView = created.filter(s => {
+        const d = parseISO(s.event_date)
+        return d >= rangeStart && d <= rangeEnd
+      })
+      if (inView.length) setSessions(prev => [...prev, ...inView])
+      closeNewBooking()
+    } catch (err: unknown) {
+      setNbError(err instanceof Error ? err.message : 'Failed to create sessions.')
+    } finally {
+      setNbSaving(false)
+    }
+  }
+
   async function handleCreateBooking() {
+    if (nbBookingMode === 'open') { await handleCreateOpenSessions(); return }
     if (!nbServiceId || !nbName.trim() || !nbEmail.trim()) {
       setNbError('Name, email and service are required.')
       return
@@ -1537,6 +1681,30 @@ export default function AdminCalendar() {
                       </div>
                     )
                   })}
+
+                  {/* Open group-session slots */}
+                  {sessions.filter(s => s.staff_id === member.id).map(session => {
+                    const start = new Date(`${session.event_date}T${session.start_time}`)
+                    const end = addMinutes(start, session.service?.duration_minutes ?? 60)
+                    const { top, height } = positionBlock(start.toISOString(), end.toISOString())
+                    const cap = sessionCapacityMap.get(session.id)
+                    const color = categoryColorMap[session.service?.category ?? ''] ?? '#7C3AED'
+                    return (
+                      <div
+                        key={session.id}
+                        data-booking="true"
+                        onClick={() => openSessionDetail(session)}
+                        className="absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden cursor-pointer z-20 border-2 border-dashed hover:brightness-95"
+                        style={{ top, height, backgroundColor: `${color}11`, borderColor: color }}
+                        title={`${session.service?.name} — open session`}
+                      >
+                        <p className="text-xs font-semibold truncate leading-tight" style={{ color }}>
+                          {session.start_time.slice(0, 5)} {session.service?.name}
+                        </p>
+                        {cap && <p className="text-xs font-medium" style={{ color }}>{cap.taken}/{cap.max} booked</p>}
+                      </div>
+                    )
+                  })}
                 </div>
               )
             })}
@@ -1582,6 +1750,28 @@ export default function AdminCalendar() {
                   </div>
                 )
               })}
+              {sessions.filter(s => s.staff_id === null).map(session => {
+                const start = new Date(`${session.event_date}T${session.start_time}`)
+                const end = addMinutes(start, session.service?.duration_minutes ?? 60)
+                const { top, height } = positionBlock(start.toISOString(), end.toISOString())
+                const cap = sessionCapacityMap.get(session.id)
+                const color = categoryColorMap[session.service?.category ?? ''] ?? '#7C3AED'
+                return (
+                  <div
+                    key={session.id}
+                    data-booking="true"
+                    onClick={() => openSessionDetail(session)}
+                    className="absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden cursor-pointer z-20 border-2 border-dashed hover:brightness-95"
+                    style={{ top, height, backgroundColor: `${color}11`, borderColor: color }}
+                    title={`${session.service?.name} — open session`}
+                  >
+                    <p className="text-xs font-semibold truncate leading-tight" style={{ color }}>
+                      {session.start_time.slice(0, 5)} {session.service?.name}
+                    </p>
+                    {cap && <p className="text-xs font-medium" style={{ color }}>{cap.taken}/{cap.max} booked</p>}
+                  </div>
+                )
+              })}
             </div>
             )}
 
@@ -1624,8 +1814,10 @@ export default function AdminCalendar() {
 
             {/* Day columns */}
             {weekDays.map(day => {
+              const dayKey = format(day, 'yyyy-MM-dd')
               const dayBookings = packOverlaps(bookings.filter(b => isSameDay(parseISO(b.starts_at), day) && (!resolvedStaffFilterId || b.staff_id === resolvedStaffFilterId)))
               const dayBlocks = blockedTimes.filter(bt => isSameDay(parseISO(bt.starts_at), day))
+              const daySessions = sessions.filter(s => s.event_date === dayKey && (!resolvedStaffFilterId || s.staff_id === resolvedStaffFilterId))
               return (
                 <div
                   key={day.toISOString()}
@@ -1682,6 +1874,29 @@ export default function AdminCalendar() {
                             {slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)!.taken}/{slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)!.max} spots
                           </p>
                         )}
+                      </div>
+                    )
+                  })}
+
+                  {daySessions.map(session => {
+                    const start = new Date(`${session.event_date}T${session.start_time}`)
+                    const end = addMinutes(start, session.service?.duration_minutes ?? 60)
+                    const { top, height } = positionBlock(start.toISOString(), end.toISOString(), day)
+                    const cap = sessionCapacityMap.get(session.id)
+                    const color = categoryColorMap[session.service?.category ?? ''] ?? '#7C3AED'
+                    return (
+                      <div
+                        key={session.id}
+                        data-booking="true"
+                        onClick={() => openSessionDetail(session)}
+                        className="absolute left-1 right-1 rounded-md px-1.5 py-1 overflow-hidden cursor-pointer z-20 border-2 border-dashed hover:brightness-95"
+                        style={{ top, height, backgroundColor: `${color}11`, borderColor: color }}
+                        title={`${session.service?.name} — open session`}
+                      >
+                        <p className="text-xs font-semibold truncate leading-tight" style={{ color }}>
+                          {session.start_time.slice(0, 5)} {session.service?.name}
+                        </p>
+                        {cap && <p className="text-xs font-medium" style={{ color }}>{cap.taken}/{cap.max} booked</p>}
                       </div>
                     )
                   })}
@@ -1749,10 +1964,9 @@ export default function AdminCalendar() {
                 onChange={e => {
                   const id = e.target.value
                   setNbServiceId(id)
-                  if (!nbPriceTouched) {
-                    const svc = services.find(s => s.id === id)
-                    if (svc) setNbPrice((svc.price / 100).toFixed(2))
-                  }
+                  const svc = services.find(s => s.id === id)
+                  if (!svc?.is_group_session) setNbBookingMode('customer')
+                  if (!nbPriceTouched && svc) setNbPrice((svc.price / 100).toFixed(2))
                 }}
                 className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
               >
@@ -1760,11 +1974,28 @@ export default function AdminCalendar() {
               </select>
             </div>
           </div>
+
+          {selectedService?.is_group_session && (
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+              <button type="button" onClick={() => setNbBookingMode('customer')} className={cn('flex-1 py-2 font-medium transition-colors', nbBookingMode === 'customer' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50')}>
+                Assign to a customer
+              </button>
+              <button type="button" onClick={() => setNbBookingMode('open')} className={cn('flex-1 py-2 font-medium transition-colors', nbBookingMode === 'open' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50')}>
+                Leave spots open
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <Input label="Date" type="date" value={nbDate} onChange={e => setNbDate(e.target.value)} required />
             <Input label="Start time" type="time" value={nbTime} onChange={e => setNbTime(e.target.value)} required />
           </div>
           {nbEndTime && <p className="text-xs text-gray-500 bg-gray-50 rounded px-3 py-2">{selectedService?.duration_minutes} min · ends at {nbEndTime}</p>}
+          {nbBookingMode === 'open' && (
+            <p className="text-xs text-gray-500 bg-gray-50 rounded px-3 py-2">
+              This opens {nbSpotsBooked} spot{nbSpotsBooked !== 1 ? 's' : ''} for customers to book online — no need to enter a customer below.
+            </p>
+          )}
 
           {/* Repeat */}
           <div className="border border-gray-100 rounded-lg p-3 space-y-2">
@@ -1845,21 +2076,23 @@ export default function AdminCalendar() {
           </div>
 
           <div className="flex items-end gap-3">
-            <div className="relative w-32">
-              <label className="text-sm font-medium text-gray-700 mb-1 block">Price</label>
-              <span className="absolute left-2.5 top-1/2 translate-y-[3px] text-sm text-gray-500">£</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={nbPrice}
-                onChange={e => { setNbPrice(e.target.value); setNbPriceTouched(true) }}
-                className="w-full h-10 pl-5 pr-2 text-sm border border-gray-200 rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
-              />
-            </div>
+            {nbBookingMode === 'customer' && (
+              <div className="relative w-32">
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Price</label>
+                <span className="absolute left-2.5 top-1/2 translate-y-[3px] text-sm text-gray-500">£</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={nbPrice}
+                  onChange={e => { setNbPrice(e.target.value); setNbPriceTouched(true) }}
+                  className="w-full h-10 pl-5 pr-2 text-sm border border-gray-200 rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
+                />
+              </div>
+            )}
             {selectedService?.is_group_session && (
               <div className="w-24">
-                <label className="text-sm font-medium text-gray-700 mb-1 block">Spots</label>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">{nbBookingMode === 'open' ? 'Capacity' : 'Spots'}</label>
                 <input
                   type="number"
                   min={1}
@@ -1870,39 +2103,43 @@ export default function AdminCalendar() {
               </div>
             )}
           </div>
-          {selectedService?.is_group_session && nbSlotCapacity && (
+          {nbBookingMode === 'customer' && selectedService?.is_group_session && nbSlotCapacity && (
             <p className={cn('text-xs px-2.5 py-1.5 rounded-lg inline-block', nbSlotCapacity.taken >= nbSlotCapacity.max ? 'bg-red-50 text-red-600' : 'bg-gray-50 text-gray-600')}>
               {nbSlotCapacity.taken} of {nbSlotCapacity.max} spots booked at this time
             </p>
           )}
 
-          <hr className="border-gray-100" />
-          <div className="relative">
-            <Input
-              label="Customer name"
-              value={nbName}
-              onChange={e => { setNbName(e.target.value); setNbSelectedCustomerId(null); searchCustomers(e.target.value) }}
-              onFocus={() => nbName.length >= 2 && setNbShowSuggestions(true)}
-              onBlur={() => setTimeout(() => setNbShowSuggestions(false), 150)}
-              required
-              placeholder="Start typing a name…"
-              autoComplete="off"
-            />
-            {nbShowSuggestions && nbSuggestions.length > 0 && (
-              <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
-                {nbSuggestions.map(c => (
-                  <button key={c.id} type="button" className="w-full px-3 py-2.5 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
-                    onMouseDown={() => { setNbName(c.name); setNbEmail(c.email); setNbPhone(c.phone ?? ''); setNbSelectedCustomerId(c.id); setNbShowSuggestions(false) }}>
-                    <p className="text-sm font-medium text-gray-900">{c.name}</p>
-                    <p className="text-xs text-gray-500">{c.email}{c.phone ? ` · ${c.phone}` : ''}</p>
-                  </button>
-                ))}
+          {nbBookingMode === 'customer' && (
+            <>
+              <hr className="border-gray-100" />
+              <div className="relative">
+                <Input
+                  label="Customer name"
+                  value={nbName}
+                  onChange={e => { setNbName(e.target.value); setNbSelectedCustomerId(null); searchCustomers(e.target.value) }}
+                  onFocus={() => nbName.length >= 2 && setNbShowSuggestions(true)}
+                  onBlur={() => setTimeout(() => setNbShowSuggestions(false), 150)}
+                  required
+                  placeholder="Start typing a name…"
+                  autoComplete="off"
+                />
+                {nbShowSuggestions && nbSuggestions.length > 0 && (
+                  <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                    {nbSuggestions.map(c => (
+                      <button key={c.id} type="button" className="w-full px-3 py-2.5 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                        onMouseDown={() => { setNbName(c.name); setNbEmail(c.email); setNbPhone(c.phone ?? ''); setNbSelectedCustomerId(c.id); setNbShowSuggestions(false) }}>
+                        <p className="text-sm font-medium text-gray-900">{c.name}</p>
+                        <p className="text-xs text-gray-500">{c.email}{c.phone ? ` · ${c.phone}` : ''}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <Input label="Email" type="email" value={nbEmail} onChange={e => setNbEmail(e.target.value)} required placeholder="jane@example.com" />
-          <Input label="Phone" type="tel" value={nbPhone} onChange={e => setNbPhone(e.target.value)} placeholder="+44 7700 900000" />
-          <Textarea label="Notes" value={nbNotes} onChange={e => setNbNotes(e.target.value)} placeholder="Optional notes…" />
+              <Input label="Email" type="email" value={nbEmail} onChange={e => setNbEmail(e.target.value)} required placeholder="jane@example.com" />
+              <Input label="Phone" type="tel" value={nbPhone} onChange={e => setNbPhone(e.target.value)} placeholder="+44 7700 900000" />
+              <Textarea label="Notes" value={nbNotes} onChange={e => setNbNotes(e.target.value)} placeholder="Optional notes…" />
+            </>
+          )}
           {nbError && <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{nbError}</p>}
           {nbSkippedDates.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 space-y-1">
@@ -1918,7 +2155,11 @@ export default function AdminCalendar() {
             ) : (
               <>
                 <Button variant="secondary" onClick={closeNewBooking}>Cancel</Button>
-                <Button onClick={handleCreateBooking} loading={nbSaving}>{nbRepeat === 'none' ? 'Create Booking' : 'Create Bookings'}</Button>
+                <Button onClick={handleCreateBooking} loading={nbSaving}>
+                  {nbBookingMode === 'open'
+                    ? (nbRepeat === 'none' ? 'Open Session' : 'Open Sessions')
+                    : (nbRepeat === 'none' ? 'Create Booking' : 'Create Bookings')}
+                </Button>
               </>
             )}
           </div>
@@ -2500,6 +2741,67 @@ export default function AdminCalendar() {
             </li>
           ))}
         </ul>
+      </Modal>
+
+      {/* ── Session Attendees Modal (open group-session slots) ── */}
+      <Modal
+        open={!!selectedSession}
+        onClose={() => setSelectedSession(null)}
+        title={selectedSession ? `${selectedSession.service?.name} — ${format(parseISO(selectedSession.event_date), 'EEE d MMM')}, ${selectedSession.start_time.slice(0, 5)}` : ''}
+        size="sm"
+      >
+        {selectedSession && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              {sessionAttendeesLoading ? '…' : `${sessionCapacityMap.get(selectedSession.id)?.taken ?? 0} of ${sessionCapacityMap.get(selectedSession.id)?.max ?? 8} spots booked`}
+            </p>
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <Users className="h-3.5 w-3.5" /> Attendees
+              </p>
+              {sessionAttendeesLoading ? (
+                <p className="text-sm text-gray-400">Loading…</p>
+              ) : sessionAttendees.length === 0 ? (
+                <p className="text-sm text-gray-400">No bookings yet — this session is still open online.</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {sessionAttendees.map(a => (
+                    <li key={a.id}>
+                      <button
+                        onClick={() => openAttendeeBooking(a.id)}
+                        className="w-full flex justify-between text-sm bg-gray-50 hover:bg-gray-100 rounded-lg px-3 py-1.5 transition-colors text-left"
+                      >
+                        <span className="text-gray-800">{a.customer?.name ?? 'Unknown'}</span>
+                        <span className="text-gray-500">{a.spots_booked} spot{a.spots_booked !== 1 ? 's' : ''}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {sessionCancelOpen ? (
+              <div className="border border-red-200 bg-red-50 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-semibold text-red-800">Reason for cancelling this session (required)</p>
+                {sessionAttendees.length > 0 && (
+                  <p className="text-xs text-red-700">This will cancel all {sessionAttendees.length} attendee booking{sessionAttendees.length !== 1 ? 's' : ''}.</p>
+                )}
+                <Textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder="e.g. Not enough demand, room unavailable…" rows={2} />
+                <div className="flex gap-2">
+                  <Button variant="secondary" size="sm" onClick={() => { setSessionCancelOpen(false); setCancelReason('') }} className="shrink-0">Back</Button>
+                  <Button fullWidth variant="danger" size="sm" loading={sessionCanceling} disabled={!cancelReason.trim()} onClick={() => handleCancelSession(cancelReason)}>
+                    Confirm Cancellation
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Button fullWidth variant="danger" size="sm" onClick={() => { setSessionCancelOpen(true); setCancelReason('') }}>
+                <XCircle className="h-4 w-4" />
+                Cancel Session
+              </Button>
+            )}
+          </div>
+        )}
       </Modal>
     </div>
   )

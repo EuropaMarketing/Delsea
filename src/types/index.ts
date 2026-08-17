@@ -72,10 +72,14 @@ export interface ServiceSession {
   id: string
   business_id: string
   service_id: string
-  day_of_week: number
+  day_of_week: number | null
   start_time: string
   is_active: boolean
   created_at: string
+  event_date: string | null
+  staff_id: string | null
+  resource_id: string | null
+  max_capacity_override: number | null
 }
 
 export interface Availability {

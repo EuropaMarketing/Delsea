@@ -17,7 +17,7 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function DateTimePicker() {
   const navigate = useNavigate()
-  const { draft, services, staff, setDate, setTimeSlot, setSpotsBooked, setStaffList, rescheduleBookingId } = useBookingStore()
+  const { draft, services, staff, setDate, setTimeSlot, setSpotsBooked, setStaffList, setSessionId, rescheduleBookingId } = useBookingStore()
 
   const [calMonth, setCalMonth] = useState(() =>
     draft.date ? startOfMonth(draft.date) : startOfMonth(new Date())
@@ -149,18 +149,17 @@ export default function DateTimePicker() {
 
     if (service.is_group_session) {
       if (!groupSessions.length) return map
-      const maxCap = service.max_capacity ?? 8
       for (const day of eachDayOfInterval({ start: startOfMonth(calMonth), end: endOfMonth(calMonth) })) {
         if (isBefore(day, todayStart)) continue
-        const daySessions = groupSessions.filter((s) => s.day_of_week === getDay(day))
-        if (!daySessions.length) continue
         const dayKey = format(day, 'yyyy-MM-dd')
+        const daySessions = groupSessions.filter((s) => s.day_of_week === getDay(day) || s.event_date === dayKey)
+        if (!daySessions.length) continue
         const counts: Record<string, number> = {}
         for (const b of monthBookings.filter((b) => b.service_id === service.id && b.starts_at.startsWith(dayKey))) {
           const t = format(parseISO(b.starts_at), 'HH:mm')
           counts[t] = (counts[t] ?? 0) + (b.spots_booked ?? 1)
         }
-        const available = daySessions.filter((s) => (counts[s.start_time.substring(0, 5)] ?? 0) < maxCap)
+        const available = daySessions.filter((s) => (counts[s.start_time.substring(0, 5)] ?? 0) < (s.max_capacity_override ?? service.max_capacity ?? 8))
         if (available.length) map.set(dayKey, available.map((s) => s.start_time.substring(0, 5)))
       }
       return map
@@ -247,21 +246,25 @@ export default function DateTimePicker() {
   // Capacity-aware slot list for group sessions on the selected date
   const groupSlots = useMemo(() => {
     if (!service?.is_group_session || !selectedDate || !groupSessions.length) return []
+    const dayKey = format(selectedDate, 'yyyy-MM-dd')
     const daySessions = groupSessions
-      .filter((s) => s.day_of_week === getDay(selectedDate))
+      .filter((s) => s.day_of_week === getDay(selectedDate) || s.event_date === dayKey)
       .sort((a, b) => a.start_time.localeCompare(b.start_time))
     if (!daySessions.length) return []
-    const dayKey = format(selectedDate, 'yyyy-MM-dd')
     const counts: Record<string, number> = {}
     for (const b of monthBookings.filter((b) => b.service_id === service.id && b.starts_at.startsWith(dayKey))) {
       const t = format(parseISO(b.starts_at), 'HH:mm')
       counts[t] = (counts[t] ?? 0) + (b.spots_booked ?? 1)
     }
-    const maxCap = service.max_capacity ?? 8
-    return daySessions.map((s) => ({
-      time: s.start_time.substring(0, 5),
-      spotsLeft: Math.max(0, maxCap - (counts[s.start_time.substring(0, 5)] ?? 0)),
-    }))
+    return daySessions.map((s) => {
+      const time = s.start_time.substring(0, 5)
+      const maxCap = s.max_capacity_override ?? service.max_capacity ?? 8
+      return {
+        time,
+        spotsLeft: Math.max(0, maxCap - (counts[time] ?? 0)),
+        sessionId: s.event_date ? s.id : null,
+      }
+    })
   }, [service, selectedDate, groupSessions, monthBookings])
 
   const monthHasSlots = useMemo(
@@ -381,9 +384,10 @@ export default function DateTimePicker() {
     setTimeSlot('')
   }
 
-  function handleSlotClick(slot: string) {
+  function handleSlotClick(slot: string, sessionId: string | null = null) {
     setSelectedSlot(slot)
     setTimeSlot(slot)
+    setSessionId(sessionId)
   }
 
   const calDays = eachDayOfInterval({ start: startOfMonth(calMonth), end: endOfMonth(calMonth) })
@@ -527,7 +531,7 @@ export default function DateTimePicker() {
                     <button
                       key={slot.time}
                       disabled={slot.spotsLeft === 0}
-                      onClick={() => slot.spotsLeft > 0 && handleSlotClick(slot.time)}
+                      onClick={() => slot.spotsLeft > 0 && handleSlotClick(slot.time, slot.sessionId)}
                       className={cn(
                         'w-full flex items-center justify-between px-4 py-3 text-sm font-medium border transition-all rounded-(--border-radius-sm)',
                         slot.spotsLeft === 0
