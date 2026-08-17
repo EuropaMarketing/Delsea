@@ -27,7 +27,7 @@ const SERVICE_COLORS = [
   '#7C3AED', '#DB2777', '#0891B2', '#059669', '#D97706', '#DC2626',
 ]
 
-type RichBooking = Booking & {
+type RichBooking = Omit<Booking, 'staff' | 'service' | 'customer' | 'price_override'> & {
   discount_amount: number
   payment_status: string
   deposit_charged: number

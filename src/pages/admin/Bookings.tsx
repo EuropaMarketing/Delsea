@@ -14,7 +14,7 @@ import type { Booking, BookingStatus, Resource } from '@/types'
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 const PAGE_SIZE = 20
 
-type ExtBooking = Booking & {
+type ExtBooking = Omit<Booking, 'staff' | 'service' | 'customer'> & {
   service: { name: string; price: number }
   staff: { name: string } | null
   customer: { name: string; email: string; sumup_card_token: string | null }
