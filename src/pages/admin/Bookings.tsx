@@ -24,6 +24,10 @@ type ExtBooking = Booking & {
   checked_in_at: string | null
 }
 
+function bookingPrice(b: { price_override?: number | null; service?: { price: number } | null }): number {
+  return b.price_override ?? b.service?.price ?? 0
+}
+
 type ActivityLogEntry = {
   id: string
   actor_type: string
@@ -192,7 +196,7 @@ export default function AdminBookings() {
   function openBooking(b: ExtBooking) {
     setSelectedBooking(b)
     setSelectedBookingForm(null)
-    const remaining = (b.service?.price ?? 0) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0) - (b.deposit_charged ?? 0)
+    const remaining = bookingPrice(b) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0) - (b.deposit_charged ?? 0)
     setChargeAmount(remaining > 0 ? (remaining / 100).toFixed(2) : '')
     setChargeType('balance')
     setChargeError('')
@@ -236,7 +240,7 @@ export default function AdminBookings() {
       b.service?.name,
       b.staff?.name ?? 'N/A',
       b.status,
-      b.service ? (b.service.price / 100).toFixed(2) : '0.00',
+      b.service ? (bookingPrice(b) / 100).toFixed(2) : '0.00',
     ])
     const csv = [header, ...rows].map((r) => r.join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
@@ -298,7 +302,7 @@ export default function AdminBookings() {
             <div className="flex items-center justify-between">
               <p className="text-xs text-gray-400">{format(parseISO(b.starts_at), 'dd/MM/yyyy HH:mm')}</p>
               <p className="text-sm font-bold text-gray-900">
-                {b.service ? formatCurrency(b.service.price - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0)) : '—'}
+                {b.service ? formatCurrency(bookingPrice(b) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0)) : '—'}
               </p>
             </div>
           </button>
@@ -351,7 +355,7 @@ export default function AdminBookings() {
                     </Badge>
                   </td>
                   <td className="px-4 py-3 font-bold text-gray-900 whitespace-nowrap">
-                    {b.service ? formatCurrency(b.service.price - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0)) : '—'}
+                    {b.service ? formatCurrency(bookingPrice(b) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0)) : '—'}
                   </td>
                   <td className="px-4 py-3">
                     <button
@@ -410,7 +414,7 @@ export default function AdminBookings() {
                 { label: 'Staff', value: selectedBooking.staff?.name ?? '—' },
                 { label: 'Date', value: format(parseISO(selectedBooking.starts_at), 'EEE d MMM yyyy') },
                 { label: 'Time', value: `${format(parseISO(selectedBooking.starts_at), 'HH:mm')} – ${format(parseISO(selectedBooking.ends_at), 'HH:mm')}` },
-                { label: 'Price', value: selectedBooking.service ? formatCurrency(selectedBooking.service.price - (selectedBooking.discount_amount ?? 0) - (selectedBooking.gift_voucher_amount ?? 0)) : '—' },
+                { label: 'Price', value: selectedBooking.service ? formatCurrency(bookingPrice(selectedBooking) - (selectedBooking.discount_amount ?? 0) - (selectedBooking.gift_voucher_amount ?? 0)) : '—' },
               ].map(({ label, value }) => (
                 <div key={label}>
                   <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</dt>

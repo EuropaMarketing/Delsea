@@ -70,7 +70,7 @@ export default function AdminClients() {
           .order('name'),
         supabase
           .from('bookings')
-          .select('id, customer_id, starts_at, ends_at, status, service:services(name, price), staff:staff(name)')
+          .select('id, customer_id, starts_at, ends_at, status, price_override, service:services(name, price), staff:staff(name)')
           .eq('business_id', BUSINESS_ID)
           .order('starts_at', { ascending: false }),
       ])
@@ -82,7 +82,7 @@ export default function AdminClients() {
       const rows: ClientRow[] = customers.map((c) => {
         const cBks = bookings.filter((b) => b.customer_id === c.id)
         const nonCancelled = cBks.filter((b) => b.status !== 'cancelled')
-        const totalSpent = nonCancelled.reduce((sum, b) => sum + (b.service?.price ?? 0), 0)
+        const totalSpent = nonCancelled.reduce((sum, b) => sum + (b.price_override ?? b.service?.price ?? 0), 0)
         const upcoming = nonCancelled.filter((b) => isBefore(now, parseISO(b.starts_at)))
         const past = nonCancelled.filter((b) => !isBefore(now, parseISO(b.starts_at)))
         const lastVisit = past[0]?.starts_at ?? null
@@ -413,7 +413,7 @@ function BookingRow({ booking }: { booking: Booking }) {
         </p>
       </div>
       <div className="flex items-center gap-3 shrink-0">
-        <span className="font-semibold text-gray-900">{formatCurrency(booking.service?.price ?? 0)}</span>
+        <span className="font-semibold text-gray-900">{formatCurrency(booking.price_override ?? booking.service?.price ?? 0)}</span>
         <Badge variant={statusBadgeVariant(booking.status)} className="capitalize">{booking.status}</Badge>
       </div>
     </div>

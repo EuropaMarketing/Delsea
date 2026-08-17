@@ -32,6 +32,7 @@ type CompletedBooking = {
   staff_id: string | null
   discount_amount: number
   gift_voucher_amount: number
+  price_override: number | null
 }
 
 type StaffSummary = Staff & {
@@ -43,7 +44,7 @@ type StaffSummary = Staff & {
 }
 
 function bookingTotal(b: CompletedBooking) {
-  return (b.service?.price ?? 0) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0)
+  return (b.price_override ?? b.service?.price ?? 0) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0)
 }
 
 function calcStaffPayment(b: CompletedBooking, member: Staff): number {
@@ -79,7 +80,7 @@ export default function AdminPayroll() {
     const { periodStart, periodEnd } = getPayPeriod(month)
     supabase
       .from('bookings')
-      .select('id, staff_id, starts_at, ends_at, discount_amount, gift_voucher_amount, service:services(name, price, duration_minutes, commission_type, commission_rate)')
+      .select('id, staff_id, starts_at, ends_at, discount_amount, gift_voucher_amount, price_override, service:services(name, price, duration_minutes, commission_type, commission_rate)')
       .eq('business_id', BUSINESS_ID)
       .eq('status', 'completed')
       .gte('starts_at', periodStart.toISOString())

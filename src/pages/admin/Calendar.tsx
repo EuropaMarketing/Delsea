@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import {
-  format, addDays, subDays, startOfDay, endOfDay,
-  parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday,
+  format, addDays, subDays, addWeeks, subWeeks, startOfDay, endOfDay, startOfWeek, endOfWeek,
+  parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday, isSameDay,
 } from 'date-fns'
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
@@ -32,10 +32,17 @@ type RichBooking = Booking & {
   payment_status: string
   deposit_charged: number
   checked_in_at: string | null
+  price_override: number | null
+  equipment_resource_id?: string | null
   service: { name: string; category: string; price: number }
   staff: { name: string } | null
   customer: { name: string; email: string; phone: string | null; sumup_card_token: string | null }
   resource: { name: string } | null
+  equipment_resource?: { name: string } | null
+}
+
+function bookingPrice(b: { price_override?: number | null; service?: { price: number } | null }): number {
+  return b.price_override ?? b.service?.price ?? 0
 }
 
 type BlockedTime = {
@@ -65,6 +72,7 @@ interface DragState {
 
 export default function AdminCalendar() {
   const [selectedDay, setSelectedDay] = useState(new Date())
+  const [viewMode, setViewMode] = useState<'day' | 'week'>('day')
   const [bookings, setBookings] = useState<RichBooking[]>([])
   const [blockedTimes, setBlockedTimes] = useState<BlockedTime[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
@@ -74,7 +82,8 @@ export default function AdminCalendar() {
   const [ratings, setRatings] = useState<Record<string, { avg: number; count: number }>>({})
 
   // New booking modal
-  const [newBookingStaffId, setNewBookingStaffId] = useState<string | null>(null)
+  const [nbModalOpen, setNbModalOpen] = useState(false)
+  const [nbStaffId, setNbStaffId] = useState<string | null>(null)
   const [nbServiceId, setNbServiceId] = useState('')
   const [nbDate, setNbDate] = useState('')
   const [nbTime, setNbTime] = useState('')
@@ -82,6 +91,8 @@ export default function AdminCalendar() {
   const [nbEmail, setNbEmail] = useState('')
   const [nbPhone, setNbPhone] = useState('')
   const [nbNotes, setNbNotes] = useState('')
+  const [nbPrice, setNbPrice] = useState('')
+  const [nbPriceTouched, setNbPriceTouched] = useState(false)
   const [nbSaving, setNbSaving] = useState(false)
   const [nbError, setNbError] = useState('')
   const [nbSuggestions, setNbSuggestions] = useState<Customer[]>([])
@@ -112,6 +123,19 @@ export default function AdminCalendar() {
   const [editNotes, setEditNotes] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
+  // Customer / service / staff / date-time / price — full detail edit
+  const [editCustomerId, setEditCustomerId] = useState<string | null>(null)
+  const [editCustomerName, setEditCustomerName] = useState('')
+  const [editCustomerEmail, setEditCustomerEmail] = useState('')
+  const [editCustomerPhone, setEditCustomerPhone] = useState('')
+  const [editCustomerSuggestions, setEditCustomerSuggestions] = useState<Customer[]>([])
+  const [editCustomerShowSuggestions, setEditCustomerShowSuggestions] = useState(false)
+  const [editServiceId, setEditServiceId] = useState('')
+  const [editStaffId, setEditStaffId] = useState<string | null>(null)
+  const [editDate, setEditDate] = useState('')
+  const [editTime, setEditTime] = useState('')
+  const [editPrice, setEditPrice] = useState('')
+  const [editPriceTouched, setEditPriceTouched] = useState(false)
   // Token state in edit mode
   const [editTokenInfo, setEditTokenInfo] = useState<{ membershipId: string; planName: string; tokens: number } | null>(null)
   const [editTokenApplied, setEditTokenApplied] = useState(false)
@@ -144,10 +168,13 @@ export default function AdminCalendar() {
   const [chargeSuccess, setChargeSuccess] = useState(false)
 
   // Cell click popover (new booking vs block time)
-  const [cellPopover, setCellPopover] = useState<{ staffId: string; time: string; pageX: number; pageY: number } | null>(null)
+  const [cellPopover, setCellPopover] = useState<{ staffId: string | null; date: Date; time: string; pageX: number; pageY: number } | null>(null)
 
   // Resize drag
   const [drag, setDrag] = useState<DragState | null>(null)
+
+  // Move drag (native HTML5 drag-and-drop, reposition to a different time/staff/day)
+  const [draggingBookingId, setDraggingBookingId] = useState<string | null>(null)
 
   // Current time line
   const [now, setNow] = useState(new Date())
@@ -164,7 +191,7 @@ export default function AdminCalendar() {
       ? ((now.getHours() - START_HOUR) * 60 + now.getMinutes()) / 60 * HOUR_HEIGHT - 120
       : 0
     scrollRef.current.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
-  }, [selectedDay])
+  }, [selectedDay, viewMode])
 
   useEffect(() => {
     async function loadRatings() {
@@ -194,8 +221,10 @@ export default function AdminCalendar() {
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const dayStart = startOfDay(selectedDay).toISOString()
-      const dayEnd = endOfDay(selectedDay).toISOString()
+      const rangeStart = viewMode === 'week' ? startOfWeek(selectedDay, { weekStartsOn: 1 }) : startOfDay(selectedDay)
+      const rangeEnd = viewMode === 'week' ? endOfWeek(selectedDay, { weekStartsOn: 1 }) : endOfDay(selectedDay)
+      const dayStart = rangeStart.toISOString()
+      const dayEnd = rangeEnd.toISOString()
 
       const [staffRes, bookRes, svcRes, blockRes, resRes, equipRes] = await Promise.all([
         supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name'),
@@ -228,7 +257,7 @@ export default function AdminCalendar() {
       setLoading(false)
     }
     load()
-  }, [selectedDay])
+  }, [selectedDay, viewMode])
 
   // Drag-to-resize
   useEffect(() => {
@@ -276,9 +305,9 @@ export default function AdminCalendar() {
     return Object.fromEntries(cats.map((c, i) => [c, SERVICE_COLORS[i % SERVICE_COLORS.length]]))
   }, [bookings])
 
-  function positionBlock(startsAt: string, endsAt: string) {
-    const dayFloor = setMinutes(setHours(selectedDay, START_HOUR), 0)
-    const dayCeil = setMinutes(setHours(selectedDay, END_HOUR), 0)
+  function positionBlock(startsAt: string, endsAt: string, refDay: Date = selectedDay) {
+    const dayFloor = setMinutes(setHours(refDay, START_HOUR), 0)
+    const dayCeil = setMinutes(setHours(refDay, END_HOUR), 0)
     const start = parseISO(startsAt)
     const end = parseISO(endsAt)
     const clampedStart = start < dayFloor ? dayFloor : start
@@ -288,37 +317,105 @@ export default function AdminCalendar() {
     return { top, height }
   }
 
-  function handleCellClick(e: React.MouseEvent<HTMLDivElement>, staffId: string) {
-    if ((e.target as HTMLElement).closest('[data-booking]')) return
-    if (drag) return
-    const member = staff.find(s => s.id === staffId)
-    if (member?.on_holiday) return
-    const rect = e.currentTarget.getBoundingClientRect()
+  // Packs same-day overlapping bookings into side-by-side sub-columns (week view, which
+  // has no staff-column split, so two staff members' bookings can land at the same time).
+  function packOverlaps(items: RichBooking[]): Array<RichBooking & { col: number; cols: number }> {
+    const sorted = [...items].sort((a, b) => parseISO(a.starts_at).getTime() - parseISO(b.starts_at).getTime())
+    const colEndTimes: number[] = []
+    const placed: Array<RichBooking & { col: number }> = []
+    for (const item of sorted) {
+      const start = parseISO(item.starts_at).getTime()
+      const end = parseISO(item.ends_at).getTime()
+      let col = colEndTimes.findIndex(t => t <= start)
+      if (col === -1) { col = colEndTimes.length; colEndTimes.push(end) } else { colEndTimes[col] = end }
+      placed.push({ ...item, col })
+    }
+    const cols = Math.max(colEndTimes.length, 1)
+    return placed.map(p => ({ ...p, cols }))
+  }
+
+  function timeFromPointerY(e: React.MouseEvent | React.DragEvent, el: HTMLElement) {
+    const rect = el.getBoundingClientRect()
     const y = e.clientY - rect.top
     const totalMinutes = START_HOUR * 60 + (y / HOUR_HEIGHT) * 60
     const snapped = Math.round(totalMinutes / 15) * 15
     const h = Math.min(Math.floor(snapped / 60), END_HOUR - 1)
     const m = snapped % 60
-    const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-    setCellPopover({ staffId, time, pageX: e.clientX, pageY: e.clientY })
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+  }
+
+  function handleDragStart(e: React.DragEvent<HTMLDivElement>, bookingId: string) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', bookingId)
+    setDraggingBookingId(bookingId)
+  }
+
+  // targetStaffId: pass explicitly (including null for "unassigned") in day view to reassign staff;
+  // omit it in week view so the booking's existing staff stays unchanged (week columns are days, not staff).
+  async function handleDropBooking(e: React.DragEvent<HTMLDivElement>, targetDate: Date, targetStaffId?: string | null) {
+    e.preventDefault()
+    const bookingId = draggingBookingId ?? e.dataTransfer.getData('text/plain')
+    setDraggingBookingId(null)
+    const booking = bookings.find(b => b.id === bookingId)
+    if (!booking) return
+    const newStaffId = targetStaffId === undefined ? booking.staff_id : targetStaffId
+    const targetMember = newStaffId ? staff.find(s => s.id === newStaffId) : null
+    if (targetMember?.on_holiday) return
+
+    const durationMinutes = differenceInMinutes(parseISO(booking.ends_at), parseISO(booking.starts_at))
+    const rect = e.currentTarget.getBoundingClientRect()
+    const y = e.clientY - rect.top
+    const totalMinutes = START_HOUR * 60 + (y / HOUR_HEIGHT) * 60
+    const snapped = Math.round(totalMinutes / 15) * 15
+    const maxStart = Math.max(END_HOUR * 60 - durationMinutes, START_HOUR * 60)
+    const clamped = Math.min(Math.max(snapped, START_HOUR * 60), maxStart)
+    const h = Math.floor(clamped / 60), m = clamped % 60
+    const newStart = setMinutes(setHours(startOfDay(targetDate), h), m)
+    const newEnd = addMinutes(newStart, durationMinutes)
+
+    if (newStart.toISOString() === booking.starts_at && newStaffId === booking.staff_id) return
+
+    const { error } = await supabase
+      .from('bookings')
+      .update({ starts_at: newStart.toISOString(), ends_at: newEnd.toISOString(), staff_id: newStaffId })
+      .eq('id', booking.id)
+    if (!error) {
+      const staffObj = newStaffId ? staff.find(s => s.id === newStaffId) : null
+      setBookings(prev => prev.map(b => b.id === booking.id
+        ? { ...b, starts_at: newStart.toISOString(), ends_at: newEnd.toISOString(), staff_id: newStaffId, staff: staffObj ? { name: staffObj.name } : null }
+        : b,
+      ))
+    }
+  }
+
+  function handleCellClick(e: React.MouseEvent<HTMLDivElement>, staffId: string | null, date: Date) {
+    if ((e.target as HTMLElement).closest('[data-booking]')) return
+    if (drag) return
+    const member = staffId ? staff.find(s => s.id === staffId) : null
+    if (member?.on_holiday) return
+    const time = timeFromPointerY(e, e.currentTarget)
+    setCellPopover({ staffId, date, time, pageX: e.clientX, pageY: e.clientY })
   }
 
   function openNewBookingFromPopover() {
     if (!cellPopover) return
-    setNewBookingStaffId(cellPopover.staffId)
-    setNbDate(format(selectedDay, 'yyyy-MM-dd'))
+    setNbStaffId(cellPopover.staffId ?? staff.find(s => !s.on_holiday)?.id ?? null)
+    setNbDate(format(cellPopover.date, 'yyyy-MM-dd'))
     setNbTime(cellPopover.time)
     setNbServiceId(services[0]?.id ?? '')
     setNbName(''); setNbEmail(''); setNbPhone(''); setNbNotes('')
+    setNbPrice(services[0] ? (services[0].price / 100).toFixed(2) : '')
+    setNbPriceTouched(false)
     setNbError(''); setNbSuggestions([]); setNbShowSuggestions(false); setNbSelectedCustomerId(null)
+    setNbModalOpen(true)
     setCellPopover(null)
   }
 
   function openBlockTimeFromPopover() {
     if (!cellPopover) return
     const endTime = format(addMinutes(new Date(`2000-01-01T${cellPopover.time}:00`), 60), 'HH:mm')
-    setBtStaffId(cellPopover.staffId)
-    setBtDate(format(selectedDay, 'yyyy-MM-dd'))
+    setBtStaffId(cellPopover.staffId ?? staff.find(s => !s.on_holiday)?.id ?? '')
+    setBtDate(format(cellPopover.date, 'yyyy-MM-dd'))
     setBtStart(cellPopover.time)
     setBtEnd(endTime)
     setBtReason('Booked Time')
@@ -328,7 +425,7 @@ export default function AdminCalendar() {
   }
 
   function closeNewBooking() {
-    setNewBookingStaffId(null)
+    setNbModalOpen(false)
     setNbSuggestions([]); setNbShowSuggestions(false); setNbSelectedCustomerId(null)
   }
 
@@ -402,12 +499,39 @@ export default function AdminCalendar() {
   }
 
 
+  async function refreshEditTokenInfo(email: string | undefined, category: string | undefined, bookingId: string, checkExistingRedemption: boolean) {
+    setEditTokenInfo(null)
+    setEditTokenApplied(false)
+    if (!email) return
+    const [tokenRes, txRes] = await Promise.all([
+      supabase.rpc('get_customer_token_balance', {
+        p_email: email,
+        p_business_id: BUSINESS_ID,
+        p_category: category ?? null,
+      }),
+      checkExistingRedemption
+        ? supabase
+          .from('membership_transactions')
+          .select('id, membership_id')
+          .eq('booking_id', bookingId)
+          .eq('type', 'redeem')
+          .maybeSingle()
+        : Promise.resolve({ data: null }),
+    ])
+    if (tokenRes.data && tokenRes.data.length > 0) {
+      const row = tokenRes.data[0] as { membership_id: string; plan_name: string; tokens_remaining: number }
+      setEditTokenInfo({ membershipId: row.membership_id, planName: row.plan_name, tokens: row.tokens_remaining })
+    }
+    if (txRes.data) setEditTokenApplied(true)
+  }
+
   async function openEditMode() {
     if (!selectedBooking) return
     setEditMode(true)
+    setEditError('')
     setEditNotes(selectedBooking.notes ?? '')
     setEditResourceId(selectedBooking.resource_id ?? null)
-    setEditEquipmentResourceId((selectedBooking as unknown as { equipment_resource_id: string | null }).equipment_resource_id ?? null)
+    setEditEquipmentResourceId(selectedBooking.equipment_resource_id ?? null)
     setEditVoucherCode('')
     setEditVoucherError('')
     setEditVoucherApplied((selectedBooking.gift_voucher_amount ?? 0) > 0)
@@ -416,29 +540,42 @@ export default function AdminCalendar() {
     setEditDiscountError('')
     setEditDiscountApplied((selectedBooking.discount_amount ?? 0) > 0)
     setEditDiscountAmount(selectedBooking.discount_amount ?? 0)
-    setEditTokenInfo(null)
-    setEditTokenApplied(false)
 
-    const email = selectedBooking.customer?.email
-    if (email) {
-      const [tokenRes, txRes] = await Promise.all([
-        supabase.rpc('get_customer_token_balance', {
-          p_email: email,
-          p_business_id: BUSINESS_ID,
-          p_category: selectedBooking.service?.category ?? null,
-        }),
-        supabase
-          .from('membership_transactions')
-          .select('id, membership_id')
-          .eq('booking_id', selectedBooking.id)
-          .eq('type', 'redeem')
-          .maybeSingle(),
-      ])
-      if (tokenRes.data && tokenRes.data.length > 0) {
-        const row = tokenRes.data[0] as { membership_id: string; plan_name: string; tokens_remaining: number }
-        setEditTokenInfo({ membershipId: row.membership_id, planName: row.plan_name, tokens: row.tokens_remaining })
-      }
-      if (txRes.data) setEditTokenApplied(true)
+    setEditCustomerId(selectedBooking.customer_id)
+    setEditCustomerName(selectedBooking.customer?.name ?? '')
+    setEditCustomerEmail(selectedBooking.customer?.email ?? '')
+    setEditCustomerPhone(selectedBooking.customer?.phone ?? '')
+    setEditCustomerSuggestions([]); setEditCustomerShowSuggestions(false)
+    setEditServiceId(selectedBooking.service_id)
+    setEditStaffId(selectedBooking.staff_id)
+    setEditDate(format(parseISO(selectedBooking.starts_at), 'yyyy-MM-dd'))
+    setEditTime(format(parseISO(selectedBooking.starts_at), 'HH:mm'))
+    setEditPrice((bookingPrice(selectedBooking) / 100).toFixed(2))
+    setEditPriceTouched(false)
+
+    await refreshEditTokenInfo(selectedBooking.customer?.email, selectedBooking.service?.category, selectedBooking.id, true)
+  }
+
+  async function editSearchCustomers(query: string) {
+    if (query.length < 2) { setEditCustomerSuggestions([]); setEditCustomerShowSuggestions(false); return }
+    const { data } = await supabase
+      .from('customers')
+      .select('id, name, email, phone, business_id, user_id, created_at')
+      .eq('business_id', BUSINESS_ID)
+      .ilike('name', `%${query}%`)
+      .order('name')
+      .limit(8)
+    if (data) { setEditCustomerSuggestions(data as Customer[]); setEditCustomerShowSuggestions(true) }
+  }
+
+  function selectEditCustomer(c: Customer) {
+    setEditCustomerId(c.id)
+    setEditCustomerName(c.name)
+    setEditCustomerEmail(c.email)
+    setEditCustomerPhone(c.phone ?? '')
+    setEditCustomerShowSuggestions(false)
+    if (selectedBooking) {
+      refreshEditTokenInfo(c.email, editService?.category, selectedBooking.id, false)
     }
   }
 
@@ -461,7 +598,7 @@ export default function AdminCalendar() {
   function openBookingDetail(b: RichBooking) {
     setSelectedBooking(b)
     setSelectedBookingForm(null)
-    const remaining = (b.service?.price ?? 0) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0) - (b.deposit_charged ?? 0)
+    const remaining = bookingPrice(b) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0) - (b.deposit_charged ?? 0)
     setChargeAmount(remaining > 0 ? (remaining / 100).toFixed(2) : '')
     setChargeType('balance')
     setChargeError('')
@@ -507,27 +644,63 @@ export default function AdminCalendar() {
 
   async function handleSaveEdit() {
     if (!selectedBooking) return
+    if (!editCustomerId) { setEditError('Select a customer.'); return }
+    const newService = services.find(s => s.id === editServiceId)
+    if (!newService) { setEditError('Select a service.'); return }
+    if (!editDate || !editTime) { setEditError('Date and time are required.'); return }
     setEditSaving(true)
     setEditError('')
     const matchedResource = resources.find((r) => r.id === editResourceId) ?? null
     const matchedEquipment = equipmentResources.find((r) => r.id === editEquipmentResourceId) ?? null
+    const matchedStaff = editStaffId ? staff.find(s => s.id === editStaffId) ?? null : null
+    const startsAt = new Date(`${editDate}T${editTime}:00`)
+    const endsAt = addMinutes(startsAt, newService.duration_minutes)
+    const enteredPrice = editPrice.trim() ? Math.round(parseFloat(editPrice) * 100) : newService.price
+    const priceOverride = Number.isFinite(enteredPrice) && enteredPrice !== newService.price ? enteredPrice : null
+
     const { error } = await supabase
       .from('bookings')
-      .update({ notes: editNotes.trim() || null, resource_id: editResourceId, equipment_resource_id: editEquipmentResourceId })
+      .update({
+        customer_id: editCustomerId,
+        service_id: editServiceId,
+        staff_id: editStaffId,
+        starts_at: startsAt.toISOString(),
+        ends_at: endsAt.toISOString(),
+        price_override: priceOverride,
+        notes: editNotes.trim() || null,
+        resource_id: editResourceId,
+        equipment_resource_id: editEquipmentResourceId,
+      })
       .eq('id', selectedBooking.id)
     if (error) {
       setEditError(error.message)
     } else {
       const resourceObj = matchedResource ? { name: matchedResource.name } : null
-      const equipObj = matchedEquipment ? { name: matchedEquipment.name } : null
-      setBookings(prev => prev.map(b => b.id === selectedBooking.id
-        ? { ...b, notes: editNotes.trim() || null, resource_id: editResourceId, resource: resourceObj }
-        : b,
-      ))
-      setSelectedBooking(prev => prev
-        ? { ...prev, notes: editNotes.trim() || null, resource_id: editResourceId, resource: resourceObj, equipment_resource_id: editEquipmentResourceId, equipment_resource: equipObj }
-        : null,
-      )
+      const customerObj = {
+        name: editCustomerName,
+        email: editCustomerEmail,
+        phone: editCustomerPhone || null,
+        sumup_card_token: editCustomerId === selectedBooking.customer_id ? selectedBooking.customer?.sumup_card_token ?? null : null,
+      }
+      const serviceObj = { name: newService.name, category: newService.category, price: newService.price }
+      const staffObj = matchedStaff ? { name: matchedStaff.name } : null
+      const patch = {
+        customer_id: editCustomerId,
+        customer: customerObj,
+        service_id: editServiceId,
+        service: serviceObj,
+        staff_id: editStaffId,
+        staff: staffObj,
+        starts_at: startsAt.toISOString(),
+        ends_at: endsAt.toISOString(),
+        price_override: priceOverride,
+        notes: editNotes.trim() || null,
+        resource_id: editResourceId,
+        resource: resourceObj,
+        equipment_resource_id: editEquipmentResourceId,
+      }
+      setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, ...patch } : b))
+      setSelectedBooking(prev => prev ? { ...prev, ...patch } : null)
       await refreshActivityLog(selectedBooking.id)
       setEditMode(false)
     }
@@ -626,7 +799,6 @@ export default function AdminCalendar() {
   }
 
   async function handleCreateBooking() {
-    if (!newBookingStaffId) return
     if (!nbServiceId || !nbName.trim() || !nbEmail.trim()) {
       setNbError('Name, email and service are required.')
       return
@@ -635,6 +807,8 @@ export default function AdminCalendar() {
     if (!service || !nbDate || !nbTime) return
     const startsAt = new Date(`${nbDate}T${nbTime}:00`)
     const endsAt = addMinutes(startsAt, service.duration_minutes)
+    const enteredPrice = nbPrice.trim() ? Math.round(parseFloat(nbPrice) * 100) : service.price
+    const priceOverride = Number.isFinite(enteredPrice) && enteredPrice !== service.price ? enteredPrice : null
     setNbSaving(true)
     setNbError('')
     try {
@@ -656,12 +830,13 @@ export default function AdminCalendar() {
         .insert({
           business_id: BUSINESS_ID,
           customer_id: customerId,
-          staff_id: newBookingStaffId,
+          staff_id: nbStaffId,
           service_id: nbServiceId,
           starts_at: startsAt.toISOString(),
           ends_at: endsAt.toISOString(),
           status: 'confirmed',
           notes: nbNotes.trim() || null,
+          price_override: priceOverride,
         })
         .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token)')
         .single()
@@ -680,6 +855,7 @@ export default function AdminCalendar() {
     selectedService && nbDate && nbTime
       ? format(addMinutes(new Date(`${nbDate}T${nbTime}:00`), selectedService.duration_minutes), 'HH:mm')
       : null
+  const editService = services.find(s => s.id === editServiceId)
 
   if (loading) return <FullPageSpinner />
 
@@ -689,6 +865,7 @@ export default function AdminCalendar() {
     todaySelected && now.getHours() >= START_HOUR && now.getHours() < END_HOUR
       ? ((now.getHours() - START_HOUR) * 60 + now.getMinutes()) / 60 * HOUR_HEIGHT
       : null
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(selectedDay, { weekStartsOn: 1 }), i))
 
   return (
     <div className={cn(drag && 'select-none')}>
@@ -697,19 +874,43 @@ export default function AdminCalendar() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">Calendar</h1>
           <p className={cn('text-sm font-medium mt-0.5', todaySelected ? 'text-(--color-primary)' : 'text-gray-500')}>
-            {todaySelected ? 'Today · ' : ''}{format(selectedDay, 'EEEE d MMMM yyyy')}
+            {viewMode === 'week'
+              ? `${format(weekDays[0], 'd MMM')} – ${format(weekDays[6], 'd MMM yyyy')}`
+              : <>{todaySelected ? 'Today · ' : ''}{format(selectedDay, 'EEEE d MMMM yyyy')}</>}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+            <button
+              onClick={() => setViewMode('day')}
+              className={cn('px-3 py-1.5 text-sm font-medium rounded-md transition-colors', viewMode === 'day' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}
+            >
+              Day
+            </button>
+            <button
+              onClick={() => setViewMode('week')}
+              className={cn('px-3 py-1.5 text-sm font-medium rounded-md transition-colors', viewMode === 'week' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}
+            >
+              Week
+            </button>
+          </div>
           <Button variant="secondary" size="sm" onClick={openBlockTime}>
             <Lock className="h-3.5 w-3.5" />
             Block Time
           </Button>
           <div className="flex items-center gap-1">
-            <button onClick={() => setSelectedDay(d => subDays(d, 7))} className="p-2 rounded-lg hover:bg-gray-100" title="Previous week">
+            <button
+              onClick={() => setSelectedDay(d => viewMode === 'week' ? subWeeks(d, 4) : subDays(d, 7))}
+              className="p-2 rounded-lg hover:bg-gray-100"
+              title={viewMode === 'week' ? 'Back 4 weeks' : 'Previous week'}
+            >
               <ChevronsLeft className="h-4 w-4 text-gray-500" />
             </button>
-            <button onClick={() => setSelectedDay(d => subDays(d, 1))} className="p-2 rounded-lg hover:bg-gray-100" title="Previous day">
+            <button
+              onClick={() => setSelectedDay(d => viewMode === 'week' ? subWeeks(d, 1) : subDays(d, 1))}
+              className="p-2 rounded-lg hover:bg-gray-100"
+              title={viewMode === 'week' ? 'Previous week' : 'Previous day'}
+            >
               <ChevronLeft className="h-4 w-4 text-gray-600" />
             </button>
             <input
@@ -718,10 +919,18 @@ export default function AdminCalendar() {
               onChange={e => { if (e.target.value) setSelectedDay(new Date(e.target.value + 'T12:00:00')) }}
               className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white cursor-pointer hover:bg-gray-50 outline-none focus:ring-2 focus:ring-(--color-primary) focus:border-(--color-primary)"
             />
-            <button onClick={() => setSelectedDay(d => addDays(d, 1))} className="p-2 rounded-lg hover:bg-gray-100" title="Next day">
+            <button
+              onClick={() => setSelectedDay(d => viewMode === 'week' ? addWeeks(d, 1) : addDays(d, 1))}
+              className="p-2 rounded-lg hover:bg-gray-100"
+              title={viewMode === 'week' ? 'Next week' : 'Next day'}
+            >
               <ChevronRight className="h-4 w-4 text-gray-600" />
             </button>
-            <button onClick={() => setSelectedDay(d => addDays(d, 7))} className="p-2 rounded-lg hover:bg-gray-100" title="Next week">
+            <button
+              onClick={() => setSelectedDay(d => viewMode === 'week' ? addWeeks(d, 4) : addDays(d, 7))}
+              className="p-2 rounded-lg hover:bg-gray-100"
+              title={viewMode === 'week' ? 'Forward 4 weeks' : 'Next week'}
+            >
               <ChevronsRight className="h-4 w-4 text-gray-500" />
             </button>
             {!todaySelected && (
@@ -733,6 +942,7 @@ export default function AdminCalendar() {
         </div>
       </div>
 
+      {viewMode === 'day' ? (
       <div className="bg-white border border-gray-200 brand-card overflow-hidden overflow-x-auto">
         {/* Staff header row */}
         <div
@@ -803,7 +1013,9 @@ export default function AdminCalendar() {
                   key={member.id}
                   className={cn('relative border-r border-gray-100', member.on_holiday ? 'cursor-not-allowed' : 'cursor-crosshair')}
                   style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
-                  onClick={e => handleCellClick(e, member.id)}
+                  onClick={e => handleCellClick(e, member.id, selectedDay)}
+                  onDragOver={e => !member.on_holiday && e.preventDefault()}
+                  onDrop={e => !member.on_holiday && handleDropBooking(e, selectedDay, member.id)}
                 >
                   {hours.map(h => (
                     <div key={h} className="absolute w-full border-t border-gray-100" style={{ top: (h - START_HOUR) * HOUR_HEIGHT }} />
@@ -852,8 +1064,11 @@ export default function AdminCalendar() {
                       <div
                         key={booking.id}
                         data-booking="true"
+                        draggable={!member.on_holiday}
+                        onDragStart={e => { e.stopPropagation(); handleDragStart(e, booking.id) }}
+                        onDragEnd={() => setDraggingBookingId(null)}
                         onClick={() => !isDragging && openBookingDetail(booking)}
-                        className={cn('absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden transition-shadow z-20 cursor-pointer', isDragging ? 'shadow-lg' : 'hover:brightness-95', booking.status === 'completed' && 'opacity-50')}
+                        className={cn('absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden transition-shadow z-20 cursor-pointer', isDragging ? 'shadow-lg' : 'hover:brightness-95', booking.status === 'completed' && 'opacity-50', draggingBookingId === booking.id && 'opacity-30')}
                         style={{ top, height, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
                         title={`${booking.customer?.name} — ${booking.service?.name}`}
                       >
@@ -882,7 +1097,12 @@ export default function AdminCalendar() {
             })}
 
             {/* Unstaffed column */}
-            <div className="relative border-gray-100 bg-gray-50/30" style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}>
+            <div
+              className="relative border-gray-100 bg-gray-50/30"
+              style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => handleDropBooking(e, selectedDay, null)}
+            >
               {hours.map(h => (
                 <div key={h} className="absolute w-full border-t border-gray-100" style={{ top: (h - START_HOUR) * HOUR_HEIGHT }} />
               ))}
@@ -893,8 +1113,11 @@ export default function AdminCalendar() {
                   <div
                     key={booking.id}
                     data-booking="true"
+                    draggable
+                    onDragStart={e => { e.stopPropagation(); handleDragStart(e, booking.id) }}
+                    onDragEnd={() => setDraggingBookingId(null)}
                     onClick={() => openBookingDetail(booking)}
-                    className={cn('absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden cursor-pointer z-20', booking.status === 'completed' ? 'opacity-50' : 'hover:brightness-95')}
+                    className={cn('absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden cursor-pointer z-20', booking.status === 'completed' ? 'opacity-50' : 'hover:brightness-95', draggingBookingId === booking.id && 'opacity-30')}
                     style={{ top, height, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
                     title={`${booking.customer?.name} — ${booking.service?.name}`}
                   >
@@ -921,6 +1144,96 @@ export default function AdminCalendar() {
           </div>
         </div>
       </div>
+      ) : (
+      <div className="bg-white border border-gray-200 brand-card overflow-hidden overflow-x-auto">
+        {/* Day header row */}
+        <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: `56px repeat(7, minmax(140px, 1fr))` }}>
+          <div className="border-r border-gray-100" />
+          {weekDays.map(day => (
+            <div key={day.toISOString()} className={cn('px-3 py-3 border-r border-gray-100 text-center', isToday(day) && 'bg-(--color-primary)/5')}>
+              <p className="text-xs text-gray-400 uppercase tracking-wide">{format(day, 'EEE')}</p>
+              <p className={cn('text-sm font-semibold mt-0.5', isToday(day) ? 'text-(--color-primary)' : 'text-gray-800')}>{format(day, 'd MMM')}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Time grid */}
+        <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: `${HOUR_HEIGHT * (END_HOUR - START_HOUR)}px` }}>
+          <div className="relative grid" style={{ gridTemplateColumns: `56px repeat(7, minmax(140px, 1fr))` }}>
+            {/* Hour labels */}
+            <div className="border-r border-gray-100">
+              {hours.map(h => (
+                <div key={h} className="text-right pr-2 text-xs text-gray-400 border-t border-gray-100 first:border-t-0" style={{ height: HOUR_HEIGHT }}>
+                  <span className="relative -top-2">{format(setMinutes(setHours(new Date(), h), 0), 'HH:mm')}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Day columns */}
+            {weekDays.map(day => {
+              const dayBookings = packOverlaps(bookings.filter(b => isSameDay(parseISO(b.starts_at), day)))
+              const dayBlocks = blockedTimes.filter(bt => isSameDay(parseISO(bt.starts_at), day))
+              return (
+                <div
+                  key={day.toISOString()}
+                  className="relative border-r border-gray-100 cursor-crosshair"
+                  style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
+                  onClick={e => handleCellClick(e, null, day)}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => handleDropBooking(e, day)}
+                >
+                  {hours.map(h => (
+                    <div key={h} className="absolute w-full border-t border-gray-100" style={{ top: (h - START_HOUR) * HOUR_HEIGHT }} />
+                  ))}
+
+                  {dayBlocks.map(bt => {
+                    const { top, height } = positionBlock(bt.starts_at, bt.ends_at, day)
+                    return (
+                      <div
+                        key={bt.id}
+                        data-booking="true"
+                        onClick={e => { e.stopPropagation(); setSelectedBlock(bt) }}
+                        className="absolute left-0.5 right-0.5 rounded overflow-hidden z-10 cursor-pointer"
+                        style={{ top, height, backgroundColor: 'rgba(254,243,199,0.85)', backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(251,191,36,0.18) 6px, rgba(251,191,36,0.18) 12px)', borderLeft: '3px solid #F59E0B' }}
+                        title="Click to delete"
+                      >
+                        <p className="text-xs font-semibold text-amber-700 px-1.5 pt-1 truncate leading-tight">{bt.reason ?? 'Booked Time'}</p>
+                        <p className="text-xs text-amber-600 px-1.5 truncate">{format(parseISO(bt.starts_at), 'HH:mm')}–{format(parseISO(bt.ends_at), 'HH:mm')}</p>
+                      </div>
+                    )
+                  })}
+
+                  {dayBookings.map(booking => {
+                    const { top, height } = positionBlock(booking.starts_at, booking.ends_at, day)
+                    const color = categoryColorMap[booking.service?.category] ?? '#7C3AED'
+                    const widthPct = 100 / booking.cols
+                    return (
+                      <div
+                        key={booking.id}
+                        data-booking="true"
+                        draggable
+                        onDragStart={e => { e.stopPropagation(); handleDragStart(e, booking.id) }}
+                        onDragEnd={() => setDraggingBookingId(null)}
+                        onClick={() => openBookingDetail(booking)}
+                        className={cn('absolute rounded-md px-1.5 py-1 overflow-hidden cursor-pointer z-20', booking.status === 'completed' ? 'opacity-50' : 'hover:brightness-95', draggingBookingId === booking.id && 'opacity-30')}
+                        style={{ top, height, left: `calc(${widthPct * booking.col}% + 2px)`, width: `calc(${widthPct}% - 4px)`, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
+                        title={`${booking.customer?.name} — ${booking.service?.name} — ${booking.staff?.name ?? 'Unassigned'}`}
+                      >
+                        <p className="text-xs font-semibold truncate leading-tight" style={{ color }}>
+                          {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
+                        </p>
+                        <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
+                        <p className="text-xs truncate text-gray-400">{booking.staff?.name ?? 'Unassigned'}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+      )}
 
       {/* ── Cell click popover: New Booking or Block Time ── */}
       {cellPopover && (
@@ -931,7 +1244,7 @@ export default function AdminCalendar() {
             style={{ top: cellPopover.pageY + 6, left: cellPopover.pageX }}
           >
             <div className="px-3 py-1.5 text-xs font-semibold text-gray-400 border-b border-gray-100 mb-1">
-              {cellPopover.time} · {staff.find(s => s.id === cellPopover.staffId)?.name}
+              {format(cellPopover.date, 'EEE d MMM')} · {cellPopover.time}{cellPopover.staffId ? ` · ${staff.find(s => s.id === cellPopover.staffId)?.name ?? ''}` : ''}
             </div>
             <button
               onClick={openNewBookingFromPopover}
@@ -952,16 +1265,34 @@ export default function AdminCalendar() {
       )}
 
       {/* ── New Booking Modal ── */}
-      <Modal open={!!newBookingStaffId} onClose={closeNewBooking} title="New Booking" size="md">
+      <Modal open={nbModalOpen} onClose={closeNewBooking} title="New Booking" size="md">
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <p className="text-sm font-medium text-gray-700 mb-1">Staff member</p>
-              <p className="text-sm text-gray-900 font-semibold">{staff.find(s => s.id === newBookingStaffId)?.name}</p>
+              <label className="text-sm font-medium text-gray-700 mb-1 block">Staff member</label>
+              <select
+                value={nbStaffId ?? ''}
+                onChange={e => setNbStaffId(e.target.value || null)}
+                className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
+              >
+                <option value="">Unassigned</option>
+                {staff.filter(s => !s.on_holiday).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
             </div>
             <div>
               <label className="text-sm font-medium text-gray-700 mb-1 block">Service</label>
-              <select value={nbServiceId} onChange={e => setNbServiceId(e.target.value)} className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded outline-none focus:ring-2 focus:ring-(--color-primary)">
+              <select
+                value={nbServiceId}
+                onChange={e => {
+                  const id = e.target.value
+                  setNbServiceId(id)
+                  if (!nbPriceTouched) {
+                    const svc = services.find(s => s.id === id)
+                    if (svc) setNbPrice((svc.price / 100).toFixed(2))
+                  }
+                }}
+                className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
+              >
                 {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
@@ -971,6 +1302,18 @@ export default function AdminCalendar() {
             <Input label="Start time" type="time" value={nbTime} onChange={e => setNbTime(e.target.value)} required />
           </div>
           {nbEndTime && <p className="text-xs text-gray-500 bg-gray-50 rounded px-3 py-2">{selectedService?.duration_minutes} min · ends at {nbEndTime}</p>}
+          <div className="relative w-32">
+            <label className="text-sm font-medium text-gray-700 mb-1 block">Price</label>
+            <span className="absolute left-2.5 top-1/2 translate-y-[3px] text-sm text-gray-500">£</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={nbPrice}
+              onChange={e => { setNbPrice(e.target.value); setNbPriceTouched(true) }}
+              className="w-full h-10 pl-5 pr-2 text-sm border border-gray-200 rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
+            />
+          </div>
           <hr className="border-gray-100" />
           <div className="relative">
             <Input
@@ -1049,7 +1392,7 @@ export default function AdminCalendar() {
         open={!!selectedBooking}
         onClose={closeDetail}
         title={selectedBooking ? `${format(parseISO(selectedBooking.starts_at), 'HH:mm')} – ${format(parseISO(selectedBooking.ends_at), 'HH:mm')}` : ''}
-        size="sm"
+        size={editMode ? 'md' : 'sm'}
       >
         {selectedBooking && !editMode && (
           <div className="space-y-4">
@@ -1068,6 +1411,15 @@ export default function AdminCalendar() {
               <div className="flex justify-between">
                 <dt className="text-gray-500">Service</dt>
                 <dd className="font-medium text-gray-900">{selectedBooking.service?.name}</dd>
+              </div>
+              <div className="flex justify-between items-center">
+                <dt className="text-gray-500">Price</dt>
+                <dd className="font-medium text-gray-900 flex items-center gap-1.5">
+                  {formatCurrency(bookingPrice(selectedBooking))}
+                  {selectedBooking.price_override != null && (
+                    <span className="text-xs font-normal text-(--color-primary) bg-(--color-primary)/10 px-1.5 py-0.5 rounded">custom</span>
+                  )}
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">Customer</dt>
@@ -1246,6 +1598,92 @@ export default function AdminCalendar() {
 
         {selectedBooking && editMode && (
           <div className="space-y-4">
+            {/* Customer */}
+            <div className="relative">
+              <Input
+                label="Customer"
+                value={editCustomerName}
+                onChange={e => {
+                  setEditCustomerName(e.target.value)
+                  if (e.target.value !== selectedBooking.customer?.name) setEditCustomerId(null)
+                  editSearchCustomers(e.target.value)
+                }}
+                onFocus={() => editCustomerName.length >= 2 && setEditCustomerShowSuggestions(true)}
+                onBlur={() => setTimeout(() => setEditCustomerShowSuggestions(false), 150)}
+                placeholder="Start typing a name…"
+                autoComplete="off"
+              />
+              {editCustomerShowSuggestions && editCustomerSuggestions.length > 0 && (
+                <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                  {editCustomerSuggestions.map(c => (
+                    <button key={c.id} type="button" className="w-full px-3 py-2.5 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                      onMouseDown={() => selectEditCustomer(c)}>
+                      <p className="text-sm font-medium text-gray-900">{c.name}</p>
+                      <p className="text-xs text-gray-500">{c.email}{c.phone ? ` · ${c.phone}` : ''}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {!editCustomerId && <p className="text-xs text-amber-600 mt-1">Select a customer from the list.</p>}
+            </div>
+
+            {/* Service / Staff */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Service</label>
+                <select
+                  value={editServiceId}
+                  onChange={e => {
+                    const id = e.target.value
+                    setEditServiceId(id)
+                    if (!editPriceTouched) {
+                      const svc = services.find(s => s.id === id)
+                      if (svc) setEditPrice((svc.price / 100).toFixed(2))
+                    }
+                  }}
+                  className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                >
+                  {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Staff</label>
+                <select
+                  value={editStaffId ?? ''}
+                  onChange={e => setEditStaffId(e.target.value || null)}
+                  className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                >
+                  <option value="">Unassigned</option>
+                  {staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* Date / Time / Price */}
+            <div className="grid grid-cols-3 gap-3">
+              <Input label="Date" type="date" value={editDate} onChange={e => setEditDate(e.target.value)} required />
+              <Input label="Start time" type="time" value={editTime} onChange={e => setEditTime(e.target.value)} required />
+              <div className="relative">
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Price</label>
+                <span className="absolute left-2.5 top-1/2 translate-y-[3px] text-sm text-gray-500">£</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={editPrice}
+                  onChange={e => { setEditPrice(e.target.value); setEditPriceTouched(true) }}
+                  className="w-full h-10 pl-5 pr-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                />
+              </div>
+            </div>
+            {editService && (
+              <p className="text-xs text-gray-500 bg-gray-50 rounded px-3 py-2 -mt-2">
+                {editService.duration_minutes} min · ends at {editDate && editTime ? format(addMinutes(new Date(`${editDate}T${editTime}:00`), editService.duration_minutes), 'HH:mm') : '—'}
+              </p>
+            )}
+
+            <hr className="border-gray-100" />
+
             {/* Notes */}
             <Textarea label="Notes" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Add notes…" />
 
@@ -1368,7 +1806,7 @@ export default function AdminCalendar() {
               <Button variant="secondary" onClick={() => { setEditMode(false); if (selectedBooking) refreshActivityLog(selectedBooking.id) }} className="shrink-0">
                 <X className="h-3.5 w-3.5" />
               </Button>
-              <Button fullWidth onClick={handleSaveEdit} loading={editSaving}>Save Changes</Button>
+              <Button fullWidth onClick={handleSaveEdit} loading={editSaving} disabled={!editCustomerId}>Save Changes</Button>
             </div>
           </div>
         )}

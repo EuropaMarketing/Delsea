@@ -28,6 +28,7 @@ type Appt = {
   id: string; starts_at: string; ends_at: string; status: string; notes: string | null
   resource_id: string | null; equipment_resource_id: string | null; checked_in_at: string | null
   payment_status: string; deposit_charged: number; discount_amount: number; gift_voucher_amount: number
+  price_override: number | null
   customer: { name: string; phone: string | null; email: string; sumup_card_token: string | null } | null
   service: { name: string; duration_minutes: number; price: number } | null
   resource: { name: string } | null; equipment_resource: { name: string } | null
@@ -141,7 +142,7 @@ export default function StaffPortal() {
       const [staffRes, apptRes, resRes, equipRes, cancelRes] = await Promise.all([
         supabase.from('staff').select('name').eq('id', staffId).single(),
         supabase.from('bookings')
-          .select('id, starts_at, ends_at, status, notes, resource_id, equipment_resource_id, checked_in_at, payment_status, deposit_charged, discount_amount, gift_voucher_amount, customer:customers(name,phone,email,sumup_card_token), service:services(name,duration_minutes,price), resource:resources!resource_id(name), equipment_resource:resources!equipment_resource_id(name)')
+          .select('id, starts_at, ends_at, status, notes, resource_id, equipment_resource_id, checked_in_at, payment_status, deposit_charged, discount_amount, gift_voucher_amount, price_override, customer:customers(name,phone,email,sumup_card_token), service:services(name,duration_minutes,price), resource:resources!resource_id(name), equipment_resource:resources!equipment_resource_id(name)')
           .eq('business_id', BUSINESS_ID).eq('staff_id', staffId).neq('status', 'cancelled')
           .gte('starts_at', startOfDay(new Date()).toISOString())
           .lte('starts_at', endOfDay(addDays(new Date(), 60)).toISOString()).order('starts_at'),
@@ -276,7 +277,7 @@ export default function StaffPortal() {
       if (txRes.data) setEditTokenApplied(true)
     }
     setCancelOpen(false); setCancelReason('')
-    const remaining = (a.service?.price ?? 0) - (a.discount_amount ?? 0) - (a.gift_voucher_amount ?? 0) - (a.deposit_charged ?? 0)
+    const remaining = (a.price_override ?? a.service?.price ?? 0) - (a.discount_amount ?? 0) - (a.gift_voucher_amount ?? 0) - (a.deposit_charged ?? 0)
     setChargeAmount(remaining > 0 ? (remaining / 100).toFixed(2) : '')
     setChargeType('balance'); setChargeError(''); setChargeSuccess(false); setActivityLog([])
     refreshActivityLog(a.id)
@@ -681,7 +682,7 @@ export default function StaffPortal() {
                         const full = [...todayAppts, ...upcomingAppts].find(x => x.id === a.id)
                         if (full) { openDetail(full); return }
                         const { data } = await supabase.from('bookings')
-                          .select('id, starts_at, ends_at, status, notes, resource_id, equipment_resource_id, checked_in_at, payment_status, deposit_charged, discount_amount, gift_voucher_amount, customer:customers(name,phone,email,sumup_card_token), service:services(name,duration_minutes,price), resource:resources!resource_id(name), equipment_resource:resources!equipment_resource_id(name)')
+                          .select('id, starts_at, ends_at, status, notes, resource_id, equipment_resource_id, checked_in_at, payment_status, deposit_charged, discount_amount, gift_voucher_amount, price_override, customer:customers(name,phone,email,sumup_card_token), service:services(name,duration_minutes,price), resource:resources!resource_id(name), equipment_resource:resources!equipment_resource_id(name)')
                           .eq('id', a.id).single()
                         if (data) openDetail(data as unknown as Appt)
                       }}
