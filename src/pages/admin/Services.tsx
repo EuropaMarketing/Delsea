@@ -220,7 +220,7 @@ export default function AdminServices() {
     if (data) {
       setSessionsList((prev) =>
         [...prev, data as ServiceSession].sort((a, b) =>
-          a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time)
+          (a.day_of_week ?? 0) - (b.day_of_week ?? 0) || a.start_time.localeCompare(b.start_time)
         )
       )
       setAddingSession(false)
