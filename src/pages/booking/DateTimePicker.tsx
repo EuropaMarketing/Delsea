@@ -255,7 +255,7 @@ export default function DateTimePicker() {
     const counts: Record<string, number> = {}
     for (const b of monthBookings.filter((b) => b.service_id === service.id && b.starts_at.startsWith(dayKey))) {
       const t = format(parseISO(b.starts_at), 'HH:mm')
-      counts[t] = (counts[t] ?? 0) + 1
+      counts[t] = (counts[t] ?? 0) + (b.spots_booked ?? 1)
     }
     const maxCap = service.max_capacity ?? 8
     return daySessions.map((s) => ({

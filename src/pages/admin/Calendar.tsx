@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import {
-  format, addDays, subDays, addWeeks, subWeeks, startOfDay, endOfDay, startOfWeek, endOfWeek,
+  format, addDays, subDays, addWeeks, subWeeks, addMonths, startOfDay, endOfDay, startOfWeek, endOfWeek,
   parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday, isSameDay,
 } from 'date-fns'
 import {
@@ -43,6 +43,30 @@ type RichBooking = Omit<Booking, 'staff' | 'service' | 'customer' | 'price_overr
 
 function bookingPrice(b: { price_override?: number | null; service?: { price: number } | null }): number {
   return b.price_override ?? b.service?.price ?? 0
+}
+
+const MAX_RECURRENCE_OCCURRENCES = 52
+
+function computeOccurrenceDates(
+  start: Date,
+  repeat: 'none' | 'daily' | 'weekly' | 'monthly',
+  interval: number,
+  endType: 'count' | 'until',
+  count: number,
+  until: Date | null,
+): Date[] {
+  if (repeat === 'none') return [start]
+  const step = (d: Date) =>
+    repeat === 'daily' ? addDays(d, interval) : repeat === 'weekly' ? addWeeks(d, interval) : addMonths(d, interval)
+  const dates: Date[] = [start]
+  let next = step(start)
+  while (dates.length < MAX_RECURRENCE_OCCURRENCES) {
+    if (endType === 'count' && dates.length >= Math.max(count, 1)) break
+    if (endType === 'until' && until && next > until) break
+    dates.push(next)
+    next = step(next)
+  }
+  return dates
 }
 
 type BlockedTime = {
@@ -98,6 +122,16 @@ export default function AdminCalendar() {
   const [nbSuggestions, setNbSuggestions] = useState<Customer[]>([])
   const [nbShowSuggestions, setNbShowSuggestions] = useState(false)
   const [nbSelectedCustomerId, setNbSelectedCustomerId] = useState<string | null>(null)
+  // Group-session spots + live capacity readout
+  const [nbSpotsBooked, setNbSpotsBooked] = useState(1)
+  const [nbSlotCapacity, setNbSlotCapacity] = useState<{ taken: number; max: number } | null>(null)
+  // Repeat (Outlook-style recurrence)
+  const [nbRepeat, setNbRepeat] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none')
+  const [nbRepeatInterval, setNbRepeatInterval] = useState(1)
+  const [nbRepeatEndType, setNbRepeatEndType] = useState<'count' | 'until'>('count')
+  const [nbRepeatCount, setNbRepeatCount] = useState(8)
+  const [nbRepeatUntil, setNbRepeatUntil] = useState('')
+  const [nbSkippedDates, setNbSkippedDates] = useState<string[]>([])
 
   // Block Time modal
   const [btOpen, setBtOpen] = useState(false)
@@ -112,6 +146,7 @@ export default function AdminCalendar() {
 
   // Booking detail / edit
   const [selectedBooking, setSelectedBooking] = useState<RichBooking | null>(null)
+  const [detailCapacity, setDetailCapacity] = useState<{ taken: number; max: number } | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
   const [cancelReasonOpen, setCancelReasonOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
@@ -136,6 +171,9 @@ export default function AdminCalendar() {
   const [editTime, setEditTime] = useState('')
   const [editPrice, setEditPrice] = useState('')
   const [editPriceTouched, setEditPriceTouched] = useState(false)
+  const [editSpotsBooked, setEditSpotsBooked] = useState(1)
+  const [editSlotCapacity, setEditSlotCapacity] = useState<{ taken: number; max: number } | null>(null)
+  const [cancelScope, setCancelScope] = useState<'one' | 'series'>('one')
   // Token state in edit mode
   const [editTokenInfo, setEditTokenInfo] = useState<{ membershipId: string; planName: string; tokens: number } | null>(null)
   const [editTokenApplied, setEditTokenApplied] = useState(false)
@@ -300,10 +338,43 @@ export default function AdminCalendar() {
     }
   }, [drag, bookings])
 
+  // Live capacity readout in the New Booking modal, for group-session services.
+  useEffect(() => {
+    if (!nbModalOpen || !nbServiceId || !nbDate || !nbTime) { setNbSlotCapacity(null); return }
+    const startsAt = new Date(`${nbDate}T${nbTime}:00`).toISOString()
+    let cancelled = false
+    fetchSlotCapacity(nbServiceId, startsAt).then(cap => { if (!cancelled) setNbSlotCapacity(cap) })
+    return () => { cancelled = true }
+  }, [nbModalOpen, nbServiceId, nbDate, nbTime])
+
+  // Live capacity readout in the edit form, for group-session services (excluding this booking's own spots).
+  useEffect(() => {
+    if (!editMode || !selectedBooking || !editServiceId || !editDate || !editTime) { setEditSlotCapacity(null); return }
+    const startsAt = new Date(`${editDate}T${editTime}:00`).toISOString()
+    let cancelled = false
+    fetchSlotCapacity(editServiceId, startsAt, selectedBooking.id).then(cap => { if (!cancelled) setEditSlotCapacity(cap) })
+    return () => { cancelled = true }
+  }, [editMode, selectedBooking, editServiceId, editDate, editTime])
+
   const categoryColorMap = useMemo(() => {
     const cats = [...new Set(bookings.map(b => b.service?.category))]
     return Object.fromEntries(cats.map((c, i) => [c, SERVICE_COLORS[i % SERVICE_COLORS.length]]))
   }, [bookings])
+
+  // Aggregate capacity per group-session slot (service_id + starts_at) for the "X/Y" badge on calendar blocks.
+  const slotCapacityMap = useMemo(() => {
+    const map = new Map<string, { taken: number; max: number }>()
+    for (const b of bookings) {
+      const service = services.find(s => s.id === b.service_id)
+      if (!service?.is_group_session) continue
+      const key = `${b.service_id}|${b.starts_at}`
+      const spots = b.spots_booked ?? 1
+      const existing = map.get(key)
+      if (existing) existing.taken += spots
+      else map.set(key, { taken: spots, max: service.max_capacity ?? 8 })
+    }
+    return map
+  }, [bookings, services])
 
   function positionBlock(startsAt: string, endsAt: string, refDay: Date = selectedDay) {
     const dayFloor = setMinutes(setHours(refDay, START_HOUR), 0)
@@ -332,6 +403,23 @@ export default function AdminCalendar() {
     }
     const cols = Math.max(colEndTimes.length, 1)
     return placed.map(p => ({ ...p, cols }))
+  }
+
+  // Slot capacity for a group-session service; excludeBookingId lets an in-progress
+  // edit compute "how many spots are taken by OTHER bookings" for validation.
+  async function fetchSlotCapacity(serviceId: string, startsAtISO: string, excludeBookingId?: string): Promise<{ taken: number; max: number } | null> {
+    const service = services.find(s => s.id === serviceId)
+    if (!service?.is_group_session) return null
+    const { data } = await supabase
+      .from('bookings')
+      .select('id, spots_booked')
+      .eq('service_id', serviceId)
+      .eq('starts_at', startsAtISO)
+      .neq('status', 'cancelled')
+    const taken = (data ?? [])
+      .filter(b => b.id !== excludeBookingId)
+      .reduce((sum, b) => sum + (b.spots_booked ?? 1), 0)
+    return { taken, max: service.max_capacity ?? 8 }
   }
 
   function timeFromPointerY(e: React.MouseEvent | React.DragEvent, el: HTMLElement) {
@@ -406,6 +494,10 @@ export default function AdminCalendar() {
     setNbName(''); setNbEmail(''); setNbPhone(''); setNbNotes('')
     setNbPrice(services[0] ? (services[0].price / 100).toFixed(2) : '')
     setNbPriceTouched(false)
+    setNbSpotsBooked(1)
+    setNbSlotCapacity(null)
+    setNbRepeat('none'); setNbRepeatInterval(1); setNbRepeatEndType('count'); setNbRepeatCount(8); setNbRepeatUntil('')
+    setNbSkippedDates([])
     setNbError(''); setNbSuggestions([]); setNbShowSuggestions(false); setNbSelectedCustomerId(null)
     setNbModalOpen(true)
     setCellPopover(null)
@@ -552,6 +644,8 @@ export default function AdminCalendar() {
     setEditTime(format(parseISO(selectedBooking.starts_at), 'HH:mm'))
     setEditPrice((bookingPrice(selectedBooking) / 100).toFixed(2))
     setEditPriceTouched(false)
+    setEditSpotsBooked(selectedBooking.spots_booked ?? 1)
+    setEditSlotCapacity(null)
 
     await refreshEditTokenInfo(selectedBooking.customer?.email, selectedBooking.service?.category, selectedBooking.id, true)
   }
@@ -605,17 +699,33 @@ export default function AdminCalendar() {
     setChargeSuccess(false)
     setCancelReasonOpen(false)
     setCancelReason('')
+    setCancelScope('one')
     setActivityLog([])
     setActivityLogOpen(false)
     refreshActivityLog(b.id)
     checkBookingForm(b.service_id, b.customer_id).then(setSelectedBookingForm)
+    setDetailCapacity(null)
+    fetchSlotCapacity(b.service_id, b.starts_at).then(setDetailCapacity)
   }
 
   async function handleCancelWithReason(bookingId: string) {
     if (!cancelReason.trim()) return
     setActionLoading(true)
-    await supabase.from('bookings').update({ status: 'cancelled', cancellation_reason: cancelReason.trim() }).eq('id', bookingId)
-    setBookings(prev => prev.filter(b => b.id !== bookingId))
+    const booking = selectedBooking
+    if (cancelScope === 'series' && booking && booking.recurrence_id) {
+      const { data } = await supabase
+        .from('bookings')
+        .update({ status: 'cancelled', cancellation_reason: cancelReason.trim() })
+        .eq('recurrence_id', booking.recurrence_id)
+        .gte('starts_at', booking.starts_at)
+        .neq('status', 'cancelled')
+        .select('id')
+      const cancelledIds = new Set((data ?? []).map(r => r.id))
+      setBookings(prev => prev.filter(b => !cancelledIds.has(b.id)))
+    } else {
+      await supabase.from('bookings').update({ status: 'cancelled', cancellation_reason: cancelReason.trim() }).eq('id', bookingId)
+      setBookings(prev => prev.filter(b => b.id !== bookingId))
+    }
     setSelectedBooking(null)
     setCancelReasonOpen(false)
     setCancelReason('')
@@ -648,6 +758,14 @@ export default function AdminCalendar() {
     const newService = services.find(s => s.id === editServiceId)
     if (!newService) { setEditError('Select a service.'); return }
     if (!editDate || !editTime) { setEditError('Date and time are required.'); return }
+    if (newService.is_group_session) {
+      const startsAtISO = new Date(`${editDate}T${editTime}:00`).toISOString()
+      const cap = await fetchSlotCapacity(editServiceId, startsAtISO, selectedBooking.id)
+      if (cap && cap.taken + editSpotsBooked > cap.max) {
+        setEditError(`Not enough spots available. Only ${Math.max(cap.max - cap.taken, 0)} spot(s) remaining.`)
+        return
+      }
+    }
     setEditSaving(true)
     setEditError('')
     const matchedResource = resources.find((r) => r.id === editResourceId) ?? null
@@ -670,6 +788,7 @@ export default function AdminCalendar() {
         notes: editNotes.trim() || null,
         resource_id: editResourceId,
         equipment_resource_id: editEquipmentResourceId,
+        spots_booked: newService.is_group_session ? editSpotsBooked : 1,
       })
       .eq('id', selectedBooking.id)
     if (error) {
@@ -700,6 +819,7 @@ export default function AdminCalendar() {
         resource: resourceObj,
         equipment_resource_id: editEquipmentResourceId,
         equipment_resource: equipmentObj,
+        spots_booked: newService.is_group_session ? editSpotsBooked : 1,
       }
       setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, ...patch } : b))
       setSelectedBooking(prev => prev ? { ...prev, ...patch } : null)
@@ -807,12 +927,20 @@ export default function AdminCalendar() {
     }
     const service = services.find(s => s.id === nbServiceId)
     if (!service || !nbDate || !nbTime) return
-    const startsAt = new Date(`${nbDate}T${nbTime}:00`)
-    const endsAt = addMinutes(startsAt, service.duration_minutes)
+    const baseStartsAt = new Date(`${nbDate}T${nbTime}:00`)
     const enteredPrice = nbPrice.trim() ? Math.round(parseFloat(nbPrice) * 100) : service.price
     const priceOverride = Number.isFinite(enteredPrice) && enteredPrice !== service.price ? enteredPrice : null
+    const occurrenceDates = computeOccurrenceDates(
+      baseStartsAt,
+      nbRepeat,
+      nbRepeatInterval,
+      nbRepeatEndType,
+      nbRepeatCount,
+      nbRepeatEndType === 'until' && nbRepeatUntil ? new Date(`${nbRepeatUntil}T23:59:59`) : null,
+    )
     setNbSaving(true)
     setNbError('')
+    setNbSkippedDates([])
     try {
       let customerId = nbSelectedCustomerId
       if (!customerId) {
@@ -827,24 +955,62 @@ export default function AdminCalendar() {
         if (custErr) throw custErr
         customerId = customer.id
       }
-      const { data: booking, error: bookErr } = await supabase
-        .from('bookings')
-        .insert({
+
+      const rowsToInsert: Record<string, unknown>[] = []
+      const skipped: string[] = []
+      for (const occStart of occurrenceDates) {
+        const occEnd = addMinutes(occStart, service.duration_minutes)
+        if (service.is_group_session) {
+          const cap = await fetchSlotCapacity(nbServiceId, occStart.toISOString())
+          if (cap && cap.taken + nbSpotsBooked > cap.max) {
+            skipped.push(format(occStart, 'EEE d MMM yyyy, HH:mm'))
+            continue
+          }
+        }
+        rowsToInsert.push({
           business_id: BUSINESS_ID,
           customer_id: customerId,
           staff_id: nbStaffId,
           service_id: nbServiceId,
-          starts_at: startsAt.toISOString(),
-          ends_at: endsAt.toISOString(),
+          starts_at: occStart.toISOString(),
+          ends_at: occEnd.toISOString(),
           status: 'confirmed',
           notes: nbNotes.trim() || null,
           price_override: priceOverride,
+          spots_booked: service.is_group_session ? nbSpotsBooked : 1,
         })
-        .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token)')
-        .single()
-      if (bookErr) throw bookErr
-      setBookings(prev => [...prev, booking as RichBooking])
-      closeNewBooking()
+      }
+
+      if (rowsToInsert.length > 1) {
+        const recurrenceId = crypto.randomUUID()
+        rowsToInsert.forEach((row, i) => {
+          row.recurrence_id = recurrenceId
+          row.recurrence_index = i + 1
+          row.recurrence_total = rowsToInsert.length
+        })
+      }
+
+      if (rowsToInsert.length > 0) {
+        const { data: created, error: bookErr } = await supabase
+          .from('bookings')
+          .insert(rowsToInsert)
+          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token)')
+        if (bookErr) throw bookErr
+
+        const rangeStart = viewMode === 'week' ? startOfWeek(selectedDay, { weekStartsOn: 1 }) : startOfDay(selectedDay)
+        const rangeEnd = viewMode === 'week' ? endOfWeek(selectedDay, { weekStartsOn: 1 }) : endOfDay(selectedDay)
+        const inView = (created as RichBooking[]).filter(b => {
+          const t = parseISO(b.starts_at)
+          return t >= rangeStart && t <= rangeEnd
+        })
+        if (inView.length) setBookings(prev => [...prev, ...inView])
+      }
+
+      if (skipped.length > 0) {
+        setNbSkippedDates(skipped)
+      } else {
+        closeNewBooking()
+      }
     } catch (err: unknown) {
       setNbError(err instanceof Error ? err.message : 'Failed to create booking.')
     } finally {
@@ -1080,6 +1246,11 @@ export default function AdminCalendar() {
                           {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
                         </p>
                         <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
+                        {slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`) && (
+                          <p className="text-xs font-medium" style={{ color }}>
+                            {slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)!.taken}/{slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)!.max} spots
+                          </p>
+                        )}
                         {isDragging && <p className="text-xs font-medium mt-0.5" style={{ color }}>→ {format(parseISO(endsAt), 'HH:mm')}</p>}
                         <div
                           data-booking="true"
@@ -1128,7 +1299,12 @@ export default function AdminCalendar() {
                       {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
                     </p>
                     <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
-                    {(booking.spots_booked ?? 1) > 1 && <p className="text-xs text-gray-500">{booking.spots_booked} spots</p>}
+                    {(() => {
+                      const cap = slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)
+                      return cap
+                        ? <p className="text-xs font-medium" style={{ color }}>{cap.taken}/{cap.max} spots</p>
+                        : (booking.spots_booked ?? 1) > 1 ? <p className="text-xs text-gray-500">{booking.spots_booked} spots</p> : null
+                    })()}
                   </div>
                 )
               })}
@@ -1226,6 +1402,11 @@ export default function AdminCalendar() {
                         </p>
                         <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
                         <p className="text-xs truncate text-gray-400">{booking.staff?.name ?? 'Unassigned'}</p>
+                        {slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`) && (
+                          <p className="text-xs font-medium" style={{ color }}>
+                            {slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)!.taken}/{slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)!.max} spots
+                          </p>
+                        )}
                       </div>
                     )
                   })}
@@ -1304,18 +1485,117 @@ export default function AdminCalendar() {
             <Input label="Start time" type="time" value={nbTime} onChange={e => setNbTime(e.target.value)} required />
           </div>
           {nbEndTime && <p className="text-xs text-gray-500 bg-gray-50 rounded px-3 py-2">{selectedService?.duration_minutes} min · ends at {nbEndTime}</p>}
-          <div className="relative w-32">
-            <label className="text-sm font-medium text-gray-700 mb-1 block">Price</label>
-            <span className="absolute left-2.5 top-1/2 translate-y-[3px] text-sm text-gray-500">£</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={nbPrice}
-              onChange={e => { setNbPrice(e.target.value); setNbPriceTouched(true) }}
-              className="w-full h-10 pl-5 pr-2 text-sm border border-gray-200 rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
-            />
+
+          {/* Repeat */}
+          <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+            <label className="text-sm font-medium text-gray-700 block">Repeat</label>
+            <select
+              value={nbRepeat}
+              onChange={e => setNbRepeat(e.target.value as typeof nbRepeat)}
+              className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
+            >
+              <option value="none">Does not repeat</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+            {nbRepeat !== 'none' && (
+              <>
+                <div className="flex items-center gap-2 text-sm text-gray-700">
+                  <span>Every</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={nbRepeatInterval}
+                    onChange={e => setNbRepeatInterval(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-16 h-9 px-2 text-sm border border-gray-200 rounded text-center outline-none focus:ring-2 focus:ring-(--color-primary)"
+                  />
+                  <span>{nbRepeat === 'daily' ? 'day(s)' : nbRepeat === 'weekly' ? 'week(s)' : 'month(s)'}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-700">
+                  <select
+                    value={nbRepeatEndType}
+                    onChange={e => setNbRepeatEndType(e.target.value as typeof nbRepeatEndType)}
+                    className="h-9 px-2 text-sm border border-gray-200 rounded bg-white outline-none focus:ring-2 focus:ring-(--color-primary)"
+                  >
+                    <option value="count">After</option>
+                    <option value="until">Until</option>
+                  </select>
+                  {nbRepeatEndType === 'count' ? (
+                    <>
+                      <input
+                        type="number"
+                        min={1}
+                        max={MAX_RECURRENCE_OCCURRENCES}
+                        value={nbRepeatCount}
+                        onChange={e => setNbRepeatCount(Math.max(1, parseInt(e.target.value) || 1))}
+                        className="w-16 h-9 px-2 text-sm border border-gray-200 rounded text-center outline-none focus:ring-2 focus:ring-(--color-primary)"
+                      />
+                      <span>occurrence(s)</span>
+                    </>
+                  ) : (
+                    <input
+                      type="date"
+                      value={nbRepeatUntil}
+                      onChange={e => setNbRepeatUntil(e.target.value)}
+                      className="h-9 px-2 text-sm border border-gray-200 rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
+                    />
+                  )}
+                </div>
+                {nbDate && nbTime && (() => {
+                  const occurrences = computeOccurrenceDates(
+                    new Date(`${nbDate}T${nbTime}:00`),
+                    nbRepeat,
+                    nbRepeatInterval,
+                    nbRepeatEndType,
+                    nbRepeatCount,
+                    nbRepeatEndType === 'until' && nbRepeatUntil ? new Date(`${nbRepeatUntil}T23:59:59`) : null,
+                  )
+                  const last = occurrences[occurrences.length - 1]
+                  return (
+                    <p className="text-xs text-gray-500">
+                      Creates {occurrences.length} booking{occurrences.length !== 1 ? 's' : ''}, {nbRepeat}, ending {format(last, 'd MMM yyyy')}
+                      {occurrences.length >= MAX_RECURRENCE_OCCURRENCES ? ' (capped at 52)' : ''}
+                    </p>
+                  )
+                })()}
+              </>
+            )}
           </div>
+
+          <div className="flex items-end gap-3">
+            <div className="relative w-32">
+              <label className="text-sm font-medium text-gray-700 mb-1 block">Price</label>
+              <span className="absolute left-2.5 top-1/2 translate-y-[3px] text-sm text-gray-500">£</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={nbPrice}
+                onChange={e => { setNbPrice(e.target.value); setNbPriceTouched(true) }}
+                className="w-full h-10 pl-5 pr-2 text-sm border border-gray-200 rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
+              />
+            </div>
+            {selectedService?.is_group_session && (
+              <div className="w-24">
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Spots</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={nbSpotsBooked}
+                  onChange={e => setNbSpotsBooked(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-full h-10 px-3 text-sm border border-gray-200 rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
+                />
+              </div>
+            )}
+          </div>
+          {selectedService?.is_group_session && nbSlotCapacity && (
+            <p className={cn('text-xs px-2.5 py-1.5 rounded-lg inline-block', nbSlotCapacity.taken >= nbSlotCapacity.max ? 'bg-red-50 text-red-600' : 'bg-gray-50 text-gray-600')}>
+              {nbSlotCapacity.taken} of {nbSlotCapacity.max} spots booked at this time
+            </p>
+          )}
+
           <hr className="border-gray-100" />
           <div className="relative">
             <Input
@@ -1344,9 +1624,23 @@ export default function AdminCalendar() {
           <Input label="Phone" type="tel" value={nbPhone} onChange={e => setNbPhone(e.target.value)} placeholder="+44 7700 900000" />
           <Textarea label="Notes" value={nbNotes} onChange={e => setNbNotes(e.target.value)} placeholder="Optional notes…" />
           {nbError && <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{nbError}</p>}
+          {nbSkippedDates.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 space-y-1">
+              <p className="text-xs font-semibold text-amber-800">{nbSkippedDates.length} occurrence{nbSkippedDates.length !== 1 ? 's' : ''} skipped — not enough capacity:</p>
+              <ul className="text-xs text-amber-700 list-disc list-inside">
+                {nbSkippedDates.map(d => <li key={d}>{d}</li>)}
+              </ul>
+            </div>
+          )}
           <div className="flex gap-2 justify-end pt-1">
-            <Button variant="secondary" onClick={closeNewBooking}>Cancel</Button>
-            <Button onClick={handleCreateBooking} loading={nbSaving}>Create Booking</Button>
+            {nbSkippedDates.length > 0 ? (
+              <Button onClick={closeNewBooking}>OK</Button>
+            ) : (
+              <>
+                <Button variant="secondary" onClick={closeNewBooking}>Cancel</Button>
+                <Button onClick={handleCreateBooking} loading={nbSaving}>{nbRepeat === 'none' ? 'Create Booking' : 'Create Bookings'}</Button>
+              </>
+            )}
           </div>
         </div>
       </Modal>
@@ -1414,6 +1708,12 @@ export default function AdminCalendar() {
                 <dt className="text-gray-500">Service</dt>
                 <dd className="font-medium text-gray-900">{selectedBooking.service?.name}</dd>
               </div>
+              {selectedBooking.recurrence_id && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Recurring</dt>
+                  <dd className="text-gray-700">Occurrence {selectedBooking.recurrence_index} of {selectedBooking.recurrence_total}</dd>
+                </div>
+              )}
               <div className="flex justify-between items-center">
                 <dt className="text-gray-500">Price</dt>
                 <dd className="font-medium text-gray-900 flex items-center gap-1.5">
@@ -1439,10 +1739,13 @@ export default function AdminCalendar() {
                   <dd className="text-gray-700">{selectedBooking.staff.name}</dd>
                 </div>
               )}
-              {(selectedBooking.spots_booked ?? 1) > 1 && (
+              {(detailCapacity || (selectedBooking.spots_booked ?? 1) > 1) && (
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Spots</dt>
-                  <dd className="font-semibold text-gray-900">{selectedBooking.spots_booked}</dd>
+                  <dd className="font-semibold text-gray-900">
+                    {selectedBooking.spots_booked ?? 1}
+                    {detailCapacity && <span className="text-gray-400 font-normal"> · {detailCapacity.taken} of {detailCapacity.max} booked</span>}
+                  </dd>
                 </div>
               )}
               {selectedBooking.notes && (
@@ -1538,7 +1841,9 @@ export default function AdminCalendar() {
 
             {cancelReasonOpen ? (
               <div className="border border-red-200 bg-red-50 rounded-lg p-3 space-y-2">
-                <p className="text-xs font-semibold text-red-800">Reason for cancellation (required)</p>
+                <p className="text-xs font-semibold text-red-800">
+                  {cancelScope === 'series' ? 'Cancel this & all future occurrences' : 'Reason for cancellation'} (required)
+                </p>
                 <Textarea
                   value={cancelReason}
                   onChange={e => setCancelReason(e.target.value)}
@@ -1550,7 +1855,7 @@ export default function AdminCalendar() {
                     Back
                   </Button>
                   <Button fullWidth variant="danger" size="sm" loading={actionLoading} disabled={!cancelReason.trim()} onClick={() => handleCancelWithReason(selectedBooking.id)}>
-                    Confirm Cancellation
+                    {cancelScope === 'series' ? 'Confirm — Cancel Series' : 'Confirm Cancellation'}
                   </Button>
                 </div>
               </div>
@@ -1586,11 +1891,16 @@ export default function AdminCalendar() {
                         <CheckCircle2 className="h-4 w-4" />
                         Complete
                       </Button>
-                      <Button fullWidth variant="danger" size="sm" onClick={() => setCancelReasonOpen(true)}>
+                      <Button fullWidth variant="danger" size="sm" onClick={() => { setCancelScope('one'); setCancelReasonOpen(true) }}>
                         <XCircle className="h-4 w-4" />
                         Cancel
                       </Button>
                     </>
+                  )}
+                  {selectedBooking.recurrence_id && (selectedBooking.status === 'confirmed' || selectedBooking.status === 'pending') && (
+                    <Button fullWidth variant="secondary" size="sm" onClick={() => { setCancelScope('series'); setCancelReasonOpen(true) }} className="text-red-600! border-red-200! hover:bg-red-50!">
+                      Cancel & Future
+                    </Button>
                   )}
                 </div>
               </div>
@@ -1682,6 +1992,26 @@ export default function AdminCalendar() {
               <p className="text-xs text-gray-500 bg-gray-50 rounded px-3 py-2 -mt-2">
                 {editService.duration_minutes} min · ends at {editDate && editTime ? format(addMinutes(new Date(`${editDate}T${editTime}:00`), editService.duration_minutes), 'HH:mm') : '—'}
               </p>
+            )}
+
+            {editService?.is_group_session && (
+              <div className="flex items-end gap-3">
+                <div className="w-24">
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">Spots</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={editSpotsBooked}
+                    onChange={e => setEditSpotsBooked(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-full h-10 px-3 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                  />
+                </div>
+                {editSlotCapacity && (
+                  <p className={cn('text-xs px-2.5 py-1.5 rounded-lg', editSlotCapacity.taken + editSpotsBooked > editSlotCapacity.max ? 'bg-red-50 text-red-600' : 'bg-gray-50 text-gray-600')}>
+                    {editSlotCapacity.taken} of {editSlotCapacity.max} other spot(s) booked at this time
+                  </p>
+                )}
+              </div>
             )}
 
             <hr className="border-gray-100" />

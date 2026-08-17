@@ -104,6 +104,9 @@ export interface Booking {
   gift_voucher_id?: string | null
   gift_voucher_amount?: number
   price_override?: number | null
+  recurrence_id?: string | null
+  recurrence_index?: number | null
+  recurrence_total?: number | null
   checked_in_at?: string | null
   created_at: string
   staff?: Staff
