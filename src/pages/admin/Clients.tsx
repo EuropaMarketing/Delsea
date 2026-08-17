@@ -1,10 +1,12 @@
 import { useEffect, useState, useMemo } from 'react'
 import { format, parseISO, isBefore, isPast } from 'date-fns'
-import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle, Pencil, X } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import type { Customer, MembershipExpiryType } from '@/types'
@@ -60,6 +62,12 @@ export default function AdminClients() {
   const [detailTab, setDetailTab] = useState<'overview' | 'forms'>('overview')
   const [clientForms, setClientForms] = useState<ClientFormResponse[]>([])
   const [formsLoading, setFormsLoading] = useState(false)
+  const [editMode, setEditMode] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -108,6 +116,7 @@ export default function AdminClients() {
       setMemberships([])
       setClientForms([])
       setDetailTab('overview')
+      setEditMode(false)
       return
     }
     setMembershipsLoading(true)
@@ -135,6 +144,32 @@ export default function AdminClients() {
         setFormsLoading(false)
       })
   }, [selected?.id, detailTab])
+
+  function openEditClient() {
+    if (!selected) return
+    setEditName(selected.name)
+    setEditEmail(selected.email)
+    setEditPhone(selected.phone ?? '')
+    setEditError('')
+    setEditMode(true)
+  }
+
+  async function handleSaveClient() {
+    if (!selected) return
+    if (!editName.trim() || !editEmail.trim()) { setEditError('Name and email are required.'); return }
+    setEditSaving(true)
+    setEditError('')
+    const patch = { name: editName.trim(), email: editEmail.trim().toLowerCase(), phone: editPhone.trim() || null }
+    const { error } = await supabase.from('customers').update(patch).eq('id', selected.id)
+    if (error) {
+      setEditError(error.code === '23505' ? 'That email is already used by another client.' : error.message)
+    } else {
+      setClients(prev => prev.map(c => c.id === selected.id ? { ...c, ...patch } : c))
+      setSelected(prev => prev ? { ...prev, ...patch } : null)
+      setEditMode(false)
+    }
+    setEditSaving(false)
+  }
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
@@ -240,20 +275,30 @@ export default function AdminClients() {
         {selected && (
           <div className="space-y-5">
             {/* Tabs */}
-            <div className="flex gap-1 border-b border-gray-200 -mt-1">
-              {(['overview', 'forms'] as const).map(t => (
+            <div className="flex items-center justify-between border-b border-gray-200 -mt-1">
+              <div className="flex gap-1">
+                {(['overview', 'forms'] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => { setDetailTab(t); setEditMode(false) }}
+                    className={`px-4 py-2 text-sm font-medium capitalize border-b-2 -mb-px transition-colors ${
+                      detailTab === t
+                        ? 'border-(--color-primary) text-(--color-primary)'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    {t === 'overview' ? 'Overview' : 'Completed Forms'}
+                  </button>
+                ))}
+              </div>
+              {detailTab === 'overview' && !editMode && (
                 <button
-                  key={t}
-                  onClick={() => setDetailTab(t)}
-                  className={`px-4 py-2 text-sm font-medium capitalize border-b-2 -mb-px transition-colors ${
-                    detailTab === t
-                      ? 'border-(--color-primary) text-(--color-primary)'
-                      : 'border-transparent text-gray-500 hover:text-gray-700'
-                  }`}
+                  onClick={openEditClient}
+                  className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1.5 mb-1 transition-colors"
                 >
-                  {t === 'overview' ? 'Overview' : 'Completed Forms'}
+                  <Pencil className="h-3.5 w-3.5" /> Edit
                 </button>
-              ))}
+              )}
             </div>
 
             {/* Forms tab */}
@@ -297,7 +342,21 @@ export default function AdminClients() {
 
             {/* Overview tab */}
             {detailTab === 'overview' && <>
-            {/* Contact info */}
+            {editMode ? (
+              <div className="space-y-3 border border-gray-200 rounded-xl p-3">
+                <Input label="Name" value={editName} onChange={e => setEditName(e.target.value)} required />
+                <Input label="Email" type="email" value={editEmail} onChange={e => setEditEmail(e.target.value)} required />
+                <Input label="Phone" type="tel" value={editPhone} onChange={e => setEditPhone(e.target.value)} placeholder="+44 7700 900000" />
+                {editError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{editError}</p>}
+                <div className="flex gap-2 justify-end">
+                  <Button variant="secondary" size="sm" onClick={() => setEditMode(false)}>
+                    <X className="h-3.5 w-3.5" /> Cancel
+                  </Button>
+                  <Button size="sm" loading={editSaving} onClick={handleSaveClient}>Save</Button>
+                </div>
+              </div>
+            ) : (
+            /* Contact info */
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="flex items-center gap-2 text-sm text-gray-600">
                 <Mail className="h-4 w-4 text-gray-400 shrink-0" />
@@ -314,6 +373,7 @@ export default function AdminClients() {
                 <span className="font-semibold text-gray-900">{formatCurrency(selected.totalSpent)} total spent</span>
               </div>
             </div>
+            )}
 
             {/* Summary stats */}
             <div className="grid grid-cols-3 gap-3">

@@ -1,14 +1,16 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import {
   format, addDays, subDays, addWeeks, subWeeks, addMonths, startOfDay, endOfDay, startOfWeek, endOfWeek,
-  parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday, isSameDay,
+  parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday, isSameDay, getDay,
 } from 'date-fns'
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck, ClipboardList,
+  Clock, CalendarRange, Sparkles,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
+import { useAuthStore } from '@/store/authStore'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
@@ -16,7 +18,7 @@ import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Input, Textarea } from '@/components/ui/Input'
 import { cn } from '@/lib/cn'
 import { formatCurrency } from '@/lib/currency'
-import type { Booking, Staff, Service, Customer, Resource } from '@/types'
+import type { Booking, Staff, Service, Customer, Resource, Availability } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 const HOUR_HEIGHT = 60
@@ -75,6 +77,7 @@ type BlockedTime = {
   starts_at: string
   ends_at: string
   reason: string | null
+  is_shift_adjustment: boolean
 }
 
 type ActivityLogEntry = {
@@ -94,6 +97,20 @@ interface DragState {
   currentEndsAt: string
 }
 
+type BookingAddon = {
+  addon_id: string
+  price: number
+  service_addon: { name: string; duration_minutes: number } | null
+}
+
+type AvailableAddon = {
+  id: string
+  service_id: string
+  name: string
+  duration_minutes: number
+  price: number
+}
+
 export default function AdminCalendar() {
   const [selectedDay, setSelectedDay] = useState(new Date())
   const [viewMode, setViewMode] = useState<'day' | 'week'>('day')
@@ -104,6 +121,20 @@ export default function AdminCalendar() {
   const [resources, setResources] = useState<Resource[]>([])
   const [loading, setLoading] = useState(true)
   const [ratings, setRatings] = useState<Record<string, { avg: number; count: number }>>({})
+  const [availability, setAvailability] = useState<Availability[]>([])
+  const authStaffId = useAuthStore(s => s.staffId)
+
+  // Staff view filter + roster panel
+  const [staffFilter, setStaffFilter] = useState<'all' | 'mine' | string>('all')
+  const [rosterOpen, setRosterOpen] = useState(false)
+
+  // Shift adjustment popover
+  const [shiftAdjustFor, setShiftAdjustFor] = useState<Staff | null>(null)
+  const [shiftStart, setShiftStart] = useState('')
+  const [shiftEnd, setShiftEnd] = useState('')
+  const [shiftReason, setShiftReason] = useState('')
+  const [shiftSaving, setShiftSaving] = useState(false)
+  const [shiftError, setShiftError] = useState('')
 
   // New booking modal
   const [nbModalOpen, setNbModalOpen] = useState(false)
@@ -147,6 +178,7 @@ export default function AdminCalendar() {
   // Booking detail / edit
   const [selectedBooking, setSelectedBooking] = useState<RichBooking | null>(null)
   const [detailCapacity, setDetailCapacity] = useState<{ taken: number; max: number } | null>(null)
+  const [detailAddons, setDetailAddons] = useState<BookingAddon[]>([])
   const [actionLoading, setActionLoading] = useState(false)
   const [cancelReasonOpen, setCancelReasonOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
@@ -174,6 +206,10 @@ export default function AdminCalendar() {
   const [editSpotsBooked, setEditSpotsBooked] = useState(1)
   const [editSlotCapacity, setEditSlotCapacity] = useState<{ taken: number; max: number } | null>(null)
   const [cancelScope, setCancelScope] = useState<'one' | 'series'>('one')
+  // Add-ons in edit mode
+  const [availableAddons, setAvailableAddons] = useState<AvailableAddon[]>([])
+  const [editAddonIds, setEditAddonIds] = useState<Set<string>>(new Set())
+  const [originalAddonIds, setOriginalAddonIds] = useState<Set<string>>(new Set())
   // Token state in edit mode
   const [editTokenInfo, setEditTokenInfo] = useState<{ membershipId: string; planName: string; tokens: number } | null>(null)
   const [editTokenApplied, setEditTokenApplied] = useState(false)
@@ -257,6 +293,12 @@ export default function AdminCalendar() {
   }, [])
 
   useEffect(() => {
+    supabase.from('availability').select('*').then(({ data }) => {
+      if (data) setAvailability(data as Availability[])
+    })
+  }, [])
+
+  useEffect(() => {
     async function load() {
       setLoading(true)
       const rangeStart = viewMode === 'week' ? startOfWeek(selectedDay, { weekStartsOn: 1 }) : startOfDay(selectedDay)
@@ -276,7 +318,7 @@ export default function AdminCalendar() {
         supabase.from('services').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).order('name'),
         supabase
           .from('blocked_times')
-          .select('id, staff_id, starts_at, ends_at, reason')
+          .select('id, staff_id, starts_at, ends_at, reason, is_shift_adjustment')
           .lt('starts_at', dayEnd)
           .gt('ends_at', dayStart),
         supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'room').order('name'),
@@ -356,6 +398,16 @@ export default function AdminCalendar() {
     return () => { cancelled = true }
   }, [editMode, selectedBooking, editServiceId, editDate, editTime])
 
+  // Available add-ons for the edit form, staff-qualification-aware (same RPC the customer booking flow uses).
+  useEffect(() => {
+    if (!editMode || !editServiceId) { setAvailableAddons([]); return }
+    let cancelled = false
+    supabase
+      .rpc('get_available_addons', { p_service_id: editServiceId, p_staff_id: editStaffId })
+      .then(({ data }) => { if (!cancelled) setAvailableAddons((data ?? []) as AvailableAddon[]) })
+    return () => { cancelled = true }
+  }, [editMode, editServiceId, editStaffId])
+
   const categoryColorMap = useMemo(() => {
     const cats = [...new Set(bookings.map(b => b.service?.category))]
     return Object.fromEntries(cats.map((c, i) => [c, SERVICE_COLORS[i % SERVICE_COLORS.length]]))
@@ -420,6 +472,104 @@ export default function AdminCalendar() {
       .filter(b => b.id !== excludeBookingId)
       .reduce((sum, b) => sum + (b.spots_booked ?? 1), 0)
     return { taken, max: service.max_capacity ?? 8 }
+  }
+
+  async function fetchBookingAddons(bookingId: string): Promise<BookingAddon[]> {
+    const { data } = await supabase
+      .from('booking_addons')
+      .select('addon_id, price, service_addon:service_addons(name, duration_minutes)')
+      .eq('booking_id', bookingId)
+    return (data ?? []) as unknown as BookingAddon[]
+  }
+
+  // A staff member's effective working window for a given day: their normal weekly
+  // availability, narrowed by any is_shift_adjustment blocks (e.g. an early finish)
+  // for that specific day — without ever touching the underlying availability row.
+  function getStaffDayStatus(member: Staff, day: Date):
+    | { kind: 'holiday' }
+    | { kind: 'not_scheduled' }
+    | { kind: 'scheduled'; start: string; end: string; adjusted: boolean } {
+    if (member.on_holiday) return { kind: 'holiday' }
+    const dow = getDay(day)
+    const avail = availability.find(a => a.staff_id === member.id && a.day_of_week === dow)
+    if (!avail) return { kind: 'not_scheduled' }
+    let start = avail.start_time.slice(0, 5)
+    let end = avail.end_time.slice(0, 5)
+    let adjusted = false
+    const dayStr = format(day, 'yyyy-MM-dd')
+    for (const bt of blockedTimes) {
+      if (bt.staff_id !== member.id || !bt.is_shift_adjustment) continue
+      if (format(parseISO(bt.starts_at), 'yyyy-MM-dd') !== dayStr) continue
+      const btStart = format(parseISO(bt.starts_at), 'HH:mm')
+      const btEnd = format(parseISO(bt.ends_at), 'HH:mm')
+      if (btStart <= start) { start = btEnd; adjusted = true }
+      if (btEnd >= end) { end = btStart; adjusted = true }
+    }
+    return { kind: 'scheduled', start, end, adjusted }
+  }
+
+  function timeToTop(timeStr: string): number {
+    const [h, m] = timeStr.split(':').map(Number)
+    const raw = (h - START_HOUR) * HOUR_HEIGHT + (m / 60) * HOUR_HEIGHT
+    return Math.max(0, Math.min(raw, HOUR_HEIGHT * (END_HOUR - START_HOUR)))
+  }
+
+  function openShiftAdjust(member: Staff) {
+    const status = getStaffDayStatus(member, selectedDay)
+    if (status.kind !== 'scheduled') return
+    setShiftAdjustFor(member)
+    setShiftStart(status.start)
+    setShiftEnd(status.end)
+    setShiftReason('')
+    setShiftError('')
+  }
+
+  async function handleSaveShiftAdjust() {
+    if (!shiftAdjustFor) return
+    const status = getStaffDayStatus(shiftAdjustFor, selectedDay)
+    if (status.kind !== 'scheduled') return
+    const dow = getDay(selectedDay)
+    const avail = availability.find(a => a.staff_id === shiftAdjustFor.id && a.day_of_week === dow)
+    if (!avail) return
+    const originalStart = avail.start_time.slice(0, 5)
+    const originalEnd = avail.end_time.slice(0, 5)
+    if (shiftStart >= shiftEnd) { setShiftError('Start must be before finish.'); return }
+    if (shiftStart < originalStart || shiftEnd > originalEnd) {
+      setShiftError(`Adjusted hours must fall within their normal shift (${originalStart}–${originalEnd}).`)
+      return
+    }
+    const rows: Array<{ staff_id: string; starts_at: string; ends_at: string; reason: string | null; is_shift_adjustment: boolean }> = []
+    const dayStr = format(selectedDay, 'yyyy-MM-dd')
+    if (shiftStart > originalStart) {
+      rows.push({
+        staff_id: shiftAdjustFor.id,
+        starts_at: new Date(`${dayStr}T${originalStart}:00`).toISOString(),
+        ends_at: new Date(`${dayStr}T${shiftStart}:00`).toISOString(),
+        reason: shiftReason.trim() || 'Shift adjusted', is_shift_adjustment: true,
+      })
+    }
+    if (shiftEnd < originalEnd) {
+      rows.push({
+        staff_id: shiftAdjustFor.id,
+        starts_at: new Date(`${dayStr}T${shiftEnd}:00`).toISOString(),
+        ends_at: new Date(`${dayStr}T${originalEnd}:00`).toISOString(),
+        reason: shiftReason.trim() || 'Shift adjusted', is_shift_adjustment: true,
+      })
+    }
+    if (rows.length === 0) { setShiftError('No change to save.'); return }
+    setShiftSaving(true)
+    setShiftError('')
+    const { data, error } = await supabase
+      .from('blocked_times')
+      .insert(rows)
+      .select('id, staff_id, starts_at, ends_at, reason, is_shift_adjustment')
+    if (error) {
+      setShiftError(error.message)
+    } else {
+      setBlockedTimes(prev => [...prev, ...(data as BlockedTime[])])
+      setShiftAdjustFor(null)
+    }
+    setShiftSaving(false)
   }
 
   function timeFromPointerY(e: React.MouseEvent | React.DragEvent, el: HTMLElement) {
@@ -647,6 +797,11 @@ export default function AdminCalendar() {
     setEditSpotsBooked(selectedBooking.spots_booked ?? 1)
     setEditSlotCapacity(null)
 
+    const currentAddons = await fetchBookingAddons(selectedBooking.id)
+    const currentIds = new Set(currentAddons.map(a => a.addon_id))
+    setEditAddonIds(currentIds)
+    setOriginalAddonIds(currentIds)
+
     await refreshEditTokenInfo(selectedBooking.customer?.email, selectedBooking.service?.category, selectedBooking.id, true)
   }
 
@@ -706,6 +861,8 @@ export default function AdminCalendar() {
     checkBookingForm(b.service_id, b.customer_id).then(setSelectedBookingForm)
     setDetailCapacity(null)
     fetchSlotCapacity(b.service_id, b.starts_at).then(setDetailCapacity)
+    setDetailAddons([])
+    fetchBookingAddons(b.id).then(setDetailAddons)
   }
 
   async function handleCancelWithReason(bookingId: string) {
@@ -771,8 +928,10 @@ export default function AdminCalendar() {
     const matchedResource = resources.find((r) => r.id === editResourceId) ?? null
     const matchedEquipment = equipmentResources.find((r) => r.id === editEquipmentResourceId) ?? null
     const matchedStaff = editStaffId ? staff.find(s => s.id === editStaffId) ?? null : null
+    const selectedAddons = availableAddons.filter(a => editAddonIds.has(a.id))
+    const addonExtraDuration = selectedAddons.reduce((sum, a) => sum + a.duration_minutes, 0)
     const startsAt = new Date(`${editDate}T${editTime}:00`)
-    const endsAt = addMinutes(startsAt, newService.duration_minutes)
+    const endsAt = addMinutes(startsAt, newService.duration_minutes + addonExtraDuration)
     const enteredPrice = editPrice.trim() ? Math.round(parseFloat(editPrice) * 100) : newService.price
     const priceOverride = Number.isFinite(enteredPrice) && enteredPrice !== newService.price ? enteredPrice : null
 
@@ -823,6 +982,23 @@ export default function AdminCalendar() {
       }
       setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, ...patch } : b))
       setSelectedBooking(prev => prev ? { ...prev, ...patch } : null)
+
+      const addonsToAdd = [...editAddonIds].filter(id => !originalAddonIds.has(id))
+      const addonsToRemove = [...originalAddonIds].filter(id => !editAddonIds.has(id))
+      if (addonsToAdd.length) {
+        await supabase.from('booking_addons').insert(
+          addonsToAdd.map(addonId => ({
+            booking_id: selectedBooking.id,
+            addon_id: addonId,
+            price: availableAddons.find(a => a.id === addonId)?.price ?? 0,
+          })),
+        )
+      }
+      if (addonsToRemove.length) {
+        await supabase.from('booking_addons').delete().eq('booking_id', selectedBooking.id).in('addon_id', addonsToRemove)
+      }
+      fetchBookingAddons(selectedBooking.id).then(setDetailAddons)
+
       await refreshActivityLog(selectedBooking.id)
       setEditMode(false)
     }
@@ -1035,6 +1211,9 @@ export default function AdminCalendar() {
       : null
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(selectedDay, { weekStartsOn: 1 }), i))
 
+  const resolvedStaffFilterId = staffFilter === 'all' ? null : staffFilter === 'mine' ? authStaffId : staffFilter
+  const visibleStaff = resolvedStaffFilterId ? staff.filter(s => s.id === resolvedStaffFilterId) : staff
+
   return (
     <div className={cn(drag && 'select-none')}>
       {/* Header */}
@@ -1062,6 +1241,19 @@ export default function AdminCalendar() {
               Week
             </button>
           </div>
+          <select
+            value={staffFilter}
+            onChange={e => setStaffFilter(e.target.value)}
+            className="h-9 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+          >
+            <option value="all">All staff</option>
+            {authStaffId && staff.some(s => s.id === authStaffId) && <option value="mine">Just me</option>}
+            {staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <Button variant={rosterOpen ? 'primary' : 'secondary'} size="sm" onClick={() => setRosterOpen(o => !o)}>
+            <CalendarRange className="h-3.5 w-3.5" />
+            Roster
+          </Button>
           <Button variant="secondary" size="sm" onClick={openBlockTime}>
             <Lock className="h-3.5 w-3.5" />
             Block Time
@@ -1110,15 +1302,59 @@ export default function AdminCalendar() {
         </div>
       </div>
 
+      {rosterOpen && (
+        <div className="bg-white border border-gray-200 brand-card overflow-hidden mb-5 p-4">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+            Roster · {format(selectedDay, 'EEEE d MMM')}
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {staff.map(member => {
+              const status = getStaffDayStatus(member, selectedDay)
+              return (
+                <div key={member.id} className="flex items-center justify-between gap-2 border border-gray-100 rounded-lg px-3 py-2.5">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="h-7 w-7 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500 shrink-0">
+                      {member.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{member.name}</p>
+                      {status.kind === 'holiday' && <p className="text-xs text-amber-600">On Holiday</p>}
+                      {status.kind === 'not_scheduled' && <p className="text-xs text-gray-400">Not scheduled</p>}
+                      {status.kind === 'scheduled' && (
+                        <p className="text-xs text-gray-500">
+                          {status.start}–{status.end}
+                          {status.adjusted && <span className="text-(--color-primary) font-medium"> · adjusted</span>}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {status.kind === 'scheduled' && (
+                    <button
+                      onClick={() => openShiftAdjust(member)}
+                      title="Adjust shift for this day"
+                      className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 shrink-0"
+                    >
+                      <Clock className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {viewMode === 'day' ? (
       <div className="bg-white border border-gray-200 brand-card overflow-hidden overflow-x-auto">
         {/* Staff header row */}
         <div
           className="grid border-b border-gray-200"
-          style={{ gridTemplateColumns: `56px repeat(${staff.length + 1}, minmax(140px, 1fr))` }}
+          style={{ gridTemplateColumns: `56px repeat(${visibleStaff.length + (resolvedStaffFilterId ? 0 : 1)}, minmax(140px, 1fr))` }}
         >
           <div className="border-r border-gray-100" />
-          {staff.map(member => (
+          {visibleStaff.map(member => {
+            const dayStatus = getStaffDayStatus(member, selectedDay)
+            return (
             <div
               key={member.id}
               className={cn('px-3 py-3 border-r border-gray-100 flex flex-col items-center gap-1.5', member.on_holiday ? 'bg-amber-50' : '')}
@@ -1147,9 +1383,21 @@ export default function AdminCalendar() {
                     <span className="text-xs text-gray-400">({ratings[member.id].count})</span>
                   </div>
                 )}
+                {dayStatus.kind === 'scheduled' && (
+                  <button
+                    onClick={() => openShiftAdjust(member)}
+                    title="Adjust shift for this day"
+                    className={cn('flex items-center gap-1 mx-auto mt-1 text-xs hover:text-gray-700', dayStatus.adjusted ? 'text-(--color-primary) font-medium' : 'text-gray-400')}
+                  >
+                    <Clock className="h-3 w-3" />
+                    {dayStatus.start}–{dayStatus.end}
+                  </button>
+                )}
               </div>
             </div>
-          ))}
+            )
+          })}
+          {!resolvedStaffFilterId && (
           <div className="px-3 py-3 flex flex-col items-center gap-1.5 bg-gray-50/60">
             <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
               <Users className="h-5 w-5 text-gray-400" />
@@ -1159,11 +1407,12 @@ export default function AdminCalendar() {
               <p className="text-xs text-gray-400 mt-0.5">Unassigned</p>
             </div>
           </div>
+          )}
         </div>
 
         {/* Time grid */}
         <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: `${HOUR_HEIGHT * (END_HOUR - START_HOUR)}px` }}>
-          <div className="relative grid" style={{ gridTemplateColumns: `56px repeat(${staff.length + 1}, minmax(140px, 1fr))` }}>
+          <div className="relative grid" style={{ gridTemplateColumns: `56px repeat(${visibleStaff.length + (resolvedStaffFilterId ? 0 : 1)}, minmax(140px, 1fr))` }}>
             {/* Hour labels */}
             <div className="border-r border-gray-100">
               {hours.map(h => (
@@ -1174,8 +1423,9 @@ export default function AdminCalendar() {
             </div>
 
             {/* Staff columns */}
-            {staff.map(member => {
-              const memberBlocks = blockedTimes.filter(bt => bt.staff_id === member.id)
+            {visibleStaff.map(member => {
+              const memberBlocks = blockedTimes.filter(bt => bt.staff_id === member.id && !bt.is_shift_adjustment)
+              const dayStatus = getStaffDayStatus(member, selectedDay)
               return (
                 <div
                   key={member.id}
@@ -1198,6 +1448,28 @@ export default function AdminCalendar() {
                       <p className="text-xs font-bold text-amber-700">On Holiday</p>
                       <p className="text-xs text-amber-500">No availability</p>
                     </div>
+                  )}
+
+                  {/* Shift-adjustment overlay — off-duty portions of an adjusted shift */}
+                  {!member.on_holiday && dayStatus.kind === 'scheduled' && dayStatus.adjusted && (
+                    <>
+                      {timeToTop(dayStatus.start) > 0 && (
+                        <div
+                          className="absolute left-0 right-0 top-0 z-[5] flex items-end justify-center pb-1"
+                          style={{ height: timeToTop(dayStatus.start), backgroundColor: 'rgba(229,231,235,0.5)', backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 10px, rgba(107,114,128,0.08) 10px, rgba(107,114,128,0.08) 20px)' }}
+                        >
+                          <p className="text-xs text-gray-400 font-medium">Starts {dayStatus.start}</p>
+                        </div>
+                      )}
+                      {timeToTop(dayStatus.end) < HOUR_HEIGHT * (END_HOUR - START_HOUR) && (
+                        <div
+                          className="absolute left-0 right-0 bottom-0 z-[5] flex items-start justify-center pt-1"
+                          style={{ top: timeToTop(dayStatus.end), backgroundColor: 'rgba(229,231,235,0.5)', backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 10px, rgba(107,114,128,0.08) 10px, rgba(107,114,128,0.08) 20px)' }}
+                        >
+                          <p className="text-xs text-gray-400 font-medium">Finished {dayStatus.end}</p>
+                        </div>
+                      )}
+                    </>
                   )}
 
                   {/* Blocked time chips — clickable to delete */}
@@ -1270,6 +1542,7 @@ export default function AdminCalendar() {
             })}
 
             {/* Unstaffed column */}
+            {!resolvedStaffFilterId && (
             <div
               className="relative border-gray-100 bg-gray-50/30 cursor-crosshair"
               style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
@@ -1310,6 +1583,7 @@ export default function AdminCalendar() {
                 )
               })}
             </div>
+            )}
 
             {/* Current time line */}
             {timeLineTop !== null && (
@@ -1350,7 +1624,7 @@ export default function AdminCalendar() {
 
             {/* Day columns */}
             {weekDays.map(day => {
-              const dayBookings = packOverlaps(bookings.filter(b => isSameDay(parseISO(b.starts_at), day)))
+              const dayBookings = packOverlaps(bookings.filter(b => isSameDay(parseISO(b.starts_at), day) && (!resolvedStaffFilterId || b.staff_id === resolvedStaffFilterId)))
               const dayBlocks = blockedTimes.filter(bt => isSameDay(parseISO(bt.starts_at), day))
               return (
                 <div
@@ -1674,6 +1948,25 @@ export default function AdminCalendar() {
         </div>
       </Modal>
 
+      {/* ── Adjust Shift Modal ── */}
+      <Modal open={!!shiftAdjustFor} onClose={() => setShiftAdjustFor(null)} title={`Adjust Shift — ${shiftAdjustFor?.name ?? ''}`} size="sm">
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">
+            For {format(selectedDay, 'EEEE d MMM')} only — their regular weekly hours are unchanged.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Start" type="time" value={shiftStart} onChange={e => setShiftStart(e.target.value)} required />
+            <Input label="Finish" type="time" value={shiftEnd} onChange={e => setShiftEnd(e.target.value)} required />
+          </div>
+          <Input label="Reason (optional)" value={shiftReason} onChange={e => setShiftReason(e.target.value)} placeholder="e.g. Early finish, no bookings" />
+          {shiftError && <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{shiftError}</p>}
+          <div className="flex gap-2 justify-end pt-1">
+            <Button variant="secondary" onClick={() => setShiftAdjustFor(null)}>Cancel</Button>
+            <Button onClick={handleSaveShiftAdjust} loading={shiftSaving}>Save</Button>
+          </div>
+        </div>
+      </Modal>
+
       {/* ── Delete Block Confirmation ── */}
       <Modal open={!!selectedBlock} onClose={() => setSelectedBlock(null)} title="Remove Block" size="sm">
         {selectedBlock && (
@@ -1758,6 +2051,16 @@ export default function AdminCalendar() {
                 <div className="flex justify-between gap-4">
                   <dt className="text-gray-500 shrink-0">Notes</dt>
                   <dd className="text-gray-700 text-right text-xs">{selectedBooking.notes}</dd>
+                </div>
+              )}
+              {detailAddons.length > 0 && (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500 shrink-0 flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" /> Add-ons</dt>
+                  <dd className="text-gray-900 text-right text-xs space-y-0.5">
+                    {detailAddons.map(a => (
+                      <p key={a.addon_id}>{a.service_addon?.name ?? 'Add-on'} · {formatCurrency(a.price)}</p>
+                    ))}
+                  </dd>
                 </div>
               )}
               {(selectedBooking.discount_amount ?? 0) > 0 && (
@@ -1994,11 +2297,15 @@ export default function AdminCalendar() {
                 />
               </div>
             </div>
-            {editService && (
-              <p className="text-xs text-gray-500 bg-gray-50 rounded px-3 py-2 -mt-2">
-                {editService.duration_minutes} min · ends at {editDate && editTime ? format(addMinutes(new Date(`${editDate}T${editTime}:00`), editService.duration_minutes), 'HH:mm') : '—'}
-              </p>
-            )}
+            {editService && (() => {
+              const addonMinutes = availableAddons.filter(a => editAddonIds.has(a.id)).reduce((sum, a) => sum + a.duration_minutes, 0)
+              const totalMinutes = editService.duration_minutes + addonMinutes
+              return (
+                <p className="text-xs text-gray-500 bg-gray-50 rounded px-3 py-2 -mt-2">
+                  {totalMinutes} min{addonMinutes > 0 ? ` (${editService.duration_minutes} + ${addonMinutes} add-on)` : ''} · ends at {editDate && editTime ? format(addMinutes(new Date(`${editDate}T${editTime}:00`), totalMinutes), 'HH:mm') : '—'}
+                </p>
+              )
+            })()}
 
             {editService?.is_group_session && (
               <div className="flex items-end gap-3">
@@ -2017,6 +2324,36 @@ export default function AdminCalendar() {
                     {editSlotCapacity.taken} of {editSlotCapacity.max} other spot(s) booked at this time
                   </p>
                 )}
+              </div>
+            )}
+
+            {availableAddons.length > 0 && (
+              <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5" /> Add-ons
+                </p>
+                <div className="space-y-1.5">
+                  {availableAddons.map(addon => {
+                    const checked = editAddonIds.has(addon.id)
+                    return (
+                      <label key={addon.id} className="flex items-center gap-2.5 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setEditAddonIds(prev => {
+                            const next = new Set(prev)
+                            checked ? next.delete(addon.id) : next.add(addon.id)
+                            return next
+                          })}
+                          className="accent-(--color-primary)"
+                        />
+                        <span className="flex-1 text-gray-700">{addon.name}</span>
+                        <span className="text-xs text-gray-400">+{addon.duration_minutes}min</span>
+                        <span className="text-xs font-semibold text-gray-900">{formatCurrency(addon.price)}</span>
+                      </label>
+                    )
+                  })}
+                </div>
               </div>
             )}
 

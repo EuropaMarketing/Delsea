@@ -156,6 +156,7 @@ export interface BlockedTime {
   starts_at: string
   ends_at: string
   reason: string | null
+  is_shift_adjustment?: boolean
 }
 
 export type ResourceType = 'room' | 'equipment' | 'other'
