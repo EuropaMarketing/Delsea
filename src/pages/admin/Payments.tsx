@@ -51,7 +51,8 @@ export default function AdminPayments() {
       })
     setSaving(false)
     if (error) {
-      setSaveError('Failed to save. Please try again.')
+      console.error('business_payment_settings upsert failed:', error)
+      setSaveError(error.message || 'Failed to save. Please try again.')
     } else {
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
