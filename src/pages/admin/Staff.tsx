@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { format, parseISO, startOfDay, endOfDay, isBefore } from 'date-fns'
 import { Plus, Pencil, Trash2, PlaneTakeoff, Camera, CalendarX2, Images, KeyRound, CheckCircle2, XCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -77,7 +78,19 @@ export default function AdminStaff() {
   const [leaveForm, setLeaveForm] = useState({ startDate: '', endDate: '', reason: '' })
   const [leaveError, setLeaveError] = useState('')
 
+  const [searchParams, setSearchParams] = useSearchParams()
+
   useEffect(() => { load() }, [])
+
+  // Deep link from elsewhere in the admin (e.g. clicking a staff name on the Calendar).
+  useEffect(() => {
+    const editId = searchParams.get('edit')
+    if (!editId || staff.length === 0) return
+    const member = staff.find(s => s.id === editId)
+    if (member) openEdit(member)
+    setSearchParams(params => { params.delete('edit'); return params }, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staff, searchParams])
 
   async function load() {
     const { data } = await supabase

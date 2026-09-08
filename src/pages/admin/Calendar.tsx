@@ -1,12 +1,13 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   format, addDays, subDays, addWeeks, subWeeks, addMonths, startOfDay, endOfDay, startOfWeek, endOfWeek,
-  parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday, isSameDay, getDay,
+  parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday, isSameDay, getDay, isPast,
 } from 'date-fns'
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck, ClipboardList,
-  Clock, CalendarRange, Sparkles,
+  Clock, CalendarRange, Sparkles, Mail, Phone as PhoneIcon, CalendarClock,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
@@ -127,7 +128,28 @@ type Attendee = {
   customer: { name: string; email: string } | null
 }
 
+type CustomerBookingHistory = {
+  id: string
+  starts_at: string
+  status: string
+  service: { name: string } | null
+}
+
+type CustomerFormHistory = {
+  id: string
+  completed_at: string
+  expires_at: string
+  form: { title: string } | null
+}
+
+type CustomerMembershipHistory = {
+  id: string
+  tokens_remaining: number
+  plan: { name: string } | null
+}
+
 export default function AdminCalendar() {
+  const navigate = useNavigate()
   const [selectedDay, setSelectedDay] = useState(new Date())
   const [viewMode, setViewMode] = useState<'day' | 'week'>('day')
   const [bookings, setBookings] = useState<RichBooking[]>([])
@@ -204,6 +226,10 @@ export default function AdminCalendar() {
   const [selectedBooking, setSelectedBooking] = useState<RichBooking | null>(null)
   const [detailCapacity, setDetailCapacity] = useState<{ taken: number; max: number } | null>(null)
   const [detailAddons, setDetailAddons] = useState<BookingAddon[]>([])
+  const [customerBookings, setCustomerBookings] = useState<CustomerBookingHistory[]>([])
+  const [customerForms, setCustomerForms] = useState<CustomerFormHistory[]>([])
+  const [customerMemberships, setCustomerMemberships] = useState<CustomerMembershipHistory[]>([])
+  const [customerSidebarLoading, setCustomerSidebarLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [cancelReasonOpen, setCancelReasonOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
@@ -940,6 +966,34 @@ export default function AdminCalendar() {
     if (data) setActivityLog(data as ActivityLogEntry[])
   }
 
+  async function fetchCustomerSidebar(customerId: string, excludeBookingId: string) {
+    setCustomerSidebarLoading(true)
+    const [bkRes, formRes, memRes] = await Promise.all([
+      supabase
+        .from('bookings')
+        .select('id, starts_at, status, service:services(name)')
+        .eq('customer_id', customerId)
+        .neq('id', excludeBookingId)
+        .order('starts_at', { ascending: false })
+        .limit(8),
+      supabase
+        .from('form_responses')
+        .select('id, completed_at, expires_at, form:service_forms(title)')
+        .eq('customer_id', customerId)
+        .order('completed_at', { ascending: false })
+        .limit(8),
+      supabase
+        .from('customer_memberships')
+        .select('id, tokens_remaining, plan:membership_plans(name)')
+        .eq('customer_id', customerId)
+        .order('purchased_at', { ascending: false }),
+    ])
+    setCustomerBookings((bkRes.data ?? []) as unknown as CustomerBookingHistory[])
+    setCustomerForms((formRes.data ?? []) as unknown as CustomerFormHistory[])
+    setCustomerMemberships((memRes.data ?? []) as unknown as CustomerMembershipHistory[])
+    setCustomerSidebarLoading(false)
+  }
+
   function openBookingDetail(b: RichBooking) {
     setSelectedBooking(b)
     setSelectedBookingForm(null)
@@ -959,6 +1013,8 @@ export default function AdminCalendar() {
     fetchSlotCapacity(b.service_id, b.starts_at).then(setDetailCapacity)
     setDetailAddons([])
     fetchBookingAddons(b.id).then(setDetailAddons)
+    setCustomerBookings([]); setCustomerForms([]); setCustomerMemberships([])
+    fetchCustomerSidebar(b.customer_id, b.id)
   }
 
   async function handleCancelWithReason(bookingId: string) {
@@ -1514,9 +1570,14 @@ export default function AdminCalendar() {
                 {member.on_holiday && <span className="absolute -bottom-0.5 -right-0.5 text-sm leading-none">✈︎</span>}
               </div>
               <div className="text-center">
-                <p className={cn('text-xs font-semibold truncate max-w-28', member.on_holiday ? 'text-amber-700' : 'text-gray-800')}>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/admin/staff?edit=${member.id}`)}
+                  title="Open staff record"
+                  className={cn('text-xs font-semibold truncate max-w-28 hover:underline', member.on_holiday ? 'text-amber-700' : 'text-gray-800')}
+                >
                   {member.name}
-                </p>
+                </button>
                 <p className={cn('text-xs mt-0.5 capitalize', member.on_holiday ? 'text-amber-500 font-medium' : 'text-gray-400')}>
                   {member.on_holiday ? 'On Holiday' : member.role}
                 </p>
@@ -2228,10 +2289,11 @@ export default function AdminCalendar() {
         open={!!selectedBooking}
         onClose={closeDetail}
         title={selectedBooking ? `${format(parseISO(selectedBooking.starts_at), 'HH:mm')} – ${format(parseISO(selectedBooking.ends_at), 'HH:mm')}` : ''}
-        size={editMode ? 'md' : 'sm'}
+        size={editMode ? 'md' : 'xl'}
       >
         {selectedBooking && !editMode && (
-          <div className="space-y-4">
+          <div className="flex flex-col lg:flex-row gap-5">
+          <div className="flex-1 min-w-0 space-y-4">
             {selectedBookingForm?.needsForm && (
               <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
                 <ClipboardList className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
@@ -2273,10 +2335,18 @@ export default function AdminCalendar() {
                   <dd className="text-gray-700 text-xs">{selectedBooking.customer.email}</dd>
                 </div>
               )}
-              {selectedBooking.staff && (
+              {selectedBooking.staff && selectedBooking.staff_id && (
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Staff</dt>
-                  <dd className="text-gray-700">{selectedBooking.staff.name}</dd>
+                  <dd>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/admin/staff?edit=${selectedBooking.staff_id}`)}
+                      className="text-(--color-primary) hover:underline font-medium"
+                    >
+                      {selectedBooking.staff.name}
+                    </button>
+                  </dd>
                 </div>
               )}
               {(detailCapacity || (selectedBooking.spots_booked ?? 1) > 1) && (
@@ -2456,6 +2526,94 @@ export default function AdminCalendar() {
               </div>
             )}
           </div>
+
+          {/* ── Customer sidebar ── */}
+          <div className="lg:w-64 shrink-0 lg:border-l lg:border-gray-100 lg:pl-5 space-y-4 lg:max-h-[70vh] lg:overflow-y-auto">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="h-8 w-8 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-500 shrink-0">
+                  {selectedBooking.customer?.name?.charAt(0).toUpperCase() ?? '?'}
+                </div>
+                <p className="font-semibold text-gray-900 text-sm truncate">{selectedBooking.customer?.name}</p>
+              </div>
+              <div className="space-y-1">
+                {selectedBooking.customer?.email && (
+                  <p className="flex items-center gap-1.5 text-xs text-gray-500 truncate">
+                    <Mail className="h-3 w-3 shrink-0" />{selectedBooking.customer.email}
+                  </p>
+                )}
+                {selectedBooking.customer?.phone && (
+                  <p className="flex items-center gap-1.5 text-xs text-gray-500">
+                    <PhoneIcon className="h-3 w-3 shrink-0" />{selectedBooking.customer.phone}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {customerSidebarLoading ? (
+              <p className="text-xs text-gray-400">Loading…</p>
+            ) : (
+              <>
+                {customerMemberships.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                      <Ticket className="h-3 w-3" /> Memberships
+                    </p>
+                    <div className="space-y-1">
+                      {customerMemberships.map(m => (
+                        <p key={m.id} className="text-xs text-gray-700">{m.plan?.name ?? 'Membership'} · {m.tokens_remaining} left</p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                    <CalendarClock className="h-3 w-3" /> Previous Bookings
+                  </p>
+                  {customerBookings.length === 0 ? (
+                    <p className="text-xs text-gray-400">No previous bookings.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {customerBookings.map(cb => (
+                        <div key={cb.id} className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs text-gray-800 truncate">{cb.service?.name ?? 'Booking'}</p>
+                            <p className="text-xs text-gray-400">{format(parseISO(cb.starts_at), 'd MMM yyyy')}</p>
+                          </div>
+                          <Badge variant={statusBadgeVariant(cb.status)} className="capitalize shrink-0">{cb.status}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                    <ClipboardList className="h-3 w-3" /> Forms
+                  </p>
+                  {customerForms.length === 0 ? (
+                    <p className="text-xs text-gray-400">No forms completed.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {customerForms.map(fr => {
+                        const valid = !isPast(parseISO(fr.expires_at))
+                        return (
+                          <div key={fr.id} className="flex items-center justify-between gap-2">
+                            <p className="text-xs text-gray-800 truncate">{fr.form?.title ?? 'Form'}</p>
+                            <span className={cn('text-xs font-medium shrink-0', valid ? 'text-green-600' : 'text-amber-600')}>
+                              {valid ? 'Valid' : 'Expired'}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
         )}
 
         {selectedBooking && editMode && (

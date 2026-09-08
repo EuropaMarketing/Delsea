@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Plus, Pencil, Trash2, ChevronUp, ChevronDown, ClipboardList,
   ToggleRight, Type, AlignLeft, CheckSquare, Phone, Heading1, X, Save, Eye, EyeOff,
-  ChevronRight, ChevronLeft, CheckCircle2, List,
+  ChevronRight, ChevronLeft, CheckCircle2, List, ListChecks,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/Button'
@@ -33,7 +33,7 @@ type FormField = {
   id: string
   form_id: string
   section_id: string
-  field_type: 'heading' | 'yes_no' | 'text' | 'textarea' | 'checkbox' | 'emergency_contact' | 'dropdown'
+  field_type: 'heading' | 'yes_no' | 'text' | 'textarea' | 'checkbox' | 'emergency_contact' | 'dropdown' | 'multi_select'
   label: string
   required: boolean
   position: number
@@ -41,7 +41,7 @@ type FormField = {
 }
 
 type Service = { id: string; name: string }
-type ResponseMap = Record<string, string | boolean | { ec_name?: string; ec_phone?: string; ec_relationship?: string }>
+type ResponseMap = Record<string, string | boolean | string[] | { ec_name?: string; ec_phone?: string; ec_relationship?: string }>
 
 const FIELD_TYPES: { type: FormField['field_type']; label: string; icon: typeof Type; color: string }[] = [
   { type: 'heading',           label: 'Sub-heading',       icon: Heading1,    color: 'text-gray-500 bg-gray-100' },
@@ -49,9 +49,12 @@ const FIELD_TYPES: { type: FormField['field_type']; label: string; icon: typeof 
   { type: 'text',              label: 'Short Text',        icon: Type,        color: 'text-violet-600 bg-violet-50' },
   { type: 'textarea',          label: 'Long Text',         icon: AlignLeft,   color: 'text-orange-600 bg-orange-50' },
   { type: 'dropdown',          label: 'Dropdown',          icon: List,        color: 'text-pink-600 bg-pink-50' },
+  { type: 'multi_select',      label: 'Multiple Choice',   icon: ListChecks,  color: 'text-teal-600 bg-teal-50' },
   { type: 'checkbox',          label: 'Acknowledgement',   icon: CheckSquare, color: 'text-green-600 bg-green-50' },
   { type: 'emergency_contact', label: 'Emergency Contact', icon: Phone,       color: 'text-red-600 bg-red-50' },
 ]
+
+const CHOICE_FIELD_TYPES: FormField['field_type'][] = ['dropdown', 'multi_select']
 
 function fieldMeta(type: FormField['field_type']) {
   return FIELD_TYPES.find(f => f.type === type) ?? FIELD_TYPES[0]
@@ -213,6 +216,32 @@ function FieldRenderer({
     )
   }
 
+  if (field.field_type === 'multi_select') {
+    const choices = field.options?.choices ?? []
+    const selected = Array.isArray(val) ? val : []
+    function toggle(choice: string) {
+      const next = selected.includes(choice) ? selected.filter(c => c !== choice) : [...selected, choice]
+      onChange(field.id, next)
+    }
+    return (
+      <div>
+        <p className="text-sm font-medium text-gray-800 mb-2">
+          {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
+        </p>
+        <div className="space-y-1.5">
+          {choices.map(c => (
+            <label key={c} className="flex items-center gap-2.5 cursor-pointer">
+              <input type="checkbox" checked={selected.includes(c)} onChange={() => toggle(c)}
+                className="h-4 w-4 rounded border-gray-300 accent-(--color-primary) shrink-0" />
+              <span className="text-sm text-gray-800">{c}</span>
+            </label>
+          ))}
+        </div>
+        {hasError && <p className="text-xs text-red-500 mt-1">Select at least one option</p>}
+      </div>
+    )
+  }
+
   return null
 }
 
@@ -314,6 +343,7 @@ export default function AdminForms() {
   const [renamingSection, setRenamingSection] = useState<string | null>(null)
   const [renamingTitle, setRenamingTitle] = useState('')
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [formError, setFormError] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -451,6 +481,7 @@ export default function AdminForms() {
   // ── Fields ──
   async function addField(sectionId: string, type: FormField['field_type']) {
     if (!selectedForm) return
+    setFormError('')
     const sectionFields = fields.filter(f => f.section_id === sectionId)
     const pos = sectionFields.length > 0 ? Math.max(...sectionFields.map(f => f.position)) + 1 : 0
     const defaultLabel =
@@ -459,14 +490,17 @@ export default function AdminForms() {
       type === 'text'    ? 'Your answer' :
       type === 'textarea' ? 'Additional information' :
       type === 'dropdown' ? 'Select an option' :
+      type === 'multi_select' ? 'Select all that apply' :
       type === 'checkbox' ? 'I confirm that I have read and understood the above' :
       'Emergency Contact'
-    const defaultOptions = type === 'dropdown' ? { choices: ['Option 1', 'Option 2'] } : {}
-    const { data } = await supabase
+    const defaultOptions = CHOICE_FIELD_TYPES.includes(type) ? { choices: ['Option 1', 'Option 2'] } : {}
+    const { data, error } = await supabase
       .from('form_fields')
       .insert({ form_id: selectedForm.id, section_id: sectionId, field_type: type, label: defaultLabel, required: type !== 'heading', position: pos, options: defaultOptions })
       .select().single()
-    if (data) {
+    if (error) {
+      setFormError(`Couldn't add field: ${error.message}`)
+    } else if (data) {
       const f = data as FormField
       setFields(p => [...p, f])
       setAddingToSection(null)
@@ -487,12 +521,14 @@ export default function AdminForms() {
   async function saveField(id: string) {
     const field = fields.find(f => f.id === id)
     if (!field) return
+    setFormError('')
     const options: FormField['options'] = {}
     if (field.field_type === 'yes_no' && fieldFollowUp) options.follow_up_label = fieldFollowUpLabel
     if (field.field_type === 'checkbox' && fieldDescription) options.description = fieldDescription
-    if (field.field_type === 'dropdown') options.choices = fieldChoices.map(c => c.trim()).filter(Boolean)
+    if (CHOICE_FIELD_TYPES.includes(field.field_type)) options.choices = fieldChoices.map(c => c.trim()).filter(Boolean)
     const u = { label: fieldLabel.trim() || field.label, required: fieldRequired, options }
-    await supabase.from('form_fields').update(u).eq('id', id)
+    const { error } = await supabase.from('form_fields').update(u).eq('id', id)
+    if (error) { setFormError(`Couldn't save field: ${error.message}`); return }
     setFields(p => p.map(f => f.id === id ? { ...f, ...u } : f))
     setEditingField(null)
   }
@@ -562,6 +598,12 @@ export default function AdminForms() {
             <Card padding="md" className="text-center py-16 text-gray-400 text-sm">Select a form to edit</Card>
           ) : (
             <>
+              {formError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2.5 flex items-center justify-between gap-3">
+                  <span>{formError}</span>
+                  <button onClick={() => setFormError('')} className="shrink-0 text-red-400 hover:text-red-600"><X className="h-4 w-4" /></button>
+                </div>
+              )}
               {/* Settings card */}
               <Card padding="md">
                 <div className="flex items-center justify-between mb-3">
@@ -707,9 +749,9 @@ export default function AdminForms() {
                                   {field.field_type === 'checkbox' && (
                                     <Input label="Sub-text below checkbox (optional)" value={fieldDescription} onChange={e => setFieldDescription(e.target.value)} />
                                   )}
-                                  {field.field_type === 'dropdown' && (
+                                  {CHOICE_FIELD_TYPES.includes(field.field_type) && (
                                     <div>
-                                      <label className="text-xs font-medium text-gray-600 block mb-1">Dropdown options</label>
+                                      <label className="text-xs font-medium text-gray-600 block mb-1">Options</label>
                                       <div className="space-y-1.5">
                                         {fieldChoices.map((choice, i) => (
                                           <div key={i} className="flex items-center gap-2">
