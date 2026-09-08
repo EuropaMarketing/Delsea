@@ -297,6 +297,8 @@ export default function AdminContrastCalendar() {
   const [editTokenInfo, setEditTokenInfo] = useState<{ membershipId: string; planName: string; tokens: number } | null>(null)
   const [editTokenApplied, setEditTokenApplied] = useState(false)
   const [editTokenLoading, setEditTokenLoading] = useState(false)
+  // Whether a membership token has been redeemed for the booking currently shown in view mode
+  const [viewTokenApplied, setViewTokenApplied] = useState(false)
   // Resource state in edit mode
   const [editResourceId, setEditResourceId] = useState<string | null>(null)
   const [editEquipmentResourceId, setEditEquipmentResourceId] = useState<string | null>(null)
@@ -1041,6 +1043,14 @@ export default function AdminContrastCalendar() {
     if (b.combo_group_id) fetchLinkedBookings(b.combo_group_id, b.id)
     setAddLinkedOpen(false)
     setAddLinkedError('')
+    setViewTokenApplied(false)
+    supabase
+      .from('membership_transactions')
+      .select('id')
+      .eq('booking_id', b.id)
+      .eq('type', 'redeem')
+      .maybeSingle()
+      .then(({ data }) => setViewTokenApplied(!!data))
   }
 
   function openAddLinkedService() {
@@ -1275,7 +1285,7 @@ export default function AdminContrastCalendar() {
       p_booking_id: selectedBooking.id,
       p_membership_id: membershipId,
     })
-    if (!error) setEditTokenApplied(true)
+    if (!error) { setEditTokenApplied(true); setViewTokenApplied(true) }
     setEditTokenLoading(false)
   }
 
@@ -1284,6 +1294,7 @@ export default function AdminContrastCalendar() {
     setEditTokenLoading(true)
     await supabase.rpc('refund_token_for_booking', { p_booking_id: selectedBooking.id })
     setEditTokenApplied(false)
+    setViewTokenApplied(false)
     setEditTokenLoading(false)
   }
 
@@ -2311,9 +2322,13 @@ export default function AdminContrastCalendar() {
                 <CreditCard className="h-3.5 w-3.5" /> Payment
               </p>
               <p className="text-xs text-gray-500 capitalize">
-                Status: <span className="font-medium text-gray-700">{(selectedBooking.payment_status ?? 'unpaid').replaceAll('_', ' ')}</span>
+                Status: <span className="font-medium text-gray-700">
+                  {viewTokenApplied ? 'Paid (membership token)' : (selectedBooking.payment_status ?? 'unpaid').replaceAll('_', ' ')}
+                </span>
               </p>
-              {selectedBooking.customer?.sumup_card_token ? (
+              {viewTokenApplied ? (
+                <p className="text-xs text-green-700 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Covered by a membership token</p>
+              ) : selectedBooking.customer?.sumup_card_token ? (
                 selectedBooking.payment_status === 'paid_in_full' ? (
                   <p className="text-xs text-green-700 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Paid in full</p>
                 ) : (
