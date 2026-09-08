@@ -12,6 +12,7 @@ export function generateTimeSlots(
   blockedTimes: BlockedTime[],
   preBuffer = 0,
   postBuffer = 0,
+  minNoticeMinutes = 5,
 ): string[] {
   const dayOfWeek = getDay(date)
   const rawDayAvail = availability.filter((a) => a.day_of_week === dayOfWeek)
@@ -43,10 +44,10 @@ export function generateTimeSlots(
       // The window this slot occupies including buffers
       const slotWindowStart = addMinutes(current, -preBuffer)
       const slotWindowEnd = addMinutes(current, durationMinutes + postBuffer)
-      const nowPlusFive = addMinutes(new Date(), 5)
+      const nowPlusNotice = addMinutes(new Date(), minNoticeMinutes)
 
-      // Skip past slots
-      if (isBefore(current, nowPlusFive)) {
+      // Skip slots that don't meet the minimum notice period
+      if (isBefore(current, nowPlusNotice)) {
         current = addMinutes(current, slotStep)
         continue
       }

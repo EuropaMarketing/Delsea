@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { Upload, ImageIcon } from 'lucide-react'
 import { Textarea } from '@/components/ui/Input'
-import brand, { type BrandConfig, type BorderRadius, DEFAULT_OPENING_HOURS } from '@/config/brand'
+import brand, {
+  type BrandConfig, type BorderRadius, DEFAULT_OPENING_HOURS,
+  DEFAULT_BOOKING_WINDOW_DAYS, DEFAULT_MIN_NOTICE_HOURS,
+  BOOKING_WINDOW_OPTIONS, MIN_NOTICE_OPTIONS,
+} from '@/config/brand'
 import { applyBrandTheme } from '@/lib/theme'
 import { supabase } from '@/lib/supabase'
 import { Input } from '@/components/ui/Input'
@@ -421,9 +425,37 @@ export default function AdminSettings() {
         <Card padding="md">
           <h2 className="font-semibold text-gray-900 mb-1">Booking Policies</h2>
           <p className="text-xs text-gray-500 mb-4">
-            These appear on the checkout screen before every booking. Plain text only.
+            Controls how far ahead customers can book, plus text shown on the checkout screen before every booking.
           </p>
           <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700">How far ahead can people book?</label>
+                <select
+                  value={config.bookingWindowDays ?? DEFAULT_BOOKING_WINDOW_DAYS}
+                  onChange={(e) => handleChange('bookingWindowDays', Number(e.target.value))}
+                  className="h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                >
+                  {BOOKING_WINDOW_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400">Bookable dates shown to customers won't extend past this.</p>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700">Minimum notice before an appointment</label>
+                <select
+                  value={config.minNoticeHours ?? DEFAULT_MIN_NOTICE_HOURS}
+                  onChange={(e) => handleChange('minNoticeHours', Number(e.target.value))}
+                  className="h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                >
+                  {MIN_NOTICE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400">Customers can't book a slot starting sooner than this.</p>
+              </div>
+            </div>
             <Input
               label="Google Review URL"
               value={config.googleReviewUrl ?? ''}

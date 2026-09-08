@@ -28,6 +28,7 @@ export default function AdminServices() {
   const [saving, setSaving] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Service | null>(null)
+  const [priceConfirmOpen, setPriceConfirmOpen] = useState(false)
   const [form, setForm] = useState(empty)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [variantsList, setVariantsList] = useState<ServiceVariant[]>([])
@@ -151,10 +152,21 @@ export default function AdminServices() {
     return e
   }
 
-  async function handleSave() {
+  function handleSave() {
     const e = validate()
     if (Object.keys(e).length) { setErrors(e); return }
+    // Price changed on an existing service — ask whether it should apply to
+    // bookings already on the books, or only to new bookings going forward.
+    if (editTarget && form.price !== editTarget.price) {
+      setPriceConfirmOpen(true)
+      return
+    }
+    doSave()
+  }
+
+  async function doSave(freezeExistingAtOldPrice = false) {
     setSaving(true)
+    const oldPrice = editTarget?.price
 
     const payload = {
       ...form,
@@ -164,12 +176,18 @@ export default function AdminServices() {
     if (editTarget) {
       const { data } = await supabase.from('services').update(payload).eq('id', editTarget.id).select().single()
       if (data) setServices((prev) => prev.map((s) => (s.id === editTarget.id ? data as Service : s)))
+      if (freezeExistingAtOldPrice && oldPrice != null) {
+        // Lock every booking that wasn't already individually price-overridden
+        // to the old price, so only new bookings pick up the new price.
+        await supabase.from('bookings').update({ price_override: oldPrice }).eq('service_id', editTarget.id).is('price_override', null)
+      }
     } else {
       const { data } = await supabase.from('services').insert({ ...payload, business_id: BUSINESS_ID }).select().single()
       if (data) setServices((prev) => [...prev, data as Service])
     }
     setSaving(false)
     setModalOpen(false)
+    setPriceConfirmOpen(false)
   }
 
   async function handleToggle(service: Service) {
@@ -1052,6 +1070,37 @@ export default function AdminServices() {
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
             <Button loading={saving} onClick={handleSave}>Save Service</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Price change scope confirmation */}
+      <Modal open={priceConfirmOpen} onClose={() => setPriceConfirmOpen(false)} title="Update Price" size="sm">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            You're changing the price from <strong>{editTarget && formatCurrency(editTarget.price)}</strong> to{' '}
+            <strong>{formatCurrency(form.price)}</strong>. Should this apply to bookings already made at the old price?
+          </p>
+          <div className="space-y-2">
+            <button
+              onClick={() => doSave(false)}
+              disabled={saving}
+              className="w-full text-left px-4 py-3 border border-gray-200 rounded-xl hover:border-(--color-primary) transition-colors disabled:opacity-50"
+            >
+              <p className="text-sm font-semibold text-gray-900">Update all bookings</p>
+              <p className="text-xs text-gray-500 mt-0.5">Existing bookings at the old price switch to the new price too.</p>
+            </button>
+            <button
+              onClick={() => doSave(true)}
+              disabled={saving}
+              className="w-full text-left px-4 py-3 border border-gray-200 rounded-xl hover:border-(--color-primary) transition-colors disabled:opacity-50"
+            >
+              <p className="text-sm font-semibold text-gray-900">Only new bookings</p>
+              <p className="text-xs text-gray-500 mt-0.5">Existing bookings keep the old price; the new price applies from now on.</p>
+            </button>
+          </div>
+          <div className="flex justify-end">
+            <Button variant="secondary" size="sm" disabled={saving} onClick={() => setPriceConfirmOpen(false)}>Cancel</Button>
           </div>
         </div>
       </Modal>

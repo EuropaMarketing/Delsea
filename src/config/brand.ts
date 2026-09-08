@@ -45,7 +45,34 @@ export interface BrandConfig {
   address?: string
   mapEmbedUrl?: string
   googleReviewUrl?: string
+  bookingWindowDays?: number
+  minNoticeHours?: number
 }
+
+export const DEFAULT_BOOKING_WINDOW_DAYS = 60
+export const DEFAULT_MIN_NOTICE_HOURS = 1
+
+export const BOOKING_WINDOW_OPTIONS: { value: number; label: string }[] = [
+  { value: 7,   label: '1 week' },
+  { value: 14,  label: '2 weeks' },
+  { value: 30,  label: '1 month' },
+  { value: 42,  label: '6 weeks' },
+  { value: 60,  label: '2 months' },
+  { value: 90,  label: '3 months' },
+  { value: 180, label: '6 months' },
+  { value: 365, label: '1 year' },
+]
+
+export const MIN_NOTICE_OPTIONS: { value: number; label: string }[] = [
+  { value: 0,  label: 'No minimum' },
+  { value: 0.5, label: '30 minutes' },
+  { value: 1,  label: '1 hour' },
+  { value: 2,  label: '2 hours' },
+  { value: 4,  label: '4 hours' },
+  { value: 12, label: '12 hours' },
+  { value: 24, label: '24 hours' },
+  { value: 48, label: '48 hours' },
+]
 
 const brand: BrandConfig = {
   brandName: 'Delséa',
@@ -63,6 +90,8 @@ const brand: BrandConfig = {
     instagram: 'https://instagram.com/luxestudios',
     facebook: 'https://facebook.com/luxestudios',
   },
+  bookingWindowDays: DEFAULT_BOOKING_WINDOW_DAYS,
+  minNoticeHours: DEFAULT_MIN_NOTICE_HOURS,
 }
 
 export default brand

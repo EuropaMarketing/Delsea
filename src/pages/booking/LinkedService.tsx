@@ -4,6 +4,8 @@ import { addMinutes, format, startOfDay, endOfDay } from 'date-fns'
 import { CheckCircle2, XCircle, Clock } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
+import { useBrandStore } from '@/store/brandStore'
+import { DEFAULT_MIN_NOTICE_HOURS } from '@/config/brand'
 import { generateTimeSlots } from '@/lib/slots'
 import { formatCurrency, formatDuration } from '@/lib/currency'
 import { Card } from '@/components/ui/Card'
@@ -16,6 +18,7 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 export default function LinkedService() {
   const navigate = useNavigate()
   const { draft, services, selectedAddons, linkedService, setLinkedService } = useBookingStore()
+  const { config } = useBrandStore()
 
   const service = services.find((s) => s.id === draft.serviceId)
 
@@ -82,7 +85,8 @@ export default function LinkedService() {
     const candidateEnd = addMinutes(candidateStart, svc.duration_minutes)
     const candidateLabel = format(candidateStart, 'HH:mm')
 
-    const slots = generateTimeSlots(day, availability, svc.duration_minutes, bookings, blockedTimes, svc.pre_buffer_minutes, svc.post_buffer_minutes)
+    const minNoticeMinutes = (config.minNoticeHours ?? DEFAULT_MIN_NOTICE_HOURS) * 60
+    const slots = generateTimeSlots(day, availability, svc.duration_minutes, bookings, blockedTimes, svc.pre_buffer_minutes, svc.post_buffer_minutes, minNoticeMinutes)
 
     setChecking(false)
     setChecked(true)

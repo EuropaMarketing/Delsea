@@ -8,6 +8,8 @@ import {
 import { ChevronLeft, ChevronRight, Globe, CalendarSearch } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useBookingStore } from '@/store/bookingStore'
+import { useBrandStore } from '@/store/brandStore'
+import { DEFAULT_BOOKING_WINDOW_DAYS, DEFAULT_MIN_NOTICE_HOURS } from '@/config/brand'
 import { generateTimeSlots } from '@/lib/slots'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
@@ -18,6 +20,9 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 export default function DateTimePicker() {
   const navigate = useNavigate()
   const { draft, services, staff, setDate, setTimeSlot, setSpotsBooked, setStaffList, setSessionId, rescheduleBookingId } = useBookingStore()
+  const { config } = useBrandStore()
+  const bookingWindowDays = config.bookingWindowDays ?? DEFAULT_BOOKING_WINDOW_DAYS
+  const minNoticeMinutes = (config.minNoticeHours ?? DEFAULT_MIN_NOTICE_HOURS) * 60
 
   const [calMonth, setCalMonth] = useState(() =>
     draft.date ? startOfMonth(draft.date) : startOfMonth(new Date())
@@ -36,6 +41,7 @@ export default function DateTimePicker() {
   const [initialLoaded, setInitialLoaded] = useState(() => !!draft.date)
 
   const todayStart = useMemo(() => startOfDay(new Date()), [])
+  const windowEnd = useMemo(() => endOfDay(addDays(new Date(), bookingWindowDays)), [bookingWindowDays])
   const skipMonthLoadKey = useRef<string | null>(null)
   const autoSelectedRef = useRef(false)
 
@@ -150,7 +156,7 @@ export default function DateTimePicker() {
     if (service.is_group_session) {
       if (!groupSessions.length) return map
       for (const day of eachDayOfInterval({ start: startOfMonth(calMonth), end: endOfMonth(calMonth) })) {
-        if (isBefore(day, todayStart)) continue
+        if (isBefore(day, todayStart) || isAfter(day, windowEnd)) continue
         const dayKey = format(day, 'yyyy-MM-dd')
         const daySessions = groupSessions.filter((s) => s.day_of_week === getDay(day) || s.event_date === dayKey)
         if (!daySessions.length) continue
@@ -172,7 +178,7 @@ export default function DateTimePicker() {
     const postBuffer = service.post_buffer_minutes
 
     for (const day of eachDayOfInterval({ start: startOfMonth(calMonth), end: endOfMonth(calMonth) })) {
-      if (isBefore(day, todayStart)) continue
+      if (isBefore(day, todayStart) || isAfter(day, windowEnd)) continue
       if (!availableDays.has(getDay(day))) continue
       const dayKey = format(day, 'yyyy-MM-dd')
       const dStart = startOfDay(day)
@@ -187,7 +193,7 @@ export default function DateTimePicker() {
           const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
           return isBefore(s, dEnd) && isAfter(e, dStart)
         })
-        map.set(dayKey, generateTimeSlots(day, availability, duration, bks, blk, preBuffer, postBuffer))
+        map.set(dayKey, generateTimeSlots(day, availability, duration, bks, blk, preBuffer, postBuffer, minNoticeMinutes))
       } else if (draft.staffId) {
         // Specific staff selected — only their availability, bookings and blocks matter
         const staffAvail = availability.filter(a => a.staff_id === draft.staffId)
@@ -197,7 +203,7 @@ export default function DateTimePicker() {
           const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
           return isBefore(s, dEnd) && isAfter(e, dStart)
         })
-        map.set(dayKey, generateTimeSlots(day, staffAvail, duration, bks, blk, preBuffer, postBuffer))
+        map.set(dayKey, generateTimeSlots(day, staffAvail, duration, bks, blk, preBuffer, postBuffer, minNoticeMinutes))
       } else {
         // Any staff — generate slots per-staff and union them so one member's
         // leave block doesn't suppress the availability of other team members
@@ -210,7 +216,7 @@ export default function DateTimePicker() {
             const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
             return isBefore(s, dEnd) && isAfter(e, dStart)
           })
-          for (const slot of generateTimeSlots(day, staffAvail, duration, staffBks, staffBlk, preBuffer, postBuffer)) {
+          for (const slot of generateTimeSlots(day, staffAvail, duration, staffBks, staffBlk, preBuffer, postBuffer, minNoticeMinutes)) {
             slotSet.add(slot)
           }
         }
@@ -218,7 +224,7 @@ export default function DateTimePicker() {
       }
     }
     return map
-  }, [calMonth, service, groupSessions, availability, availableDays, activeStaffIds, monthBookings, monthBlocked, todayStart, draft.staffId, draft.variantDuration])
+  }, [calMonth, service, groupSessions, availability, availableDays, activeStaffIds, monthBookings, monthBlocked, todayStart, windowEnd, minNoticeMinutes, draft.staffId, draft.variantDuration])
 
   // Auto-select the first available day once data is ready (runs once)
   useEffect(() => {
@@ -272,12 +278,12 @@ export default function DateTimePicker() {
     [slotsPerDay]
   )
 
-  // Search forward (up to 90 days) for the next month that has open slots
+  // Search forward (up to the configured booking window) for the next month with open slots
   async function findNextAvailable() {
     if (!service) return
     setFindingNext(true)
     let from = addDays(endOfMonth(calMonth), 1)
-    const limit = addDays(new Date(), 90)
+    const limit = addDays(new Date(), bookingWindowDays)
     const maxCap = service.max_capacity ?? 8
 
     while (isBefore(from, limit)) {
@@ -299,7 +305,7 @@ export default function DateTimePicker() {
       const blk = (btRes.data ?? []) as BlockedTime[]
 
       for (const day of eachDayOfInterval({ start: month, end: monthEnd })) {
-        if (isBefore(day, todayStart)) continue
+        if (isBefore(day, todayStart) || isAfter(day, windowEnd)) continue
         const dayKey = format(day, 'yyyy-MM-dd')
         let daySlots: string[] = []
 
@@ -329,7 +335,7 @@ export default function DateTimePicker() {
               const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
               return isBefore(s, dEnd) && isAfter(e, dStart)
             })
-            daySlots = generateTimeSlots(day, availability, dur, dayBks, dayBlk, service.pre_buffer_minutes, service.post_buffer_minutes)
+            daySlots = generateTimeSlots(day, availability, dur, dayBks, dayBlk, service.pre_buffer_minutes, service.post_buffer_minutes, minNoticeMinutes)
           } else if (draft.staffId) {
             const staffAvail = availability.filter(a => a.staff_id === draft.staffId)
             const dayBks = bks.filter(b => b.starts_at.startsWith(dayKey) && b.staff_id === draft.staffId)
@@ -338,7 +344,7 @@ export default function DateTimePicker() {
               const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
               return isBefore(s, dEnd) && isAfter(e, dStart)
             })
-            daySlots = generateTimeSlots(day, staffAvail, dur, dayBks, dayBlk, service.pre_buffer_minutes, service.post_buffer_minutes)
+            daySlots = generateTimeSlots(day, staffAvail, dur, dayBks, dayBlk, service.pre_buffer_minutes, service.post_buffer_minutes, minNoticeMinutes)
           } else {
             const slotSet = new Set<string>()
             for (const staffId of activeStaffIds) {
@@ -349,7 +355,7 @@ export default function DateTimePicker() {
                 const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
                 return isBefore(s, dEnd) && isAfter(e, dStart)
               })
-              for (const slot of generateTimeSlots(day, staffAvail, dur, staffBks, staffBlk, service.pre_buffer_minutes, service.post_buffer_minutes)) {
+              for (const slot of generateTimeSlots(day, staffAvail, dur, staffBks, staffBlk, service.pre_buffer_minutes, service.post_buffer_minutes, minNoticeMinutes)) {
                 slotSet.add(slot)
               }
             }
@@ -429,7 +435,8 @@ export default function DateTimePicker() {
             </span>
             <button
               onClick={() => setCalMonth((m) => addMonths(m, 1))}
-              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+              disabled={isAfter(startOfMonth(addMonths(calMonth, 1)), windowEnd)}
+              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
               aria-label="Next month"
             >
               <ChevronRight className="h-4 w-4 text-gray-600" />
@@ -448,11 +455,12 @@ export default function DateTimePicker() {
             {Array.from({ length: firstDow }).map((_, i) => <div key={`e${i}`} />)}
             {calDays.map((day) => {
               const isPast = isBefore(day, todayStart)
+              const isBeyondWindow = isAfter(day, windowEnd)
               const isScheduled = availableDays.has(getDay(day))
               const dayKey = format(day, 'yyyy-MM-dd')
               const hasSlots = (slotsPerDay.get(dayKey)?.length ?? 0) > 0
               // Scheduled day with no remaining slots = fully booked → show diagonal slash
-              const isFullyBooked = !isPast && isScheduled && !hasSlots
+              const isFullyBooked = !isPast && !isBeyondWindow && isScheduled && !hasSlots
               const isSelected = !!selectedDate && isSameDay(day, selectedDate)
               const isToday = isSameDay(day, new Date())
 

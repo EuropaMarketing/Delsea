@@ -4,6 +4,7 @@ import { CalendarCheck, Lock, Info, CalendarX, UserCircle2 } from 'lucide-react'
 import { format, getDay, startOfDay, endOfDay } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { useBrandStore } from '@/store/brandStore'
+import { DEFAULT_MIN_NOTICE_HOURS } from '@/config/brand'
 import { useAuthStore } from '@/store/authStore'
 import { LayoutDashboard } from 'lucide-react'
 import { generateTimeSlots } from '@/lib/slots'
@@ -68,11 +69,12 @@ export default function Landing() {
       // Generate slots per-staff and union them so one staff member's leave block
       // doesn't suppress the availability of the rest of the team
       const slotSet = new Set<string>()
+      const minNoticeMinutes = (config.minNoticeHours ?? DEFAULT_MIN_NOTICE_HOURS) * 60
       for (const staffId of activeStaffIds) {
         const staffAvail = allAvail.filter(a => a.staff_id === staffId)
         const staffBks = allBookings.filter(b => b.staff_id === staffId)
         const staffBlk = allBlocked.filter(bt => bt.staff_id === staffId)
-        for (const slot of generateTimeSlots(today, staffAvail, 30, staffBks, staffBlk)) {
+        for (const slot of generateTimeSlots(today, staffAvail, 30, staffBks, staffBlk, 0, 0, minNoticeMinutes)) {
           slotSet.add(slot)
         }
       }
