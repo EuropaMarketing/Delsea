@@ -7,7 +7,7 @@ import {
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck, ClipboardList,
-  Clock, CalendarRange, Sparkles, Mail, Phone as PhoneIcon, CalendarClock,
+  Clock, CalendarRange, Sparkles, Mail, Phone as PhoneIcon, CalendarClock, Trash2,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
@@ -708,6 +708,35 @@ export default function AdminCalendar() {
       setShiftError(error.message)
     } else {
       setBlockedTimes(prev => [...prev, ...(data as BlockedTime[])])
+      setShiftAdjustFor(null)
+    }
+    setShiftSaving(false)
+  }
+
+  // Blocks out the staff member's entire remaining working window for the day —
+  // existing bookings are left untouched, this only stops new ones being made.
+  async function handleDeleteShift() {
+    if (!shiftAdjustFor) return
+    const status = getStaffDayStatus(shiftAdjustFor, selectedDay)
+    if (status.kind !== 'scheduled') return
+    setShiftSaving(true)
+    setShiftError('')
+    const dayStr = format(selectedDay, 'yyyy-MM-dd')
+    const { data, error } = await supabase
+      .from('blocked_times')
+      .insert({
+        staff_id: shiftAdjustFor.id,
+        starts_at: new Date(`${dayStr}T${status.start}:00`).toISOString(),
+        ends_at: new Date(`${dayStr}T${status.end}:00`).toISOString(),
+        reason: shiftReason.trim() || 'Shift removed for the day',
+        is_shift_adjustment: true,
+      })
+      .select('id, staff_id, starts_at, ends_at, reason, is_shift_adjustment')
+      .single()
+    if (error) {
+      setShiftError(error.message)
+    } else {
+      setBlockedTimes(prev => [...prev, data as BlockedTime])
       setShiftAdjustFor(null)
     }
     setShiftSaving(false)
@@ -2421,9 +2450,20 @@ export default function AdminCalendar() {
           </div>
           <Input label="Reason (optional)" value={shiftReason} onChange={e => setShiftReason(e.target.value)} placeholder="e.g. Early finish, no bookings" />
           {shiftError && <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{shiftError}</p>}
-          <div className="flex gap-2 justify-end pt-1">
-            <Button variant="secondary" onClick={() => setShiftAdjustFor(null)}>Cancel</Button>
-            <Button onClick={handleSaveShiftAdjust} loading={shiftSaving}>Save</Button>
+          <div className="flex items-center justify-between pt-1">
+            <button
+              type="button"
+              title="Delete shift for the day"
+              onClick={handleDeleteShift}
+              disabled={shiftSaving}
+              className="p-2 rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-50 transition-colors"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setShiftAdjustFor(null)}>Cancel</Button>
+              <Button onClick={handleSaveShiftAdjust} loading={shiftSaving}>Save</Button>
+            </div>
           </div>
         </div>
       </Modal>
