@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   format, addDays, addWeeks, subWeeks, addMonths, subMonths, startOfDay, startOfWeek, endOfWeek,
-  startOfMonth, endOfMonth, parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday, isSameDay, isPast,
+  startOfMonth, endOfMonth, parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday, isSameDay, isPast, getDay,
 } from 'date-fns'
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
@@ -195,6 +195,9 @@ export default function AdminContrastCalendar() {
   const [sessionAttendeesLoading, setSessionAttendeesLoading] = useState(false)
   const [sessionCancelOpen, setSessionCancelOpen] = useState(false)
   const [sessionCanceling, setSessionCanceling] = useState(false)
+  const [sessionCancelScope, setSessionCancelScope] = useState<'one' | 'all'>('one')
+  const [matchingSessions, setMatchingSessions] = useState<{ id: string; event_date: string }[]>([])
+  const [matchingSessionsLoading, setMatchingSessionsLoading] = useState(false)
 
   // New booking modal
   const [nbModalOpen, setNbModalOpen] = useState(false)
@@ -637,17 +640,53 @@ export default function AdminContrastCalendar() {
     }
   }
 
+  // Looks up every other future session for this service that falls at the same
+  // time of day and day of week (e.g. every Tuesday 16:00), so cancelling can
+  // optionally apply to the whole recurring pattern rather than just this slot.
+  async function openSessionCancel() {
+    if (!selectedSession) return
+    setSessionCancelOpen(true)
+    setCancelReason('')
+    setSessionCancelScope('one')
+    setMatchingSessionsLoading(true)
+    const { data } = await supabase
+      .from('service_sessions')
+      .select('id, event_date')
+      .eq('service_id', selectedSession.service_id)
+      .eq('start_time', selectedSession.start_time)
+      .eq('is_active', true)
+      .gte('event_date', format(new Date(), 'yyyy-MM-dd'))
+    const targetDow = getDay(parseISO(selectedSession.event_date))
+    setMatchingSessions((data ?? []).filter(r => getDay(parseISO(r.event_date)) === targetDow))
+    setMatchingSessionsLoading(false)
+  }
+
   async function handleCancelSession(reason: string) {
     if (!selectedSession || !reason.trim()) return
     setSessionCanceling(true)
-    await supabase
-      .from('bookings')
-      .update({ status: 'cancelled', cancellation_reason: reason.trim() })
-      .eq('service_id', selectedSession.service_id)
-      .eq('starts_at', sessionStartsAt(selectedSession))
-      .neq('status', 'cancelled')
-    await supabase.from('service_sessions').update({ is_active: false }).eq('id', selectedSession.id)
-    setSessions(prev => prev.filter(s => s.id !== selectedSession.id))
+    if (sessionCancelScope === 'all' && matchingSessions.length > 1) {
+      const ids = matchingSessions.map(s => s.id)
+      await Promise.all(matchingSessions.map(s => {
+        const startsAtISO = new Date(`${s.event_date}T${selectedSession.start_time}`).toISOString()
+        return supabase
+          .from('bookings')
+          .update({ status: 'cancelled', cancellation_reason: reason.trim() })
+          .eq('service_id', selectedSession.service_id)
+          .eq('starts_at', startsAtISO)
+          .neq('status', 'cancelled')
+      }))
+      await supabase.from('service_sessions').update({ is_active: false }).in('id', ids)
+      setSessions(prev => prev.filter(s => !ids.includes(s.id)))
+    } else {
+      await supabase
+        .from('bookings')
+        .update({ status: 'cancelled', cancellation_reason: reason.trim() })
+        .eq('service_id', selectedSession.service_id)
+        .eq('starts_at', sessionStartsAt(selectedSession))
+        .neq('status', 'cancelled')
+      await supabase.from('service_sessions').update({ is_active: false }).eq('id', selectedSession.id)
+      setSessions(prev => prev.filter(s => s.id !== selectedSession.id))
+    }
     setSelectedSession(null)
     setSessionCancelOpen(false)
     setSessionCanceling(false)
@@ -2808,20 +2847,44 @@ export default function AdminContrastCalendar() {
 
             {sessionCancelOpen ? (
               <div className="border border-red-200 bg-red-50 rounded-lg p-3 space-y-2">
-                <p className="text-xs font-semibold text-red-800">Reason for cancelling this session (required)</p>
-                {sessionAttendees.length > 0 && (
+                <p className="text-xs font-semibold text-red-800">Cancelling this session</p>
+                {matchingSessionsLoading ? (
+                  <p className="text-xs text-red-700">Checking for other recurring sessions at this time…</p>
+                ) : matchingSessions.length > 1 && (
+                  <div className="space-y-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setSessionCancelScope('one')}
+                      className={cn('w-full text-left text-xs px-2.5 py-2 rounded-lg border transition-colors', sessionCancelScope === 'one' ? 'border-red-400 bg-red-100 font-medium text-red-800' : 'border-red-200 bg-white text-red-700 hover:bg-red-50')}
+                    >
+                      Just this one — {format(parseISO(selectedSession.event_date), 'EEE d MMM')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSessionCancelScope('all')}
+                      className={cn('w-full text-left text-xs px-2.5 py-2 rounded-lg border transition-colors', sessionCancelScope === 'all' ? 'border-red-400 bg-red-100 font-medium text-red-800' : 'border-red-200 bg-white text-red-700 hover:bg-red-50')}
+                    >
+                      All {matchingSessions.length} {format(parseISO(selectedSession.event_date), 'EEEE')} {selectedSession.start_time.slice(0, 5)} sessions (from today onward)
+                    </button>
+                  </div>
+                )}
+                {sessionCancelScope === 'one' && sessionAttendees.length > 0 && (
                   <p className="text-xs text-red-700">This will cancel all {sessionAttendees.length} attendee booking{sessionAttendees.length !== 1 ? 's' : ''}.</p>
                 )}
+                {sessionCancelScope === 'all' && matchingSessions.length > 1 && (
+                  <p className="text-xs text-red-700">This will cancel all attendee bookings across {matchingSessions.length} sessions.</p>
+                )}
+                <p className="text-xs font-semibold text-red-800">Reason for cancelling (required)</p>
                 <Textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder="e.g. Not enough demand, room unavailable…" rows={2} />
                 <div className="flex gap-2">
                   <Button variant="secondary" size="sm" onClick={() => { setSessionCancelOpen(false); setCancelReason('') }} className="shrink-0">Back</Button>
                   <Button fullWidth variant="danger" size="sm" loading={sessionCanceling} disabled={!cancelReason.trim()} onClick={() => handleCancelSession(cancelReason)}>
-                    Confirm Cancellation
+                    {sessionCancelScope === 'all' && matchingSessions.length > 1 ? `Cancel All ${matchingSessions.length}` : 'Confirm Cancellation'}
                   </Button>
                 </div>
               </div>
             ) : (
-              <Button fullWidth variant="danger" size="sm" onClick={() => { setSessionCancelOpen(true); setCancelReason('') }}>
+              <Button fullWidth variant="danger" size="sm" onClick={openSessionCancel}>
                 <XCircle className="h-4 w-4" />
                 Cancel Session
               </Button>
