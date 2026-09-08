@@ -1099,6 +1099,16 @@ export default function AdminCalendar() {
     if (!selectedBooking || !addLinkedAvailable) return
     setAddLinkedSaving(true)
     setAddLinkedError('')
+    const { data: blocked } = await supabase.rpc('is_contact_blocked', {
+      p_business_id: BUSINESS_ID,
+      p_email: selectedBooking.customer?.email ?? null,
+      p_phone: selectedBooking.customer?.phone ?? null,
+    })
+    if (blocked) {
+      setAddLinkedError('This client is blocked and cannot be booked.')
+      setAddLinkedSaving(false)
+      return
+    }
     const comboGroupId = selectedBooking.combo_group_id ?? crypto.randomUUID()
     const { data, error } = await supabase
       .from('bookings')
@@ -1436,6 +1446,16 @@ export default function AdminCalendar() {
     setNbError('')
     setNbSkippedDates([])
     try {
+      const { data: blocked } = await supabase.rpc('is_contact_blocked', {
+        p_business_id: BUSINESS_ID,
+        p_email: nbEmail.trim().toLowerCase(),
+        p_phone: nbPhone.trim() || null,
+      })
+      if (blocked) {
+        setNbError('This client is blocked and cannot be booked. Unblock them first if this is a mistake.')
+        setNbSaving(false)
+        return
+      }
       let customerId = nbSelectedCustomerId
       if (!customerId) {
         const { data: customer, error: custErr } = await supabase

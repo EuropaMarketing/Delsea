@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { format, parseISO, isBefore, isPast } from 'date-fns'
-import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle, Pencil, X } from 'lucide-react'
+import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle, Pencil, X, Ban, Trash2, ShieldOff } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
@@ -50,6 +50,8 @@ type ClientRow = Customer & {
   upcomingCount: number
   pastCount: number
   lastVisit: string | null
+  blocked: boolean
+  blockedIds: string[]
 }
 
 export default function AdminClients() {
@@ -68,47 +70,67 @@ export default function AdminClients() {
   const [editPhone, setEditPhone] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
+  const [blockModalOpen, setBlockModalOpen] = useState(false)
+  const [blockReason, setBlockReason] = useState('')
+  const [blocking, setBlocking] = useState(false)
+  const [blockError, setBlockError] = useState('')
+  const [unblocking, setUnblocking] = useState(false)
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
+  async function loadClients(): Promise<ClientRow[]> {
+    const [custRes, bkRes, blockedRes] = await Promise.all([
+      supabase
+        .from('customers')
+        .select('*')
+        .eq('business_id', BUSINESS_ID)
+        .order('name'),
+      supabase
+        .from('bookings')
+        .select('id, customer_id, starts_at, ends_at, status, price_override, service:services(name, price), staff:staff(name)')
+        .eq('business_id', BUSINESS_ID)
+        .order('starts_at', { ascending: false }),
+      supabase
+        .from('blocked_contacts')
+        .select('id, email, phone')
+        .eq('business_id', BUSINESS_ID),
+    ])
+
+    const customers = (custRes.data ?? []) as Customer[]
+    const bookings = (bkRes.data ?? []) as unknown as (Booking & { customer_id: string })[]
+    const blockedContacts = (blockedRes.data ?? []) as { id: string; email: string | null; phone: string | null }[]
+    const now = new Date()
+
+    const rows: ClientRow[] = customers.map((c) => {
+      const cBks = bookings.filter((b) => b.customer_id === c.id)
+      const nonCancelled = cBks.filter((b) => b.status !== 'cancelled')
+      const totalSpent = nonCancelled.reduce((sum, b) => sum + (b.price_override ?? b.service?.price ?? 0), 0)
+      const upcoming = nonCancelled.filter((b) => isBefore(now, parseISO(b.starts_at)))
+      const past = nonCancelled.filter((b) => !isBefore(now, parseISO(b.starts_at)))
+      const lastVisit = past[0]?.starts_at ?? null
+      const matches = blockedContacts.filter(
+        (bc) => (bc.email && bc.email.toLowerCase() === c.email.toLowerCase()) || (bc.phone && c.phone && bc.phone === c.phone),
+      )
+      return {
+        ...c,
+        bookings: cBks,
+        totalSpent,
+        upcomingCount: upcoming.length,
+        pastCount: past.length,
+        lastVisit,
+        blocked: matches.length > 0,
+        blockedIds: matches.map((m) => m.id),
+      }
+    })
+
+    setClients(rows)
+    return rows
+  }
 
   useEffect(() => {
-    async function load() {
-      const [custRes, bkRes] = await Promise.all([
-        supabase
-          .from('customers')
-          .select('*')
-          .eq('business_id', BUSINESS_ID)
-          .order('name'),
-        supabase
-          .from('bookings')
-          .select('id, customer_id, starts_at, ends_at, status, price_override, service:services(name, price), staff:staff(name)')
-          .eq('business_id', BUSINESS_ID)
-          .order('starts_at', { ascending: false }),
-      ])
-
-      const customers = (custRes.data ?? []) as Customer[]
-      const bookings = (bkRes.data ?? []) as unknown as (Booking & { customer_id: string })[]
-      const now = new Date()
-
-      const rows: ClientRow[] = customers.map((c) => {
-        const cBks = bookings.filter((b) => b.customer_id === c.id)
-        const nonCancelled = cBks.filter((b) => b.status !== 'cancelled')
-        const totalSpent = nonCancelled.reduce((sum, b) => sum + (b.price_override ?? b.service?.price ?? 0), 0)
-        const upcoming = nonCancelled.filter((b) => isBefore(now, parseISO(b.starts_at)))
-        const past = nonCancelled.filter((b) => !isBefore(now, parseISO(b.starts_at)))
-        const lastVisit = past[0]?.starts_at ?? null
-        return {
-          ...c,
-          bookings: cBks,
-          totalSpent,
-          upcomingCount: upcoming.length,
-          pastCount: past.length,
-          lastVisit,
-        }
-      })
-
-      setClients(rows)
-      setLoading(false)
-    }
-    load()
+    loadClients().then(() => setLoading(false))
   }, [])
 
   useEffect(() => {
@@ -117,6 +139,12 @@ export default function AdminClients() {
       setClientForms([])
       setDetailTab('overview')
       setEditMode(false)
+      setBlockModalOpen(false)
+      setBlockReason('')
+      setBlockError('')
+      setDeleteModalOpen(false)
+      setDeleteConfirmText('')
+      setDeleteError('')
       return
     }
     setMembershipsLoading(true)
@@ -169,6 +197,58 @@ export default function AdminClients() {
       setEditMode(false)
     }
     setEditSaving(false)
+  }
+
+  async function handleBlockClient() {
+    if (!selected) return
+    setBlocking(true)
+    setBlockError('')
+    const { error } = await supabase.rpc('block_customer', {
+      p_customer_id: selected.id,
+      p_reason: blockReason.trim() || null,
+    })
+    if (error) {
+      setBlockError(error.message)
+      setBlocking(false)
+      return
+    }
+    const rows = await loadClients()
+    setSelected(rows.find((r) => r.id === selected.id) ?? null)
+    setBlockModalOpen(false)
+    setBlockReason('')
+    setBlocking(false)
+  }
+
+  async function handleUnblockClient() {
+    if (!selected || selected.blockedIds.length === 0) return
+    setUnblocking(true)
+    const { error } = await supabase.from('blocked_contacts').delete().in('id', selected.blockedIds)
+    if (!error) {
+      const rows = await loadClients()
+      setSelected(rows.find((r) => r.id === selected.id) ?? null)
+    }
+    setUnblocking(false)
+  }
+
+  async function handleDeleteClient() {
+    if (!selected) return
+    if (deleteConfirmText.trim() !== selected.name) {
+      setDeleteError('Please type the client\'s name exactly to confirm.')
+      return
+    }
+    setDeleting(true)
+    setDeleteError('')
+    const { error } = await supabase.from('customers').delete().eq('id', selected.id)
+    if (error) {
+      setDeleteError(error.message)
+      setDeleting(false)
+      return
+    }
+    setClients((prev) => prev.filter((c) => c.id !== selected.id))
+    setSelected(null)
+    setDeleteModalOpen(false)
+    setDeleteConfirmText('')
+    setDeleting(false)
   }
 
   const filtered = useMemo(() => {
@@ -231,7 +311,10 @@ export default function AdminClients() {
 
               {/* Name + email */}
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-gray-900 truncate">{client.name}</p>
+                <div className="flex items-center gap-2">
+                  <p className="font-semibold text-gray-900 truncate">{client.name}</p>
+                  {client.blocked && <Badge variant="danger">Blocked</Badge>}
+                </div>
                 <p className="text-xs text-gray-500 truncate">{client.email}</p>
               </div>
 
@@ -269,7 +352,14 @@ export default function AdminClients() {
       <Modal
         open={!!selected}
         onClose={() => setSelected(null)}
-        title={selected?.name ?? ''}
+        title={
+          selected ? (
+            <span className="flex items-center gap-2">
+              {selected.name}
+              {selected.blocked && <Badge variant="danger">Blocked</Badge>}
+            </span>
+          ) : ''
+        }
         size="lg"
       >
         {selected && (
@@ -292,12 +382,36 @@ export default function AdminClients() {
                 ))}
               </div>
               {detailTab === 'overview' && !editMode && (
-                <button
-                  onClick={openEditClient}
-                  className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1.5 mb-1 transition-colors"
-                >
-                  <Pencil className="h-3.5 w-3.5" /> Edit
-                </button>
+                <div className="flex items-center gap-1 mb-1">
+                  <button
+                    onClick={openEditClient}
+                    className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1.5 transition-colors"
+                  >
+                    <Pencil className="h-3.5 w-3.5" /> Edit
+                  </button>
+                  {selected.blocked ? (
+                    <button
+                      onClick={handleUnblockClient}
+                      disabled={unblocking}
+                      className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1.5 transition-colors disabled:opacity-50"
+                    >
+                      <ShieldOff className="h-3.5 w-3.5" /> {unblocking ? 'Unblocking…' : 'Unblock'}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setBlockModalOpen(true)}
+                      className="flex items-center gap-1.5 text-xs font-medium text-amber-600 hover:text-amber-700 px-2 py-1.5 transition-colors"
+                    >
+                      <Ban className="h-3.5 w-3.5" /> Block
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setDeleteModalOpen(true)}
+                    className="flex items-center gap-1.5 text-xs font-medium text-red-600 hover:text-red-700 px-2 py-1.5 transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Delete
+                  </button>
+                </div>
               )}
             </div>
 
@@ -457,6 +571,48 @@ export default function AdminClients() {
             </>}
           </div>
         )}
+      </Modal>
+
+      {/* Block client modal */}
+      <Modal open={blockModalOpen} onClose={() => setBlockModalOpen(false)} title="Block Client" size="sm">
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">
+            {selected?.name} won't be able to book again with this email{selected?.phone ? ' or phone number' : ''}, and their upcoming bookings will be cancelled.
+          </p>
+          <Input label="Reason (optional)" value={blockReason} onChange={(e) => setBlockReason(e.target.value)} placeholder="e.g. repeated no-shows" />
+          {blockError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{blockError}</p>}
+          <div className="flex gap-2 justify-end pt-1">
+            <Button variant="secondary" size="sm" onClick={() => setBlockModalOpen(false)}>Cancel</Button>
+            <Button size="sm" variant="danger" loading={blocking} onClick={handleBlockClient}>Block Client</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete client modal */}
+      <Modal open={deleteModalOpen} onClose={() => setDeleteModalOpen(false)} title="Delete Client" size="sm">
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">
+            This permanently deletes <strong>{selected?.name}</strong> and all their data — bookings, forms and memberships. This cannot be undone.
+          </p>
+          <Input
+            label={`Type "${selected?.name ?? ''}" to confirm`}
+            value={deleteConfirmText}
+            onChange={(e) => setDeleteConfirmText(e.target.value)}
+          />
+          {deleteError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{deleteError}</p>}
+          <div className="flex gap-2 justify-end pt-1">
+            <Button variant="secondary" size="sm" onClick={() => setDeleteModalOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              variant="danger"
+              loading={deleting}
+              disabled={deleteConfirmText.trim() !== selected?.name}
+              onClick={handleDeleteClient}
+            >
+              Delete Permanently
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   )
