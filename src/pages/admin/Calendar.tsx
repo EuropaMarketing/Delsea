@@ -374,7 +374,7 @@ export default function AdminCalendar() {
       const dayStart = rangeStart.toISOString()
       const dayEnd = rangeEnd.toISOString()
 
-      const [staffRes, bookRes, svcRes, blockRes, resRes, equipRes, sessRes] = await Promise.all([
+      const [staffRes, bookRes, svcRes, blockRes, resRes, equipRes, sessRes, hiddenRes] = await Promise.all([
         supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name'),
         supabase
           .from('bookings')
@@ -383,7 +383,7 @@ export default function AdminCalendar() {
           .gte('starts_at', dayStart)
           .lte('starts_at', dayEnd)
           .neq('status', 'cancelled'),
-        supabase.from('services').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).order('name'),
+        supabase.from('services').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('hide_from_main_calendar', false).order('name'),
         supabase
           .from('blocked_times')
           .select('id, staff_id, starts_at, ends_at, reason, is_shift_adjustment')
@@ -399,10 +399,13 @@ export default function AdminCalendar() {
           .not('event_date', 'is', null)
           .gte('event_date', format(rangeStart, 'yyyy-MM-dd'))
           .lte('event_date', format(rangeEnd, 'yyyy-MM-dd')),
+        // Services with their own dedicated calendar (e.g. Contrast Room) are excluded here entirely
+        supabase.from('services').select('id').eq('business_id', BUSINESS_ID).eq('hide_from_main_calendar', true),
       ])
+      const hiddenIds = new Set((hiddenRes.data ?? []).map(r => r.id))
       if (staffRes.data) setStaff(staffRes.data as Staff[])
       if (bookRes.data) {
-        const bks = bookRes.data as RichBooking[]
+        const bks = (bookRes.data as RichBooking[]).filter(b => !hiddenIds.has(b.service_id))
         setBookings(bks)
         loadFormAlertSet(BUSINESS_ID, bks as Array<{ id: string; service_id: string; customer_id: string }>).then(setFormAlerts)
       }
@@ -410,7 +413,7 @@ export default function AdminCalendar() {
       if (blockRes.data) setBlockedTimes(blockRes.data as BlockedTime[])
       if (resRes.data) setResources(resRes.data as Resource[])
       if (equipRes.data) setEquipmentResources(equipRes.data as Resource[])
-      if (sessRes.data) setSessions(sessRes.data as unknown as SessionRow[])
+      if (sessRes.data) setSessions((sessRes.data as unknown as SessionRow[]).filter(s => !hiddenIds.has(s.service_id)))
       setLoading(false)
     }
     load()

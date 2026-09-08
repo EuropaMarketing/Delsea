@@ -1,19 +1,19 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  format, addDays, subDays, addWeeks, subWeeks, addMonths, startOfDay, endOfDay, startOfWeek, endOfWeek,
-  parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday, isSameDay, getDay, isPast,
+  format, addDays, addWeeks, subWeeks, addMonths, subMonths, startOfDay, startOfWeek, endOfWeek,
+  startOfMonth, endOfMonth, parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday, isSameDay, isPast,
 } from 'date-fns'
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck, ClipboardList,
-  Clock, CalendarRange, Sparkles, Mail, Phone as PhoneIcon, CalendarClock,
+  Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck, ClipboardList,
+  Sparkles, Mail, Phone as PhoneIcon, CalendarClock,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
 import { generateTimeSlots } from '@/lib/slots'
-import { useAuthStore } from '@/store/authStore'
 import { FullPageSpinner } from '@/components/ui/Spinner'
+import { MonthCalendar } from '@/components/ui/MonthCalendar'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
@@ -51,7 +51,6 @@ function bookingPrice(b: { price_override?: number | null; service?: { price: nu
 
 const MAX_RECURRENCE_OCCURRENCES = 52
 const MAX_TOTAL_SESSION_ROWS = 1000
-const LOCAL_STORAGE_SERVICE_KEY = 'contrast-calendar-service-id'
 
 // Time-of-day occurrences for a single day, e.g. 09:00, 10:00, 11:00 … up to (and including) untilTime
 function computeDailyTimes(startTime: string, intervalHours: number, untilTime: string | null): string[] {
@@ -173,7 +172,7 @@ type CustomerMembershipHistory = {
 export default function AdminContrastCalendar() {
   const navigate = useNavigate()
   const [selectedDay, setSelectedDay] = useState(new Date())
-  const [viewMode, setViewMode] = useState<'day' | 'week'>('day')
+  const [viewMode, setViewMode] = useState<'week' | 'month'>('week')
   const [bookings, setBookings] = useState<RichBooking[]>([])
   const [blockedTimes, setBlockedTimes] = useState<BlockedTime[]>([])
   const [sessions, setSessions] = useState<SessionRow[]>([])
@@ -181,27 +180,14 @@ export default function AdminContrastCalendar() {
   const [services, setServices] = useState<Service[]>([])
   const [resources, setResources] = useState<Resource[]>([])
   const [loading, setLoading] = useState(true)
-  const [ratings, setRatings] = useState<Record<string, { avg: number; count: number }>>({})
   const [availability, setAvailability] = useState<Availability[]>([])
-  const authStaffId = useAuthStore(s => s.staffId)
 
-  // Which group-session service this page is filtered to (persisted per-browser)
-  const [contrastServiceId, setContrastServiceId] = useState<string | null>(
-    () => { try { return localStorage.getItem(LOCAL_STORAGE_SERVICE_KEY) } catch { return null } }
-  )
+  // Which group-session service this page is filtered to — persisted server-side via
+  // services.hide_from_main_calendar, so it's consistent across admins/devices and the
+  // main Calendar can exclude it.
+  const [contrastServiceId, setContrastServiceId] = useState<string | null>(null)
   const [roomServices, setRoomServices] = useState<Service[]>([])
 
-  // Staff view filter + roster panel
-  const [staffFilter, setStaffFilter] = useState<'all' | 'mine' | string>('all')
-  const [rosterOpen, setRosterOpen] = useState(false)
-
-  // Shift adjustment popover
-  const [shiftAdjustFor, setShiftAdjustFor] = useState<Staff | null>(null)
-  const [shiftStart, setShiftStart] = useState('')
-  const [shiftEnd, setShiftEnd] = useState('')
-  const [shiftReason, setShiftReason] = useState('')
-  const [shiftSaving, setShiftSaving] = useState(false)
-  const [shiftError, setShiftError] = useState('')
 
   // Session attendee modal (open group-session slots)
   const [selectedSession, setSelectedSession] = useState<SessionRow | null>(null)
@@ -365,36 +351,26 @@ export default function AdminContrastCalendar() {
     scrollRef.current.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
   }, [selectedDay, viewMode])
 
-  useEffect(() => {
-    async function loadRatings() {
-      const { data } = await supabase
-        .from('staff_reviews')
-        .select('staff_id, rating')
-        .eq('business_id', BUSINESS_ID)
-        .eq('is_approved', true)
-        .not('staff_id', 'is', null)
-      if (!data) return
-      const map: Record<string, { total: number; count: number }> = {}
-      for (const r of data) {
-        if (!r.staff_id) continue
-        if (!map[r.staff_id]) map[r.staff_id] = { total: 0, count: 0 }
-        map[r.staff_id].total += r.rating
-        map[r.staff_id].count++
-      }
-      const result: Record<string, { avg: number; count: number }> = {}
-      for (const [id, { total, count }] of Object.entries(map)) {
-        result[id] = { avg: Math.round((total / count) * 10) / 10, count }
-      }
-      setRatings(result)
-    }
-    loadRatings()
-  }, [])
 
   useEffect(() => {
     supabase.from('availability').select('*').then(({ data }) => {
       if (data) setAvailability(data as Availability[])
     })
   }, [])
+
+  // Which service is "the room" is persisted server-side via hide_from_main_calendar,
+  // so the choice is shared across admins/devices and the main Calendar can exclude it.
+  async function selectRoom(id: string, list: Service[]) {
+    setContrastServiceId(id)
+    setRoomServices(list.map(s => ({ ...s, hide_from_main_calendar: s.id === id })))
+    const othersToClear = list.filter(s => s.id !== id && s.hide_from_main_calendar).map(s => s.id)
+    await Promise.all([
+      supabase.from('services').update({ hide_from_main_calendar: true }).eq('id', id),
+      othersToClear.length
+        ? supabase.from('services').update({ hide_from_main_calendar: false }).in('id', othersToClear)
+        : Promise.resolve(null),
+    ])
+  }
 
   // Candidate group-session services for the room picker — loaded once, independent of date range
   useEffect(() => {
@@ -407,27 +383,25 @@ export default function AdminContrastCalendar() {
       .order('name')
       .then(({ data }) => {
         const list = (data ?? []) as Service[]
-        setRoomServices(list)
-        setContrastServiceId(prev => {
-          if (prev && list.some(s => s.id === prev)) return prev
-          const guess = list.find(s => /contrast/i.test(s.name)) ?? list[0]
-          return guess?.id ?? null
-        })
+        const flagged = list.find(s => s.hide_from_main_calendar)
+        if (flagged) {
+          setRoomServices(list)
+          setContrastServiceId(flagged.id)
+          return
+        }
+        const guess = list.find(s => /contrast/i.test(s.name)) ?? list[0]
+        if (guess) selectRoom(guess.id, list)
+        else setRoomServices(list)
       })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  useEffect(() => {
-    if (contrastServiceId) {
-      try { localStorage.setItem(LOCAL_STORAGE_SERVICE_KEY, contrastServiceId) } catch { /* ignore */ }
-    }
-  }, [contrastServiceId])
 
   useEffect(() => {
     if (!contrastServiceId) { setLoading(false); return }
     async function load() {
       setLoading(true)
-      const rangeStart = viewMode === 'week' ? startOfWeek(selectedDay, { weekStartsOn: 1 }) : startOfDay(selectedDay)
-      const rangeEnd = viewMode === 'week' ? endOfWeek(selectedDay, { weekStartsOn: 1 }) : endOfDay(selectedDay)
+      const rangeStart = viewMode === 'month' ? startOfMonth(selectedDay) : startOfWeek(selectedDay, { weekStartsOn: 1 })
+      const rangeEnd = viewMode === 'month' ? endOfMonth(selectedDay) : endOfWeek(selectedDay, { weekStartsOn: 1 })
       const dayStart = rangeStart.toISOString()
       const dayEnd = rangeEnd.toISOString()
 
@@ -679,96 +653,6 @@ export default function AdminContrastCalendar() {
     setSessionCanceling(false)
   }
 
-  // A staff member's effective working window for a given day: their normal weekly
-  // availability, narrowed by any is_shift_adjustment blocks (e.g. an early finish)
-  // for that specific day — without ever touching the underlying availability row.
-  function getStaffDayStatus(member: Staff, day: Date):
-    | { kind: 'holiday' }
-    | { kind: 'not_scheduled' }
-    | { kind: 'scheduled'; start: string; end: string; adjusted: boolean } {
-    if (member.on_holiday) return { kind: 'holiday' }
-    const dow = getDay(day)
-    const avail = availability.find(a => a.staff_id === member.id && a.day_of_week === dow)
-    if (!avail) return { kind: 'not_scheduled' }
-    let start = avail.start_time.slice(0, 5)
-    let end = avail.end_time.slice(0, 5)
-    let adjusted = false
-    const dayStr = format(day, 'yyyy-MM-dd')
-    for (const bt of blockedTimes) {
-      if (bt.staff_id !== member.id || !bt.is_shift_adjustment) continue
-      if (format(parseISO(bt.starts_at), 'yyyy-MM-dd') !== dayStr) continue
-      const btStart = format(parseISO(bt.starts_at), 'HH:mm')
-      const btEnd = format(parseISO(bt.ends_at), 'HH:mm')
-      if (btStart <= start) { start = btEnd; adjusted = true }
-      if (btEnd >= end) { end = btStart; adjusted = true }
-    }
-    return { kind: 'scheduled', start, end, adjusted }
-  }
-
-  function timeToTop(timeStr: string): number {
-    const [h, m] = timeStr.split(':').map(Number)
-    const raw = (h - START_HOUR) * HOUR_HEIGHT + (m / 60) * HOUR_HEIGHT
-    return Math.max(0, Math.min(raw, HOUR_HEIGHT * (END_HOUR - START_HOUR)))
-  }
-
-  function openShiftAdjust(member: Staff) {
-    const status = getStaffDayStatus(member, selectedDay)
-    if (status.kind !== 'scheduled') return
-    setShiftAdjustFor(member)
-    setShiftStart(status.start)
-    setShiftEnd(status.end)
-    setShiftReason('')
-    setShiftError('')
-  }
-
-  async function handleSaveShiftAdjust() {
-    if (!shiftAdjustFor) return
-    const status = getStaffDayStatus(shiftAdjustFor, selectedDay)
-    if (status.kind !== 'scheduled') return
-    const dow = getDay(selectedDay)
-    const avail = availability.find(a => a.staff_id === shiftAdjustFor.id && a.day_of_week === dow)
-    if (!avail) return
-    const originalStart = avail.start_time.slice(0, 5)
-    const originalEnd = avail.end_time.slice(0, 5)
-    if (shiftStart >= shiftEnd) { setShiftError('Start must be before finish.'); return }
-    if (shiftStart < originalStart || shiftEnd > originalEnd) {
-      setShiftError(`Adjusted hours must fall within their normal shift (${originalStart}–${originalEnd}).`)
-      return
-    }
-    const rows: Array<{ staff_id: string; starts_at: string; ends_at: string; reason: string | null; is_shift_adjustment: boolean }> = []
-    const dayStr = format(selectedDay, 'yyyy-MM-dd')
-    if (shiftStart > originalStart) {
-      rows.push({
-        staff_id: shiftAdjustFor.id,
-        starts_at: new Date(`${dayStr}T${originalStart}:00`).toISOString(),
-        ends_at: new Date(`${dayStr}T${shiftStart}:00`).toISOString(),
-        reason: shiftReason.trim() || 'Shift adjusted', is_shift_adjustment: true,
-      })
-    }
-    if (shiftEnd < originalEnd) {
-      rows.push({
-        staff_id: shiftAdjustFor.id,
-        starts_at: new Date(`${dayStr}T${shiftEnd}:00`).toISOString(),
-        ends_at: new Date(`${dayStr}T${originalEnd}:00`).toISOString(),
-        reason: shiftReason.trim() || 'Shift adjusted', is_shift_adjustment: true,
-      })
-    }
-    if (rows.length === 0) { setShiftError('No change to save.'); return }
-    setShiftSaving(true)
-    setShiftError('')
-    const { data, error } = await supabase
-      .from('blocked_times')
-      .insert(rows)
-      .select('id, staff_id, starts_at, ends_at, reason, is_shift_adjustment')
-    if (error) {
-      setShiftError(error.message)
-    } else {
-      setBlockedTimes(prev => [...prev, ...(data as BlockedTime[])])
-      setShiftAdjustFor(null)
-    }
-    setShiftSaving(false)
-  }
-
   function timeFromPointerY(e: React.MouseEvent | React.DragEvent, el: HTMLElement) {
     const rect = el.getBoundingClientRect()
     const y = e.clientY - rect.top
@@ -846,7 +730,7 @@ export default function AdminContrastCalendar() {
   function openNewBookingFromPopover() {
     if (!cellPopover) return
     setNbBookingMode('customer')
-    setNbStaffId(cellPopover.staffId ?? (cellPopover.keepUnassigned ? null : staff.find(s => !s.on_holiday)?.id ?? null))
+    setNbStaffId(null)
     setNbDate(format(cellPopover.date, 'yyyy-MM-dd'))
     setNbTime(cellPopover.time)
     setNbServiceId(services[0]?.id ?? '')
@@ -1195,8 +1079,8 @@ export default function AdminContrastCalendar() {
       setSelectedBooking(prev => prev ? { ...prev, combo_group_id: comboGroupId } : null)
       setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, combo_group_id: comboGroupId } : b))
     }
-    const rangeStart = viewMode === 'week' ? startOfWeek(selectedDay, { weekStartsOn: 1 }) : startOfDay(selectedDay)
-    const rangeEnd = viewMode === 'week' ? endOfWeek(selectedDay, { weekStartsOn: 1 }) : endOfDay(selectedDay)
+    const rangeStart = viewMode === 'month' ? startOfMonth(selectedDay) : startOfWeek(selectedDay, { weekStartsOn: 1 })
+    const rangeEnd = viewMode === 'month' ? endOfMonth(selectedDay) : endOfWeek(selectedDay, { weekStartsOn: 1 })
     const newBooking = data as unknown as RichBooking
     const t = parseISO(newBooking.starts_at)
     if (t >= rangeStart && t <= rangeEnd) setBookings(prev => [...prev, newBooking])
@@ -1473,8 +1357,8 @@ export default function AdminContrastCalendar() {
         .insert(rows)
         .select('id, service_id, event_date, start_time, staff_id, max_capacity_override, service:services(name,category,max_capacity,duration_minutes)')
       if (error) throw error
-      const rangeStart = viewMode === 'week' ? startOfWeek(selectedDay, { weekStartsOn: 1 }) : startOfDay(selectedDay)
-      const rangeEnd = viewMode === 'week' ? endOfWeek(selectedDay, { weekStartsOn: 1 }) : endOfDay(selectedDay)
+      const rangeStart = viewMode === 'month' ? startOfMonth(selectedDay) : startOfWeek(selectedDay, { weekStartsOn: 1 })
+      const rangeEnd = viewMode === 'month' ? endOfMonth(selectedDay) : endOfWeek(selectedDay, { weekStartsOn: 1 })
       const created = (data ?? []) as unknown as SessionRow[]
       const inView = created.filter(s => {
         const d = parseISO(s.event_date)
@@ -1577,8 +1461,8 @@ export default function AdminContrastCalendar() {
           .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token)')
         if (bookErr) throw bookErr
 
-        const rangeStart = viewMode === 'week' ? startOfWeek(selectedDay, { weekStartsOn: 1 }) : startOfDay(selectedDay)
-        const rangeEnd = viewMode === 'week' ? endOfWeek(selectedDay, { weekStartsOn: 1 }) : endOfDay(selectedDay)
+        const rangeStart = viewMode === 'month' ? startOfMonth(selectedDay) : startOfWeek(selectedDay, { weekStartsOn: 1 })
+        const rangeEnd = viewMode === 'month' ? endOfMonth(selectedDay) : endOfWeek(selectedDay, { weekStartsOn: 1 })
         const inView = (created as RichBooking[]).filter(b => {
           const t = parseISO(b.starts_at)
           return t >= rangeStart && t <= rangeEnd
@@ -1623,14 +1507,7 @@ export default function AdminContrastCalendar() {
 
   const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR + i)
   const todaySelected = isToday(selectedDay)
-  const timeLineTop =
-    todaySelected && now.getHours() >= START_HOUR && now.getHours() < END_HOUR
-      ? ((now.getHours() - START_HOUR) * 60 + now.getMinutes()) / 60 * HOUR_HEIGHT
-      : null
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(selectedDay, { weekStartsOn: 1 }), i))
-
-  const resolvedStaffFilterId = staffFilter === 'all' ? null : staffFilter === 'mine' ? authStaffId : staffFilter
-  const visibleStaff = resolvedStaffFilterId ? staff.filter(s => s.id === resolvedStaffFilterId) : staff
 
   return (
     <div className={cn(drag && 'select-none')}>
@@ -1639,16 +1516,16 @@ export default function AdminContrastCalendar() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">Contrast Calendar</h1>
           <p className={cn('text-sm font-medium mt-0.5', todaySelected ? 'text-(--color-primary)' : 'text-gray-500')}>
-            {viewMode === 'week'
-              ? `${format(weekDays[0], 'd MMM')} – ${format(weekDays[6], 'd MMM yyyy')}`
-              : <>{todaySelected ? 'Today · ' : ''}{format(selectedDay, 'EEEE d MMMM yyyy')}</>}
+            {viewMode === 'month'
+              ? format(selectedDay, 'MMMM yyyy')
+              : `${format(weekDays[0], 'd MMM')} – ${format(weekDays[6], 'd MMM yyyy')}`}
           </p>
         </div>
         <div className="flex items-center gap-2">
           {roomServices.length > 1 && (
             <select
               value={contrastServiceId ?? ''}
-              onChange={e => setContrastServiceId(e.target.value)}
+              onChange={e => selectRoom(e.target.value, roomServices)}
               className="h-9 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
             >
               {roomServices.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -1656,47 +1533,34 @@ export default function AdminContrastCalendar() {
           )}
           <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
             <button
-              onClick={() => setViewMode('day')}
-              className={cn('px-3 py-1.5 text-sm font-medium rounded-md transition-colors', viewMode === 'day' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}
-            >
-              Day
-            </button>
-            <button
               onClick={() => setViewMode('week')}
               className={cn('px-3 py-1.5 text-sm font-medium rounded-md transition-colors', viewMode === 'week' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}
             >
               Week
             </button>
+            <button
+              onClick={() => setViewMode('month')}
+              className={cn('px-3 py-1.5 text-sm font-medium rounded-md transition-colors', viewMode === 'month' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}
+            >
+              Month
+            </button>
           </div>
-          <select
-            value={staffFilter}
-            onChange={e => setStaffFilter(e.target.value)}
-            className="h-9 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
-          >
-            <option value="all">All staff</option>
-            {authStaffId && staff.some(s => s.id === authStaffId) && <option value="mine">Just me</option>}
-            {staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-          <Button variant={rosterOpen ? 'primary' : 'secondary'} size="sm" onClick={() => setRosterOpen(o => !o)}>
-            <CalendarRange className="h-3.5 w-3.5" />
-            Roster
-          </Button>
           <Button variant="secondary" size="sm" onClick={openBlockTime}>
             <Lock className="h-3.5 w-3.5" />
             Block Time
           </Button>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => setSelectedDay(d => viewMode === 'week' ? subWeeks(d, 4) : subDays(d, 7))}
+              onClick={() => setSelectedDay(d => viewMode === 'month' ? subMonths(d, 3) : subWeeks(d, 4))}
               className="p-2 rounded-lg hover:bg-gray-100"
-              title={viewMode === 'week' ? 'Back 4 weeks' : 'Previous week'}
+              title={viewMode === 'month' ? 'Back 3 months' : 'Back 4 weeks'}
             >
               <ChevronsLeft className="h-4 w-4 text-gray-500" />
             </button>
             <button
-              onClick={() => setSelectedDay(d => viewMode === 'week' ? subWeeks(d, 1) : subDays(d, 1))}
+              onClick={() => setSelectedDay(d => viewMode === 'month' ? subMonths(d, 1) : subWeeks(d, 1))}
               className="p-2 rounded-lg hover:bg-gray-100"
-              title={viewMode === 'week' ? 'Previous week' : 'Previous day'}
+              title={viewMode === 'month' ? 'Previous month' : 'Previous week'}
             >
               <ChevronLeft className="h-4 w-4 text-gray-600" />
             </button>
@@ -1707,16 +1571,16 @@ export default function AdminContrastCalendar() {
               className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white cursor-pointer hover:bg-gray-50 outline-none focus:ring-2 focus:ring-(--color-primary) focus:border-(--color-primary)"
             />
             <button
-              onClick={() => setSelectedDay(d => viewMode === 'week' ? addWeeks(d, 1) : addDays(d, 1))}
+              onClick={() => setSelectedDay(d => viewMode === 'month' ? addMonths(d, 1) : addWeeks(d, 1))}
               className="p-2 rounded-lg hover:bg-gray-100"
-              title={viewMode === 'week' ? 'Next week' : 'Next day'}
+              title={viewMode === 'month' ? 'Next month' : 'Next week'}
             >
               <ChevronRight className="h-4 w-4 text-gray-600" />
             </button>
             <button
-              onClick={() => setSelectedDay(d => viewMode === 'week' ? addWeeks(d, 4) : addDays(d, 7))}
+              onClick={() => setSelectedDay(d => viewMode === 'month' ? addMonths(d, 3) : addWeeks(d, 4))}
               className="p-2 rounded-lg hover:bg-gray-100"
-              title={viewMode === 'week' ? 'Forward 4 weeks' : 'Next week'}
+              title={viewMode === 'month' ? 'Forward 3 months' : 'Forward 4 weeks'}
             >
               <ChevronsRight className="h-4 w-4 text-gray-500" />
             </button>
@@ -1729,355 +1593,22 @@ export default function AdminContrastCalendar() {
         </div>
       </div>
 
-      {rosterOpen && (
-        <div className="bg-white border border-gray-200 brand-card overflow-hidden mb-5 p-4">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-            Roster · {format(selectedDay, 'EEEE d MMM')}
-          </p>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {staff.map(member => {
-              const status = getStaffDayStatus(member, selectedDay)
-              return (
-                <div key={member.id} className="flex items-center justify-between gap-2 border border-gray-100 rounded-lg px-3 py-2.5">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="h-7 w-7 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500 shrink-0">
-                      {member.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{member.name}</p>
-                      {status.kind === 'holiday' && <p className="text-xs text-amber-600">On Holiday</p>}
-                      {status.kind === 'not_scheduled' && <p className="text-xs text-gray-400">Not scheduled</p>}
-                      {status.kind === 'scheduled' && (
-                        <p className="text-xs text-gray-500">
-                          {status.start}–{status.end}
-                          {status.adjusted && <span className="text-(--color-primary) font-medium"> · adjusted</span>}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  {status.kind === 'scheduled' && (
-                    <button
-                      onClick={() => openShiftAdjust(member)}
-                      title="Adjust shift for this day"
-                      className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 shrink-0"
-                    >
-                      <Clock className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {viewMode === 'day' ? (
-      <div className="bg-white border border-gray-200 brand-card overflow-hidden overflow-x-auto">
-        {/* Staff header row */}
-        <div
-          className="grid border-b border-gray-200"
-          style={{ gridTemplateColumns: `56px repeat(${visibleStaff.length + (resolvedStaffFilterId ? 0 : 1)}, minmax(140px, 1fr))` }}
-        >
-          <div className="border-r border-gray-100" />
-          {visibleStaff.map(member => {
-            const dayStatus = getStaffDayStatus(member, selectedDay)
-            return (
-            <div
-              key={member.id}
-              className={cn('px-3 py-3 border-r border-gray-100 flex flex-col items-center gap-1.5', member.on_holiday ? 'bg-amber-50' : '')}
-            >
-              <div className="relative">
-                {member.avatar_url ? (
-                  <img src={member.avatar_url} alt={member.name} className={cn('h-10 w-10 rounded-full object-cover', member.on_holiday && 'opacity-60')} />
-                ) : (
-                  <div className={cn('h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold', member.on_holiday ? 'bg-amber-100 text-amber-500' : 'bg-gray-100 text-gray-500')}>
-                    {member.name.charAt(0).toUpperCase()}
-                  </div>
-                )}
-                {member.on_holiday && <span className="absolute -bottom-0.5 -right-0.5 text-sm leading-none">✈︎</span>}
-              </div>
-              <div className="text-center">
-                <button
-                  type="button"
-                  onClick={() => navigate(`/admin/staff?edit=${member.id}`)}
-                  title="Open staff record"
-                  className={cn('text-xs font-semibold truncate max-w-28 hover:underline', member.on_holiday ? 'text-amber-700' : 'text-gray-800')}
-                >
-                  {member.name}
-                </button>
-                <p className={cn('text-xs mt-0.5 capitalize', member.on_holiday ? 'text-amber-500 font-medium' : 'text-gray-400')}>
-                  {member.on_holiday ? 'On Holiday' : member.role}
-                </p>
-                {!member.on_holiday && ratings[member.id] && (
-                  <div className="flex items-center justify-center gap-0.5 mt-0.5">
-                    <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
-                    <span className="text-xs font-semibold text-gray-600">{ratings[member.id].avg}</span>
-                    <span className="text-xs text-gray-400">({ratings[member.id].count})</span>
-                  </div>
-                )}
-                {dayStatus.kind === 'scheduled' && (
-                  <button
-                    onClick={() => openShiftAdjust(member)}
-                    title="Adjust shift for this day"
-                    className={cn('flex items-center gap-1 mx-auto mt-1 text-xs hover:text-gray-700', dayStatus.adjusted ? 'text-(--color-primary) font-medium' : 'text-gray-400')}
-                  >
-                    <Clock className="h-3 w-3" />
-                    {dayStatus.start}–{dayStatus.end}
-                  </button>
-                )}
-              </div>
-            </div>
-            )
-          })}
-          {!resolvedStaffFilterId && (
-          <div className="px-3 py-3 flex flex-col items-center gap-1.5 bg-gray-50/60">
-            <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
-              <Users className="h-5 w-5 text-gray-400" />
-            </div>
-            <div className="text-center">
-              <p className="text-xs font-semibold text-gray-500">Self-service</p>
-              <p className="text-xs text-gray-400 mt-0.5">Unassigned</p>
-            </div>
-          </div>
-          )}
-        </div>
-
-        {/* Time grid */}
-        <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: `${HOUR_HEIGHT * (END_HOUR - START_HOUR)}px` }}>
-          <div className="relative grid" style={{ gridTemplateColumns: `56px repeat(${visibleStaff.length + (resolvedStaffFilterId ? 0 : 1)}, minmax(140px, 1fr))` }}>
-            {/* Hour labels */}
-            <div className="border-r border-gray-100">
-              {hours.map(h => (
-                <div key={h} className="text-right pr-2 text-xs text-gray-400 border-t border-gray-100 first:border-t-0" style={{ height: HOUR_HEIGHT }}>
-                  <span className="relative -top-2">{format(setMinutes(setHours(new Date(), h), 0), 'HH:mm')}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Staff columns */}
-            {visibleStaff.map(member => {
-              const memberBlocks = blockedTimes.filter(bt => bt.staff_id === member.id && !bt.is_shift_adjustment)
-              const dayStatus = getStaffDayStatus(member, selectedDay)
-              return (
-                <div
-                  key={member.id}
-                  className={cn('relative border-r border-gray-100', member.on_holiday ? 'cursor-not-allowed' : 'cursor-crosshair')}
-                  style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
-                  onClick={e => handleCellClick(e, member.id, selectedDay)}
-                  onDragOver={e => !member.on_holiday && e.preventDefault()}
-                  onDrop={e => !member.on_holiday && handleDropBooking(e, selectedDay, member.id)}
-                >
-                  {hours.map(h => (
-                    <div key={h} className="absolute w-full border-t border-gray-100" style={{ top: (h - START_HOUR) * HOUR_HEIGHT }} />
-                  ))}
-
-                  {member.on_holiday && (
-                    <div
-                      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1.5"
-                      style={{ backgroundColor: 'rgba(254,243,199,0.55)', backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 14px, rgba(251,191,36,0.07) 14px, rgba(251,191,36,0.07) 28px)' }}
-                    >
-                      <span className="text-3xl leading-none">✈︎</span>
-                      <p className="text-xs font-bold text-amber-700">On Holiday</p>
-                      <p className="text-xs text-amber-500">No availability</p>
-                    </div>
-                  )}
-
-                  {/* Shift-adjustment overlay — off-duty portions of an adjusted shift */}
-                  {!member.on_holiday && dayStatus.kind === 'scheduled' && dayStatus.adjusted && (
-                    <>
-                      {timeToTop(dayStatus.start) > 0 && (
-                        <div
-                          className="absolute left-0 right-0 top-0 z-[5] flex items-end justify-center pb-1"
-                          style={{ height: timeToTop(dayStatus.start), backgroundColor: 'rgba(229,231,235,0.5)', backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 10px, rgba(107,114,128,0.08) 10px, rgba(107,114,128,0.08) 20px)' }}
-                        >
-                          <p className="text-xs text-gray-400 font-medium">Starts {dayStatus.start}</p>
-                        </div>
-                      )}
-                      {timeToTop(dayStatus.end) < HOUR_HEIGHT * (END_HOUR - START_HOUR) && (
-                        <div
-                          className="absolute left-0 right-0 bottom-0 z-[5] flex items-start justify-center pt-1"
-                          style={{ top: timeToTop(dayStatus.end), backgroundColor: 'rgba(229,231,235,0.5)', backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 10px, rgba(107,114,128,0.08) 10px, rgba(107,114,128,0.08) 20px)' }}
-                        >
-                          <p className="text-xs text-gray-400 font-medium">Finished {dayStatus.end}</p>
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {/* Blocked time chips — clickable to delete */}
-                  {!member.on_holiday && memberBlocks.map(bt => {
-                    const { top, height } = positionBlock(bt.starts_at, bt.ends_at)
-                    return (
-                      <div
-                        key={bt.id}
-                        data-booking="true"
-                        onClick={e => { e.stopPropagation(); setSelectedBlock(bt) }}
-                        className="absolute left-0.5 right-0.5 rounded overflow-hidden z-10 cursor-pointer group"
-                        style={{ top, height, backgroundColor: 'rgba(254,243,199,0.85)', backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(251,191,36,0.18) 6px, rgba(251,191,36,0.18) 12px)', borderLeft: '3px solid #F59E0B' }}
-                        title="Click to delete"
-                      >
-                        <p className="text-xs font-semibold text-amber-700 px-1.5 pt-1 truncate leading-tight">
-                          {bt.reason ?? 'Booked Time'}
-                        </p>
-                        <p className="text-xs text-amber-600 px-1.5 truncate">
-                          {format(parseISO(bt.starts_at), 'HH:mm')}–{format(parseISO(bt.ends_at), 'HH:mm')}
-                        </p>
-                      </div>
-                    )
-                  })}
-
-                  {/* Bookings */}
-                  {bookings.filter(b => b.staff_id === member.id).map(booking => {
-                    const isDragging = drag?.bookingId === booking.id
-                    const endsAt = isDragging ? drag.currentEndsAt : booking.ends_at
-                    const { top, height } = positionBlock(booking.starts_at, endsAt)
-                    const color = categoryColorMap[booking.service?.category] ?? '#7C3AED'
-                    return (
-                      <div
-                        key={booking.id}
-                        data-booking="true"
-                        draggable={!member.on_holiday}
-                        onDragStart={e => { e.stopPropagation(); handleDragStart(e, booking.id) }}
-                        onDragEnd={() => setDraggingBookingId(null)}
-                        onClick={() => !isDragging && openBookingDetail(booking)}
-                        onMouseEnter={e => handleBookingHover(e, booking)}
-                        onMouseMove={e => handleBookingHover(e, booking)}
-                        onMouseLeave={clearBookingHover}
-                        className={cn('absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden transition-shadow z-20 cursor-pointer', isDragging ? 'shadow-lg' : 'hover:brightness-95', booking.status === 'completed' && 'opacity-50', draggingBookingId === booking.id && 'opacity-30')}
-                        style={{ top, height, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
-                      >
-                        <p className="text-xs font-semibold truncate leading-tight flex items-center gap-1" style={{ color }}>
-                          {booking.checked_in_at && <UserCheck className="h-3 w-3 shrink-0" />}
-                          {formAlerts.has(booking.id) && <ClipboardList className="h-3 w-3 shrink-0 text-amber-500" />}
-                          {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
-                        </p>
-                        <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
-                        {slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`) && (
-                          <p className="text-xs font-medium" style={{ color }}>
-                            {slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)!.taken}/{slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)!.max} spots
-                          </p>
-                        )}
-                        {isDragging && <p className="text-xs font-medium mt-0.5" style={{ color }}>→ {format(parseISO(endsAt), 'HH:mm')}</p>}
-                        <div
-                          data-booking="true"
-                          className="absolute bottom-0 left-0 right-0 h-3 cursor-s-resize flex items-end justify-center pb-0.5"
-                          onMouseDown={e => {
-                            e.stopPropagation(); e.preventDefault()
-                            setDrag({ bookingId: booking.id, startY: e.clientY, originalEndsAt: booking.ends_at, currentEndsAt: booking.ends_at })
-                          }}
-                        >
-                          <div className="w-8 h-1 rounded-full opacity-40" style={{ backgroundColor: color }} />
-                        </div>
-                      </div>
-                    )
-                  })}
-
-                  {/* Open group-session slots */}
-                  {sessions.filter(s => s.staff_id === member.id).map(session => {
-                    const start = new Date(`${session.event_date}T${session.start_time}`)
-                    const end = addMinutes(start, session.service?.duration_minutes ?? 60)
-                    const { top, height } = positionBlock(start.toISOString(), end.toISOString())
-                    const cap = sessionCapacityMap.get(session.id)
-                    const color = categoryColorMap[session.service?.category ?? ''] ?? '#7C3AED'
-                    return (
-                      <div
-                        key={session.id}
-                        data-booking="true"
-                        onClick={() => openSessionDetail(session)}
-                        className="absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden cursor-pointer z-20 border-2 border-dashed hover:brightness-95"
-                        style={{ top, height, backgroundColor: `${color}11`, borderColor: color }}
-                        title={`${session.service?.name} — open session`}
-                      >
-                        <p className="text-xs font-semibold truncate leading-tight" style={{ color }}>
-                          {session.start_time.slice(0, 5)} {session.service?.name}
-                        </p>
-                        {cap && <p className="text-xs font-medium" style={{ color }}>{cap.taken}/{cap.max} booked</p>}
-                      </div>
-                    )
-                  })}
-                </div>
-              )
-            })}
-
-            {/* Unstaffed column */}
-            {!resolvedStaffFilterId && (
-            <div
-              className="relative border-gray-100 bg-gray-50/30 cursor-crosshair"
-              style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
-              onClick={e => handleCellClick(e, null, selectedDay, true)}
-              onDragOver={e => e.preventDefault()}
-              onDrop={e => handleDropBooking(e, selectedDay, null)}
-            >
-              {hours.map(h => (
-                <div key={h} className="absolute w-full border-t border-gray-100" style={{ top: (h - START_HOUR) * HOUR_HEIGHT }} />
-              ))}
-              {bookings.filter(b => b.staff_id === null).map(booking => {
-                const { top, height } = positionBlock(booking.starts_at, booking.ends_at)
-                const color = categoryColorMap[booking.service?.category] ?? '#7C3AED'
-                return (
-                  <div
-                    key={booking.id}
-                    data-booking="true"
-                    draggable
-                    onDragStart={e => { e.stopPropagation(); handleDragStart(e, booking.id) }}
-                    onDragEnd={() => setDraggingBookingId(null)}
-                    onClick={() => openBookingDetail(booking)}
-                    onMouseEnter={e => handleBookingHover(e, booking)}
-                    onMouseMove={e => handleBookingHover(e, booking)}
-                    onMouseLeave={clearBookingHover}
-                    className={cn('absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden cursor-pointer z-20', booking.status === 'completed' ? 'opacity-50' : 'hover:brightness-95', draggingBookingId === booking.id && 'opacity-30')}
-                    style={{ top, height, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
-                  >
-                    <p className="text-xs font-semibold truncate leading-tight flex items-center gap-1" style={{ color }}>
-                      {formAlerts.has(booking.id) && <ClipboardList className="h-3 w-3 shrink-0 text-amber-500" />}
-                      {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
-                    </p>
-                    <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
-                    {(() => {
-                      const cap = slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)
-                      return cap
-                        ? <p className="text-xs font-medium" style={{ color }}>{cap.taken}/{cap.max} spots</p>
-                        : (booking.spots_booked ?? 1) > 1 ? <p className="text-xs text-gray-500">{booking.spots_booked} spots</p> : null
-                    })()}
-                  </div>
-                )
-              })}
-              {sessions.filter(s => s.staff_id === null).map(session => {
-                const start = new Date(`${session.event_date}T${session.start_time}`)
-                const end = addMinutes(start, session.service?.duration_minutes ?? 60)
-                const { top, height } = positionBlock(start.toISOString(), end.toISOString())
-                const cap = sessionCapacityMap.get(session.id)
-                const color = categoryColorMap[session.service?.category ?? ''] ?? '#7C3AED'
-                return (
-                  <div
-                    key={session.id}
-                    data-booking="true"
-                    onClick={() => openSessionDetail(session)}
-                    className="absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden cursor-pointer z-20 border-2 border-dashed hover:brightness-95"
-                    style={{ top, height, backgroundColor: `${color}11`, borderColor: color }}
-                    title={`${session.service?.name} — open session`}
-                  >
-                    <p className="text-xs font-semibold truncate leading-tight" style={{ color }}>
-                      {session.start_time.slice(0, 5)} {session.service?.name}
-                    </p>
-                    {cap && <p className="text-xs font-medium" style={{ color }}>{cap.taken}/{cap.max} booked</p>}
-                  </div>
-                )
-              })}
-            </div>
-            )}
-
-            {/* Current time line */}
-            {timeLineTop !== null && (
-              <div className="absolute right-0 pointer-events-none z-30" style={{ top: timeLineTop, left: 56 }}>
-                <div className="relative">
-                  <div className="absolute -left-1.5 -top-1.5 h-3 w-3 rounded-full bg-(--color-primary) opacity-80" />
-                  <div className="h-px w-full opacity-40" style={{ backgroundColor: 'var(--color-primary)' }} />
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+      {viewMode === 'month' ? (
+      <div className="bg-white border border-gray-200 brand-card p-4 max-w-md">
+        <MonthCalendar
+          month={selectedDay}
+          onPrevMonth={() => setSelectedDay(d => subMonths(d, 1))}
+          onNextMonth={() => setSelectedDay(d => addMonths(d, 1))}
+          selectedDate={selectedDay}
+          onSelectDate={(day) => { setSelectedDay(day); setViewMode('week') }}
+          dayBadge={(day) => {
+            const dayKey = format(day, 'yyyy-MM-dd')
+            const count =
+              bookings.filter(b => isSameDay(parseISO(b.starts_at), day)).length +
+              sessions.filter(s => s.event_date === dayKey).length
+            return count > 0 ? count : null
+          }}
+        />
       </div>
       ) : (
       <div className="bg-white border border-gray-200 brand-card overflow-hidden overflow-x-auto">
@@ -2107,9 +1638,9 @@ export default function AdminContrastCalendar() {
             {/* Day columns */}
             {weekDays.map(day => {
               const dayKey = format(day, 'yyyy-MM-dd')
-              const dayBookings = packOverlaps(bookings.filter(b => isSameDay(parseISO(b.starts_at), day) && (!resolvedStaffFilterId || b.staff_id === resolvedStaffFilterId)))
+              const dayBookings = packOverlaps(bookings.filter(b => isSameDay(parseISO(b.starts_at), day)))
               const dayBlocks = blockedTimes.filter(bt => isSameDay(parseISO(bt.starts_at), day))
-              const daySessions = sessions.filter(s => s.event_date === dayKey && (!resolvedStaffFilterId || s.staff_id === resolvedStaffFilterId))
+              const daySessions = sessions.filter(s => s.event_date === dayKey)
               return (
                 <div
                   key={day.toISOString()}
@@ -2158,11 +1689,11 @@ export default function AdminContrastCalendar() {
                         className={cn('absolute rounded-md px-1.5 py-1 overflow-hidden cursor-pointer z-20', booking.status === 'completed' ? 'opacity-50' : 'hover:brightness-95', draggingBookingId === booking.id && 'opacity-30')}
                         style={{ top, height, left: `calc(${widthPct * booking.col}% + 2px)`, width: `calc(${widthPct}% - 4px)`, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
                       >
-                        <p className="text-xs font-semibold truncate leading-tight" style={{ color }}>
+                        <p className="text-xs font-semibold truncate leading-tight flex items-center gap-1" style={{ color }}>
+                          {formAlerts.has(booking.id) && <ClipboardList className="h-3 w-3 shrink-0 text-amber-500" />}
                           {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
                         </p>
                         <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
-                        <p className="text-xs truncate text-gray-400">{booking.staff?.name ?? 'Unassigned'}</p>
                         {slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`) && (
                           <p className="text-xs font-medium" style={{ color }}>
                             {slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)!.taken}/{slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)!.max} spots
@@ -2239,34 +1770,21 @@ export default function AdminContrastCalendar() {
       {/* ── New Booking Modal ── */}
       <Modal open={nbModalOpen} onClose={closeNewBooking} title="New Booking" size="md">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-1 block">Staff member</label>
-              <select
-                value={nbStaffId ?? ''}
-                onChange={e => setNbStaffId(e.target.value || null)}
-                className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
-              >
-                <option value="">Unassigned</option>
-                {staff.filter(s => !s.on_holiday).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-1 block">Service</label>
-              <select
-                value={nbServiceId}
-                onChange={e => {
-                  const id = e.target.value
-                  setNbServiceId(id)
-                  const svc = services.find(s => s.id === id)
-                  if (!svc?.is_group_session) setNbBookingMode('customer')
-                  if (!nbPriceTouched && svc) setNbPrice((svc.price / 100).toFixed(2))
-                }}
-                className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
-              >
-                {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
+          <div>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">Service</label>
+            <select
+              value={nbServiceId}
+              onChange={e => {
+                const id = e.target.value
+                setNbServiceId(id)
+                const svc = services.find(s => s.id === id)
+                if (!svc?.is_group_session) setNbBookingMode('customer')
+                if (!nbPriceTouched && svc) setNbPrice((svc.price / 100).toFixed(2))
+              }}
+              className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
+            >
+              {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
           </div>
 
           {selectedService?.is_group_session && (
@@ -2529,25 +2047,6 @@ export default function AdminContrastCalendar() {
           <div className="flex gap-2 justify-end pt-1">
             <Button variant="secondary" onClick={() => setBtOpen(false)}>Cancel</Button>
             <Button onClick={handleCreateBlockTime} loading={btSaving}>Block Time</Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* ── Adjust Shift Modal ── */}
-      <Modal open={!!shiftAdjustFor} onClose={() => setShiftAdjustFor(null)} title={`Adjust Shift — ${shiftAdjustFor?.name ?? ''}`} size="sm">
-        <div className="space-y-4">
-          <p className="text-xs text-gray-500">
-            For {format(selectedDay, 'EEEE d MMM')} only — their regular weekly hours are unchanged.
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <Input label="Start" type="time" value={shiftStart} onChange={e => setShiftStart(e.target.value)} required />
-            <Input label="Finish" type="time" value={shiftEnd} onChange={e => setShiftEnd(e.target.value)} required />
-          </div>
-          <Input label="Reason (optional)" value={shiftReason} onChange={e => setShiftReason(e.target.value)} placeholder="e.g. Early finish, no bookings" />
-          {shiftError && <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{shiftError}</p>}
-          <div className="flex gap-2 justify-end pt-1">
-            <Button variant="secondary" onClick={() => setShiftAdjustFor(null)}>Cancel</Button>
-            <Button onClick={handleSaveShiftAdjust} loading={shiftSaving}>Save</Button>
           </div>
         </div>
       </Modal>

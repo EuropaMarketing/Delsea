@@ -54,6 +54,7 @@ export interface Service {
   commission_type: CommissionType | null
   commission_rate: number | null
   is_event_only: boolean
+  hide_from_main_calendar?: boolean
   variants?: ServiceVariant[]
   addons?: ServiceAddon[]
 }
