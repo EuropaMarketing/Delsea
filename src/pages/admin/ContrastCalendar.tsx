@@ -7,7 +7,7 @@ import {
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck, ClipboardList,
-  Sparkles, Mail, Phone as PhoneIcon, CalendarClock,
+  Sparkles, Mail, Phone as PhoneIcon, CalendarClock, ListFilter,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
@@ -182,11 +182,13 @@ export default function AdminContrastCalendar() {
   const [loading, setLoading] = useState(true)
   const [availability, setAvailability] = useState<Availability[]>([])
 
-  // Which group-session service this page is filtered to — persisted server-side via
-  // services.hide_from_main_calendar, so it's consistent across admins/devices and the
-  // main Calendar can exclude it.
-  const [contrastServiceId, setContrastServiceId] = useState<string | null>(null)
+  // Which group-session services appear on this calendar — persisted server-side via
+  // services.hide_from_main_calendar, so the choice is shared across admins/devices and
+  // the main Calendar excludes them. Multiple services can be shown together here so
+  // everything sharing the room lands on one view with no risk of a hidden clash.
+  const [contrastServiceIds, setContrastServiceIds] = useState<string[]>([])
   const [roomServices, setRoomServices] = useState<Service[]>([])
+  const [roomPickerOpen, setRoomPickerOpen] = useState(false)
 
 
   // Session attendee modal (open group-session slots)
@@ -262,6 +264,15 @@ export default function AdminContrastCalendar() {
   const [addLinkedAvailable, setAddLinkedAvailable] = useState<{ startsAt: Date; endsAt: Date } | null>(null)
   const [addLinkedSaving, setAddLinkedSaving] = useState(false)
   const [addLinkedError, setAddLinkedError] = useState('')
+
+  // Forms attached directly to the selected booking (in addition to any the service itself requires)
+  const [bookingForms, setBookingForms] = useState<Array<{ id: string; form_id: string; title: string }>>([])
+  const [availableForms, setAvailableForms] = useState<Array<{ id: string; title: string }>>([])
+  const [addFormOpen, setAddFormOpen] = useState(false)
+  const [addFormId, setAddFormId] = useState('')
+  const [addFormSaving, setAddFormSaving] = useState(false)
+  const [addFormError, setAddFormError] = useState('')
+
   const [actionLoading, setActionLoading] = useState(false)
   const [cancelReasonOpen, setCancelReasonOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
@@ -349,6 +360,17 @@ export default function AdminContrastCalendar() {
     return () => clearInterval(id)
   }, [])
 
+  // Every active form for this business, for the "attach a form to this booking" picker
+  useEffect(() => {
+    supabase
+      .from('service_forms')
+      .select('id, title')
+      .eq('business_id', BUSINESS_ID)
+      .eq('is_active', true)
+      .order('title')
+      .then(({ data }) => setAvailableForms((data ?? []) as Array<{ id: string; title: string }>))
+  }, [])
+
   useEffect(() => {
     if (!scrollRef.current) return
     const target = isToday(selectedDay)
@@ -364,18 +386,13 @@ export default function AdminContrastCalendar() {
     })
   }, [])
 
-  // Which service is "the room" is persisted server-side via hide_from_main_calendar,
-  // so the choice is shared across admins/devices and the main Calendar can exclude it.
-  async function selectRoom(id: string, list: Service[]) {
-    setContrastServiceId(id)
-    setRoomServices(list.map(s => ({ ...s, hide_from_main_calendar: s.id === id })))
-    const othersToClear = list.filter(s => s.id !== id && s.hide_from_main_calendar).map(s => s.id)
-    await Promise.all([
-      supabase.from('services').update({ hide_from_main_calendar: true }).eq('id', id),
-      othersToClear.length
-        ? supabase.from('services').update({ hide_from_main_calendar: false }).in('id', othersToClear)
-        : Promise.resolve(null),
-    ])
+  // Toggles whether a service appears on this calendar, persisted via hide_from_main_calendar
+  // so the choice is shared across admins/devices and the main Calendar excludes it.
+  async function toggleRoomService(id: string) {
+    const turningOn = !contrastServiceIds.includes(id)
+    setContrastServiceIds(prev => turningOn ? [...prev, id] : prev.filter(x => x !== id))
+    setRoomServices(prev => prev.map(s => s.id === id ? { ...s, hide_from_main_calendar: turningOn } : s))
+    await supabase.from('services').update({ hide_from_main_calendar: turningOn }).eq('id', id)
   }
 
   // Candidate group-session services for the room picker — loaded once, independent of date range
@@ -389,21 +406,20 @@ export default function AdminContrastCalendar() {
       .order('name')
       .then(({ data }) => {
         const list = (data ?? []) as Service[]
-        const flagged = list.find(s => s.hide_from_main_calendar)
-        if (flagged) {
-          setRoomServices(list)
-          setContrastServiceId(flagged.id)
-          return
+        setRoomServices(list)
+        const flagged = list.filter(s => s.hide_from_main_calendar).map(s => s.id)
+        if (flagged.length) { setContrastServiceIds(flagged); return }
+        const guesses = list.filter(s => /contrast/i.test(s.name))
+        if (guesses.length) {
+          setContrastServiceIds(guesses.map(s => s.id))
+          Promise.all(guesses.map(s => supabase.from('services').update({ hide_from_main_calendar: true }).eq('id', s.id)))
         }
-        const guess = list.find(s => /contrast/i.test(s.name)) ?? list[0]
-        if (guess) selectRoom(guess.id, list)
-        else setRoomServices(list)
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
-    if (!contrastServiceId) { setLoading(false); return }
+    if (!contrastServiceIds.length) { setLoading(false); return }
     async function load() {
       setLoading(true)
       const rangeStart = viewMode === 'month' ? startOfMonth(selectedDay) : startOfWeek(selectedDay, { weekStartsOn: 1 })
@@ -417,11 +433,11 @@ export default function AdminContrastCalendar() {
           .from('bookings')
           .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token), resource:resources!resource_id(name)')
           .eq('business_id', BUSINESS_ID)
-          .eq('service_id', contrastServiceId)
+          .in('service_id', contrastServiceIds)
           .gte('starts_at', dayStart)
           .lte('starts_at', dayEnd)
           .neq('status', 'cancelled'),
-        supabase.from('services').select('*').eq('id', contrastServiceId),
+        supabase.from('services').select('*').in('id', contrastServiceIds).order('name'),
         supabase
           .from('blocked_times')
           .select('id, staff_id, starts_at, ends_at, reason, is_shift_adjustment')
@@ -433,7 +449,7 @@ export default function AdminContrastCalendar() {
           .from('service_sessions')
           .select('id, service_id, event_date, start_time, staff_id, max_capacity_override, service:services(name,category,max_capacity,duration_minutes)')
           .eq('business_id', BUSINESS_ID)
-          .eq('service_id', contrastServiceId)
+          .in('service_id', contrastServiceIds)
           .eq('is_active', true)
           .not('event_date', 'is', null)
           .gte('event_date', format(rangeStart, 'yyyy-MM-dd'))
@@ -453,7 +469,8 @@ export default function AdminContrastCalendar() {
       setLoading(false)
     }
     load()
-  }, [selectedDay, viewMode, contrastServiceId])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDay, viewMode, contrastServiceIds.join(',')])
 
   // Drag-to-resize
   useEffect(() => {
@@ -611,6 +628,42 @@ export default function AdminContrastCalendar() {
       .select('addon_id, price, service_addon:service_addons(name, duration_minutes)')
       .eq('booking_id', bookingId)
     return (data ?? []) as unknown as BookingAddon[]
+  }
+
+  async function fetchBookingForms(bookingId: string) {
+    const { data } = await supabase
+      .from('booking_forms')
+      .select('id, form_id, form:service_forms(title)')
+      .eq('booking_id', bookingId)
+    setBookingForms(
+      ((data ?? []) as unknown as { id: string; form_id: string; form: { title: string } | null }[])
+        .map(r => ({ id: r.id, form_id: r.form_id, title: r.form?.title ?? 'Untitled form' })),
+    )
+  }
+
+  async function handleAddBookingForm() {
+    if (!selectedBooking || !addFormId) return
+    setAddFormSaving(true)
+    setAddFormError('')
+    const { error } = await supabase
+      .from('booking_forms')
+      .insert({ business_id: BUSINESS_ID, booking_id: selectedBooking.id, form_id: addFormId })
+    if (error) {
+      setAddFormError(error.message)
+    } else {
+      await fetchBookingForms(selectedBooking.id)
+      checkBookingForm(selectedBooking.service_id, selectedBooking.customer_id, selectedBooking.id).then(setSelectedBookingForm)
+      setAddFormOpen(false)
+      setAddFormId('')
+    }
+    setAddFormSaving(false)
+  }
+
+  async function handleRemoveBookingForm(id: string) {
+    if (!selectedBooking) return
+    await supabase.from('booking_forms').delete().eq('id', id)
+    await fetchBookingForms(selectedBooking.id)
+    checkBookingForm(selectedBooking.service_id, selectedBooking.customer_id, selectedBooking.id).then(setSelectedBookingForm)
   }
 
   function sessionStartsAt(session: SessionRow): string {
@@ -1043,7 +1096,8 @@ export default function AdminContrastCalendar() {
     setActivityLog([])
     setActivityLogOpen(false)
     refreshActivityLog(b.id)
-    checkBookingForm(b.service_id, b.customer_id).then(setSelectedBookingForm)
+    checkBookingForm(b.service_id, b.customer_id, b.id).then(setSelectedBookingForm)
+    fetchBookingForms(b.id)
     setDetailCapacity(null)
     fetchSlotCapacity(b.service_id, b.starts_at).then(setDetailCapacity)
     setDetailAddons([])
@@ -1054,6 +1108,10 @@ export default function AdminContrastCalendar() {
     if (b.combo_group_id) fetchLinkedBookings(b.combo_group_id, b.id)
     setAddLinkedOpen(false)
     setAddLinkedError('')
+    setBookingForms([])
+    setAddFormOpen(false)
+    setAddFormId('')
+    setAddFormError('')
     setViewTokenApplied(false)
     supabase
       .from('membership_transactions')
@@ -1566,6 +1624,25 @@ export default function AdminContrastCalendar() {
     )
   }
 
+  if (contrastServiceIds.length === 0) {
+    return (
+      <div>
+        <h1 className="text-xl font-bold text-gray-900 mb-4">Contrast Calendar</h1>
+        <div className="border border-gray-200 rounded-xl p-8 text-center bg-white">
+          <p className="text-sm text-gray-600 mb-4">Choose which group-session services should appear on this calendar.</p>
+          <div className="max-w-xs mx-auto space-y-2 text-left">
+            {roomServices.map(s => (
+              <label key={s.id} className="flex items-center gap-2.5 text-sm text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-lg px-3 py-2 cursor-pointer transition-colors">
+                <input type="checkbox" checked={contrastServiceIds.includes(s.id)} onChange={() => toggleRoomService(s.id)} className="accent-(--color-primary)" />
+                {s.name}
+              </label>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR + i)
   const todaySelected = isToday(selectedDay)
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(selectedDay, { weekStartsOn: 1 }), i))
@@ -1583,15 +1660,26 @@ export default function AdminContrastCalendar() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {roomServices.length > 1 && (
-            <select
-              value={contrastServiceId ?? ''}
-              onChange={e => selectRoom(e.target.value, roomServices)}
-              className="h-9 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
-            >
-              {roomServices.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          )}
+          <div className="relative">
+            <Button variant="secondary" size="sm" onClick={() => setRoomPickerOpen(o => !o)}>
+              <ListFilter className="h-3.5 w-3.5" />
+              Services ({contrastServiceIds.length})
+            </Button>
+            {roomPickerOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setRoomPickerOpen(false)} />
+                <div className="absolute right-0 top-full mt-1.5 z-50 bg-white border border-gray-200 rounded-xl shadow-xl p-2 w-64">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2 py-1.5">Shown on this calendar</p>
+                  {roomServices.map(s => (
+                    <label key={s.id} className="flex items-center gap-2.5 text-sm text-gray-700 hover:bg-gray-50 rounded-lg px-2 py-1.5 cursor-pointer transition-colors">
+                      <input type="checkbox" checked={contrastServiceIds.includes(s.id)} onChange={() => toggleRoomService(s.id)} className="accent-(--color-primary)" />
+                      {s.name}
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
             <button
               onClick={() => setViewMode('week')}
@@ -2322,6 +2410,50 @@ export default function AdminContrastCalendar() {
                   <div className="flex gap-2">
                     <Button variant="secondary" size="sm" onClick={() => setAddLinkedOpen(false)} className="shrink-0">Cancel</Button>
                     <Button fullWidth size="sm" loading={addLinkedSaving} disabled={!addLinkedAvailable} onClick={handleAddLinkedService}>Add</Button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Forms attached directly to this booking */}
+            <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+              {bookingForms.length > 0 && (
+                <ul className="space-y-1.5">
+                  {bookingForms.map(bf => (
+                    <li key={bf.id} className="flex items-center justify-between gap-2 text-xs bg-gray-50 rounded-lg px-2.5 py-1.5">
+                      <span className="flex items-center gap-1.5 text-gray-700 truncate"><ClipboardList className="h-3.5 w-3.5 shrink-0 text-gray-400" /> {bf.title}</span>
+                      <button type="button" onClick={() => handleRemoveBookingForm(bf.id)} className="text-red-500 hover:text-red-700 shrink-0">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {!addFormOpen ? (
+                <button
+                  type="button"
+                  onClick={() => { setAddFormOpen(true); setAddFormId(''); setAddFormError('') }}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 uppercase tracking-wide"
+                >
+                  <ClipboardList className="h-3.5 w-3.5" /> Add Form
+                </button>
+              ) : (
+                <div className="space-y-2.5">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Add Form</p>
+                  <select
+                    value={addFormId}
+                    onChange={e => setAddFormId(e.target.value)}
+                    className="w-full h-9 px-2.5 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                  >
+                    <option value="">Select a form…</option>
+                    {availableForms.filter(f => !bookingForms.some(bf => bf.form_id === f.id)).map(f => (
+                      <option key={f.id} value={f.id}>{f.title}</option>
+                    ))}
+                  </select>
+                  {addFormError && <p className="text-xs text-red-600">{addFormError}</p>}
+                  <div className="flex gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => setAddFormOpen(false)} className="shrink-0">Cancel</Button>
+                    <Button fullWidth size="sm" loading={addFormSaving} disabled={!addFormId} onClick={handleAddBookingForm}>Add</Button>
                   </div>
                 </div>
               )}

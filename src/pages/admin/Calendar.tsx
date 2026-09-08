@@ -243,6 +243,15 @@ export default function AdminCalendar() {
   const [addLinkedAvailable, setAddLinkedAvailable] = useState<{ startsAt: Date; endsAt: Date } | null>(null)
   const [addLinkedSaving, setAddLinkedSaving] = useState(false)
   const [addLinkedError, setAddLinkedError] = useState('')
+
+  // Forms attached directly to the selected booking (in addition to any the service itself requires)
+  const [bookingForms, setBookingForms] = useState<Array<{ id: string; form_id: string; title: string }>>([])
+  const [availableForms, setAvailableForms] = useState<Array<{ id: string; title: string }>>([])
+  const [addFormOpen, setAddFormOpen] = useState(false)
+  const [addFormId, setAddFormId] = useState('')
+  const [addFormSaving, setAddFormSaving] = useState(false)
+  const [addFormError, setAddFormError] = useState('')
+
   const [actionLoading, setActionLoading] = useState(false)
   const [cancelReasonOpen, setCancelReasonOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
@@ -328,6 +337,17 @@ export default function AdminCalendar() {
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000)
     return () => clearInterval(id)
+  }, [])
+
+  // Every active form for this business, for the "attach a form to this booking" picker
+  useEffect(() => {
+    supabase
+      .from('service_forms')
+      .select('id, title')
+      .eq('business_id', BUSINESS_ID)
+      .eq('is_active', true)
+      .order('title')
+      .then(({ data }) => setAvailableForms((data ?? []) as Array<{ id: string; title: string }>))
   }, [])
 
   useEffect(() => {
@@ -578,6 +598,42 @@ export default function AdminCalendar() {
       .select('addon_id, price, service_addon:service_addons(name, duration_minutes)')
       .eq('booking_id', bookingId)
     return (data ?? []) as unknown as BookingAddon[]
+  }
+
+  async function fetchBookingForms(bookingId: string) {
+    const { data } = await supabase
+      .from('booking_forms')
+      .select('id, form_id, form:service_forms(title)')
+      .eq('booking_id', bookingId)
+    setBookingForms(
+      ((data ?? []) as unknown as { id: string; form_id: string; form: { title: string } | null }[])
+        .map(r => ({ id: r.id, form_id: r.form_id, title: r.form?.title ?? 'Untitled form' })),
+    )
+  }
+
+  async function handleAddBookingForm() {
+    if (!selectedBooking || !addFormId) return
+    setAddFormSaving(true)
+    setAddFormError('')
+    const { error } = await supabase
+      .from('booking_forms')
+      .insert({ business_id: BUSINESS_ID, booking_id: selectedBooking.id, form_id: addFormId })
+    if (error) {
+      setAddFormError(error.message)
+    } else {
+      await fetchBookingForms(selectedBooking.id)
+      checkBookingForm(selectedBooking.service_id, selectedBooking.customer_id, selectedBooking.id).then(setSelectedBookingForm)
+      setAddFormOpen(false)
+      setAddFormId('')
+    }
+    setAddFormSaving(false)
+  }
+
+  async function handleRemoveBookingForm(id: string) {
+    if (!selectedBooking) return
+    await supabase.from('booking_forms').delete().eq('id', id)
+    await fetchBookingForms(selectedBooking.id)
+    checkBookingForm(selectedBooking.service_id, selectedBooking.customer_id, selectedBooking.id).then(setSelectedBookingForm)
   }
 
   function sessionStartsAt(session: SessionRow): string {
@@ -1092,7 +1148,8 @@ export default function AdminCalendar() {
     setActivityLog([])
     setActivityLogOpen(false)
     refreshActivityLog(b.id)
-    checkBookingForm(b.service_id, b.customer_id).then(setSelectedBookingForm)
+    checkBookingForm(b.service_id, b.customer_id, b.id).then(setSelectedBookingForm)
+    fetchBookingForms(b.id)
     setDetailCapacity(null)
     fetchSlotCapacity(b.service_id, b.starts_at).then(setDetailCapacity)
     setDetailAddons([])
@@ -1103,6 +1160,10 @@ export default function AdminCalendar() {
     if (b.combo_group_id) fetchLinkedBookings(b.combo_group_id, b.id)
     setAddLinkedOpen(false)
     setAddLinkedError('')
+    setBookingForms([])
+    setAddFormOpen(false)
+    setAddFormId('')
+    setAddFormError('')
     setViewTokenApplied(false)
     supabase
       .from('membership_transactions')
@@ -2708,6 +2769,50 @@ export default function AdminCalendar() {
                   <div className="flex gap-2">
                     <Button variant="secondary" size="sm" onClick={() => setAddLinkedOpen(false)} className="shrink-0">Cancel</Button>
                     <Button fullWidth size="sm" loading={addLinkedSaving} disabled={!addLinkedAvailable} onClick={handleAddLinkedService}>Add</Button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Forms attached directly to this booking */}
+            <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+              {bookingForms.length > 0 && (
+                <ul className="space-y-1.5">
+                  {bookingForms.map(bf => (
+                    <li key={bf.id} className="flex items-center justify-between gap-2 text-xs bg-gray-50 rounded-lg px-2.5 py-1.5">
+                      <span className="flex items-center gap-1.5 text-gray-700 truncate"><ClipboardList className="h-3.5 w-3.5 shrink-0 text-gray-400" /> {bf.title}</span>
+                      <button type="button" onClick={() => handleRemoveBookingForm(bf.id)} className="text-red-500 hover:text-red-700 shrink-0">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {!addFormOpen ? (
+                <button
+                  type="button"
+                  onClick={() => { setAddFormOpen(true); setAddFormId(''); setAddFormError('') }}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 uppercase tracking-wide"
+                >
+                  <ClipboardList className="h-3.5 w-3.5" /> Add Form
+                </button>
+              ) : (
+                <div className="space-y-2.5">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Add Form</p>
+                  <select
+                    value={addFormId}
+                    onChange={e => setAddFormId(e.target.value)}
+                    className="w-full h-9 px-2.5 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                  >
+                    <option value="">Select a form…</option>
+                    {availableForms.filter(f => !bookingForms.some(bf => bf.form_id === f.id)).map(f => (
+                      <option key={f.id} value={f.id}>{f.title}</option>
+                    ))}
+                  </select>
+                  {addFormError && <p className="text-xs text-red-600">{addFormError}</p>}
+                  <div className="flex gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => setAddFormOpen(false)} className="shrink-0">Cancel</Button>
+                    <Button fullWidth size="sm" loading={addFormSaving} disabled={!addFormId} onClick={handleAddBookingForm}>Add</Button>
                   </div>
                 </div>
               )}

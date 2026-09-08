@@ -206,7 +206,7 @@ export default function AdminBookings() {
     setActivityLog([])
     setActivityLogOpen(false)
     refreshActivityLog(b.id)
-    checkBookingForm(b.service_id, b.customer_id).then(setSelectedBookingForm)
+    checkBookingForm(b.service_id, b.customer_id, b.id).then(setSelectedBookingForm)
   }
 
   async function handleChargeBalance(bookingId: string) {

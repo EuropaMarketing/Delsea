@@ -171,8 +171,8 @@ export default function MyBookings() {
   const [activityLogs, setActivityLogs] = useState<Record<string, ActivityLogEntry[]>>({})
   const [logsOpen, setLogsOpen] = useState<Set<string>>(new Set())
   const [logsLoading, setLogsLoading] = useState<Set<string>>(new Set())
-  // formRequired[bookingId] = formId if a form is required and not yet completed
-  const [formRequired, setFormRequired] = useState<Record<string, string>>({})
+  // formRequired[bookingId] = outstanding form IDs (from the service and/or attached directly to the booking)
+  const [formRequired, setFormRequired] = useState<Record<string, string[]>>({})
 
   useEffect(() => {
     if (!user) { setLoading(false); return }
@@ -247,26 +247,38 @@ export default function MyBookings() {
           )
           if (upcomingConfirmed.length && customerIds.length) {
             const serviceIds = [...new Set(upcomingConfirmed.map(b => b.service_id))]
-            const { data: forms } = await supabase
-              .from('service_forms')
-              .select('id, service_id')
-              .in('service_id', serviceIds)
-              .eq('is_active', true)
-            if (forms && forms.length) {
-              const formIds = forms.map((f: { id: string }) => f.id)
+            const bookingIds = upcomingConfirmed.map(b => b.id)
+            const [svcFormsRes, bookingFormsRes] = await Promise.all([
+              supabase.from('service_forms').select('id, service_id').in('service_id', serviceIds).eq('is_active', true),
+              supabase.from('booking_forms').select('booking_id, form_id').in('booking_id', bookingIds),
+            ])
+            const svcForms = (svcFormsRes.data ?? []) as { id: string; service_id: string }[]
+            const bookingFormRows = (bookingFormsRes.data ?? []) as { booking_id: string; form_id: string }[]
+
+            const requiredFormIdsByBooking: Record<string, string[]> = {}
+            for (const booking of upcomingConfirmed) {
+              const ids: string[] = []
+              const svcForm = svcForms.find(f => f.service_id === booking.service_id)
+              if (svcForm) ids.push(svcForm.id)
+              for (const row of bookingFormRows.filter(r => r.booking_id === booking.id)) {
+                if (!ids.includes(row.form_id)) ids.push(row.form_id)
+              }
+              if (ids.length) requiredFormIdsByBooking[booking.id] = ids
+            }
+
+            const allFormIds = [...new Set(Object.values(requiredFormIdsByBooking).flat())]
+            if (allFormIds.length) {
               const { data: validResponses } = await supabase
                 .from('form_responses')
                 .select('form_id')
                 .in('customer_id', customerIds)
-                .in('form_id', formIds)
+                .in('form_id', allFormIds)
                 .gt('expires_at', new Date().toISOString())
               const completedFormIds = new Set((validResponses ?? []).map((r: { form_id: string }) => r.form_id))
-              const required: Record<string, string> = {}
-              for (const booking of upcomingConfirmed) {
-                const form = (forms as { id: string; service_id: string }[]).find(f => f.service_id === booking.service_id)
-                if (form && !completedFormIds.has(form.id)) {
-                  required[booking.id] = form.id
-                }
+              const required: Record<string, string[]> = {}
+              for (const [bookingId, formIds] of Object.entries(requiredFormIdsByBooking)) {
+                const missing = formIds.filter(id => !completedFormIds.has(id))
+                if (missing.length) required[bookingId] = missing
               }
               setFormRequired(required)
             }
@@ -452,22 +464,22 @@ export default function MyBookings() {
           )
         )}
 
-        {/* Health form prompt */}
-        {formRequired[booking.id] && (
-          <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+        {/* Health form prompt(s) */}
+        {formRequired[booking.id]?.map(formId => (
+          <div key={formId} className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
             <ClipboardList className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-amber-800">Health form required</p>
-              <p className="text-xs text-amber-600 mt-0.5">Please complete your health questionnaire before this appointment.</p>
+              <p className="text-xs font-semibold text-amber-800">Form required</p>
+              <p className="text-xs text-amber-600 mt-0.5">Please complete this form before your appointment.</p>
             </div>
             <a
-              href={`/forms/${formRequired[booking.id]}?bookingId=${booking.id}`}
+              href={`/forms/${formId}?bookingId=${booking.id}`}
               className="text-xs font-semibold text-amber-700 hover:text-amber-900 shrink-0 underline underline-offset-2"
             >
               Complete →
             </a>
           </div>
-        )}
+        ))}
 
         {/* Activity history */}
         <button
