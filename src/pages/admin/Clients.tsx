@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { format, parseISO, isBefore, isPast } from 'date-fns'
 import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle, Pencil, X, Ban, Trash2, ShieldOff } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -55,6 +56,7 @@ type ClientRow = Customer & {
 }
 
 export default function AdminClients() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [clients, setClients] = useState<ClientRow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -132,6 +134,16 @@ export default function AdminClients() {
   useEffect(() => {
     loadClients().then(() => setLoading(false))
   }, [])
+
+  // Deep link from elsewhere in the admin (e.g. clicking a customer name on the Calendar).
+  useEffect(() => {
+    const editId = searchParams.get('edit')
+    if (!editId || clients.length === 0) return
+    const client = clients.find(c => c.id === editId)
+    if (client) setSelected(client)
+    setSearchParams(params => { params.delete('edit'); return params }, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clients, searchParams])
 
   useEffect(() => {
     if (!selected) {

@@ -2486,7 +2486,15 @@ export default function AdminCalendar() {
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">Customer</dt>
-                <dd className="font-medium text-gray-900">{selectedBooking.customer?.name}</dd>
+                <dd>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/admin/clients?edit=${selectedBooking.customer_id}`)}
+                    className="text-(--color-primary) hover:underline font-medium"
+                  >
+                    {selectedBooking.customer?.name}
+                  </button>
+                </dd>
               </div>
               {selectedBooking.customer?.email && (
                 <div className="flex justify-between">
