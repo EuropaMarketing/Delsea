@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Input, Textarea } from '@/components/ui/Input'
 import { cn } from '@/lib/cn'
-import { formatCurrency } from '@/lib/currency'
+import { formatCurrency, formatDuration } from '@/lib/currency'
 import type { Booking, Staff, Service, Customer, Resource, Availability } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
@@ -1866,6 +1866,10 @@ export default function AdminCalendar() {
                           {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
                         </p>
                         <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
+                        <p className="text-xs truncate text-gray-400">
+                          {formatDuration(differenceInMinutes(parseISO(booking.ends_at), parseISO(booking.starts_at)))}
+                          {booking.resource?.name ? ` · ${booking.resource.name}` : ''}
+                        </p>
                         {slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`) && (
                           <p className="text-xs font-medium" style={{ color }}>
                             {slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)!.taken}/{slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)!.max} spots
@@ -1947,6 +1951,10 @@ export default function AdminCalendar() {
                       {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
                     </p>
                     <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
+                    <p className="text-xs truncate text-gray-400">
+                      {formatDuration(differenceInMinutes(parseISO(booking.ends_at), parseISO(booking.starts_at)))}
+                      {booking.resource?.name ? ` · ${booking.resource.name}` : ''}
+                    </p>
                     {(() => {
                       const cap = slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`)
                       return cap
@@ -2076,6 +2084,10 @@ export default function AdminCalendar() {
                           {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
                         </p>
                         <p className="text-xs truncate text-gray-600">{booking.customer?.name}</p>
+                        <p className="text-xs truncate text-gray-400">
+                          {formatDuration(differenceInMinutes(parseISO(booking.ends_at), parseISO(booking.starts_at)))}
+                          {booking.resource?.name ? ` · ${booking.resource.name}` : ''}
+                        </p>
                         <p className="text-xs truncate text-gray-400">{booking.staff?.name ?? 'Unassigned'}</p>
                         {slotCapacityMap.get(`${booking.service_id}|${booking.starts_at}`) && (
                           <p className="text-xs font-medium" style={{ color }}>
