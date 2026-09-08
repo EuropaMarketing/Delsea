@@ -7,7 +7,7 @@ import {
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck, ClipboardList,
-  Sparkles, Mail, Phone as PhoneIcon, CalendarClock,
+  Sparkles, Mail, Phone as PhoneIcon, CalendarClock, UserPlus,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
@@ -659,6 +659,26 @@ export default function AdminContrastCalendar() {
       .neq('status', 'cancelled')
     setSessionAttendees((data as unknown as Attendee[]) ?? [])
     setSessionAttendeesLoading(false)
+  }
+
+  function openAddAttendee(session: SessionRow) {
+    const svc = services.find(s => s.id === session.service_id)
+    setNbBookingMode('customer')
+    setNbServiceId(session.service_id)
+    setNbDate(session.event_date)
+    setNbTime(session.start_time.slice(0, 5))
+    setNbStaffId(session.staff_id ?? null)
+    setNbName(''); setNbEmail(''); setNbPhone(''); setNbNotes('')
+    setNbPrice(svc ? (svc.price / 100).toFixed(2) : '')
+    setNbPriceTouched(false)
+    setNbSpotsBooked(1)
+    setNbSlotCapacity(null)
+    setNbRepeat('none'); setNbRepeatInterval(1); setNbRepeatEndType('count'); setNbRepeatCount(8); setNbRepeatUntil('')
+    setNbDailyRepeatEnabled(false); setNbDailyRepeatIntervalHours(1); setNbDailyRepeatUntilTime('')
+    setNbSkippedDates([])
+    setNbError(''); setNbSuggestions([]); setNbShowSuggestions(false); setNbSelectedCustomerId(null)
+    setSelectedSession(null)
+    setNbModalOpen(true)
   }
 
   async function openAttendeeBooking(attendeeId: string) {
@@ -2940,6 +2960,23 @@ export default function AdminContrastCalendar() {
                 </ul>
               )}
             </div>
+
+            {(() => {
+              const cap = sessionCapacityMap.get(selectedSession.id)
+              const full = !!cap && cap.taken >= cap.max
+              return (
+                <Button
+                  fullWidth
+                  variant="secondary"
+                  size="sm"
+                  disabled={full}
+                  onClick={() => openAddAttendee(selectedSession)}
+                >
+                  <UserPlus className="h-4 w-4" />
+                  {full ? 'Session Full' : 'Add Attendee'}
+                </Button>
+              )
+            })()}
 
             {sessionCancelOpen ? (
               <div className="border border-red-200 bg-red-50 rounded-lg p-3 space-y-2">
