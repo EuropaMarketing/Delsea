@@ -344,7 +344,7 @@ export default function CustomerDetails() {
       </div>
 
       <div className="mt-6 flex justify-between">
-        <Button variant="secondary" onClick={() => navigate('/datetime')}>
+        <Button variant="secondary" onClick={() => navigate(service?.is_group_session ? '/datetime' : '/linked-service')}>
           Back
         </Button>
         <Button size="lg" onClick={handleNext}>

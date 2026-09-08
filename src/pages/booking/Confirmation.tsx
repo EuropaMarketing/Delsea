@@ -14,7 +14,7 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function Confirmation() {
   const navigate = useNavigate()
-  const { draft, services, staff, selectedAddons, reset, useToken, tokenMembershipId, tokenPlanName, eventSessionId } = useBookingStore()
+  const { draft, services, staff, selectedAddons, reset, useToken, tokenMembershipId, tokenPlanName, eventSessionId, linkedService } = useBookingStore()
   const { user } = useAuthStore()
   const { config: brandConfig } = useBrandStore()
 
@@ -140,6 +140,36 @@ export default function Confirmation() {
 
       if (bErr) throw bErr
 
+      // Linked follow-on service (e.g. pressotherapy before/after the massage) — a real
+      // second booking, created best-effort. A failure here must not fail the whole
+      // checkout, since the primary booking already succeeded.
+      let linkedServiceFailed: string | undefined
+      if (linkedService) {
+        try {
+          const { data: linkedBookingId, error: linkedErr } = await supabase
+            .rpc('create_booking', {
+              p_business_id: BUSINESS_ID,
+              p_user_id: user?.id ?? null,
+              p_name: draft.customerName,
+              p_email: draft.customerEmail,
+              p_phone: draft.customerPhone || null,
+              p_service_id: linkedService.serviceId,
+              p_starts_at: linkedService.startsAt,
+              p_ends_at: linkedService.endsAt,
+              p_notes: `Linked ${linkedService.position} ${service?.name ?? 'booking'}`,
+            })
+          if (linkedErr) throw linkedErr
+          const comboGroupId = crypto.randomUUID()
+          await Promise.all([
+            supabase.from('bookings').update({ combo_group_id: comboGroupId }).eq('id', bookingId as string),
+            supabase.from('bookings').update({ combo_group_id: comboGroupId }).eq('id', linkedBookingId as string),
+          ])
+        } catch (linkedErr) {
+          console.error('Failed to create linked booking:', linkedErr)
+          linkedServiceFailed = linkedService.serviceName
+        }
+      }
+
       if (selectedAddons.length > 0) {
         await supabase.from('booking_addons').insert(
           selectedAddons.map((a) => ({
@@ -190,6 +220,7 @@ export default function Confirmation() {
         isNewUser: wasGuest,
         depositAmount,
         paymentMethod: useToken ? 'membership' : !acceptsCard ? 'manual' : paymentMethod,
+        linkedServiceFailed,
       }
 
       // Membership covers cost, or this business has no payment provider connected —
@@ -290,6 +321,28 @@ export default function Confirmation() {
               </div>
             </dl>
           </Card>
+
+          {linkedService && (
+            <Card padding="md">
+              <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Linked Treatment</h2>
+              <dl className="space-y-2.5 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Service</dt>
+                  <dd className="font-semibold text-gray-900">{linkedService.serviceName}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">When</dt>
+                  <dd className="text-gray-700">
+                    {linkedService.position === 'before' ? 'Before' : 'After'} your {service?.name} · {format(new Date(linkedService.startsAt), 'HH:mm')}–{format(new Date(linkedService.endsAt), 'HH:mm')}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Price</dt>
+                  <dd className="text-gray-700">{formatCurrency(linkedService.price)} <span className="text-xs text-gray-400">(paid at venue)</span></dd>
+                </div>
+              </dl>
+            </Card>
+          )}
 
           <Card padding="md">
             <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Your Details</h2>

@@ -632,7 +632,7 @@ export default function DateTimePicker() {
         <Button
           size="lg"
           disabled={!canContinue}
-          onClick={() => navigate(rescheduleBookingId ? '/reschedule-confirm' : '/details')}
+          onClick={() => navigate(rescheduleBookingId ? '/reschedule-confirm' : service?.is_group_session ? '/details' : '/linked-service')}
         >
           {rescheduleBookingId ? 'Choose this time →' : 'Continue'}
         </Button>

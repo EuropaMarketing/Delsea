@@ -3,6 +3,16 @@ import type { BookingDraft, Service, ServiceVariant, Staff } from '@/types'
 
 export type AddonSelection = { id: string; name: string; duration_minutes: number; price: number }
 
+export type LinkedServiceSelection = {
+  serviceId: string
+  serviceName: string
+  price: number
+  durationMinutes: number
+  position: 'before' | 'after'
+  startsAt: string
+  endsAt: string
+}
+
 interface BookingStore {
   draft: BookingDraft
   services: Service[]
@@ -14,6 +24,8 @@ interface BookingStore {
   tokenMembershipId: string | null
   tokenPlanName: string | null
   eventSessionId: string | null
+  linkedService: LinkedServiceSelection | null
+  setLinkedService: (selection: LinkedServiceSelection | null) => void
   setService: (serviceId: string) => void
   setVariant: (variant: ServiceVariant | null) => void
   setStaff: (staffId: string | null) => void
@@ -59,11 +71,13 @@ export const useBookingStore = create<BookingStore>((set) => ({
   tokenMembershipId: null,
   tokenPlanName: null,
   eventSessionId: null,
+  linkedService: null,
 
   setAddons: (addons) => set({ selectedAddons: addons }),
+  setLinkedService: (selection) => set({ linkedService: selection }),
 
   setService: (serviceId) =>
-    set((s) => ({ draft: { ...s.draft, serviceId, variantId: null, variantName: null, variantDuration: null, variantPrice: null, staffId: null, date: null, timeSlot: null }, selectedAddons: [], eventSessionId: null, rescheduleBookingId: null, rescheduleOriginalTime: null })),
+    set((s) => ({ draft: { ...s.draft, serviceId, variantId: null, variantName: null, variantDuration: null, variantPrice: null, staffId: null, date: null, timeSlot: null }, selectedAddons: [], eventSessionId: null, linkedService: null, rescheduleBookingId: null, rescheduleOriginalTime: null })),
 
   setVariant: (variant) =>
     set((s) => ({
@@ -82,10 +96,10 @@ export const useBookingStore = create<BookingStore>((set) => ({
     set((s) => ({ draft: { ...s.draft, staffId, date: null, timeSlot: null } })),
 
   setDate: (date) =>
-    set((s) => ({ draft: { ...s.draft, date, timeSlot: null, spotsBooked: 1 } })),
+    set((s) => ({ draft: { ...s.draft, date, timeSlot: null, spotsBooked: 1 }, linkedService: null })),
 
   setTimeSlot: (timeSlot) =>
-    set((s) => ({ draft: { ...s.draft, timeSlot, spotsBooked: 1 } })),
+    set((s) => ({ draft: { ...s.draft, timeSlot, spotsBooked: 1 }, linkedService: null })),
 
   setSpotsBooked: (n) =>
     set((s) => ({ draft: { ...s.draft, spotsBooked: n } })),
@@ -130,5 +144,6 @@ export const useBookingStore = create<BookingStore>((set) => ({
     tokenMembershipId: null,
     tokenPlanName: null,
     eventSessionId: null,
+    linkedService: null,
   }),
 }))

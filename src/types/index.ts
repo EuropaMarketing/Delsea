@@ -111,6 +111,7 @@ export interface Booking {
   recurrence_id?: string | null
   recurrence_index?: number | null
   recurrence_total?: number | null
+  combo_group_id?: string | null
   checked_in_at?: string | null
   created_at: string
   staff?: Staff

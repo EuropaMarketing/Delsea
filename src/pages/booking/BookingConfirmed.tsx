@@ -25,6 +25,7 @@ interface ConfirmedState {
   isNewUser: boolean
   depositAmount?: number
   paymentMethod?: 'membership' | 'card' | 'venue' | 'manual'
+  linkedServiceFailed?: string
 }
 
 type RequiredForm = { id: string; title: string }
@@ -201,6 +202,12 @@ export default function BookingConfirmed() {
       {s.isNewUser && (
         <div className="mt-5 w-full max-w-sm">
           <CreateAccountForm email={s.customerEmail} />
+        </div>
+      )}
+
+      {s.linkedServiceFailed && (
+        <div className="mt-5 w-full max-w-sm bg-amber-50 border border-amber-200 rounded-xl px-4 py-3.5 text-left text-sm text-amber-700">
+          Your {s.serviceName.toLowerCase()} is confirmed, but we couldn't secure the {s.linkedServiceFailed} slot you added — please contact us to arrange it.
         </div>
       )}
 

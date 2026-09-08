@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
+import { generateTimeSlots } from '@/lib/slots'
 import { useAuthStore } from '@/store/authStore'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { Modal } from '@/components/ui/Modal'
@@ -230,6 +231,18 @@ export default function AdminCalendar() {
   const [customerForms, setCustomerForms] = useState<CustomerFormHistory[]>([])
   const [customerMemberships, setCustomerMemberships] = useState<CustomerMembershipHistory[]>([])
   const [customerSidebarLoading, setCustomerSidebarLoading] = useState(false)
+
+  // Linked follow-on service booking (e.g. pressotherapy before/after)
+  const [linkedBookings, setLinkedBookings] = useState<Array<{ id: string; starts_at: string; ends_at: string; service: { name: string } | null }>>([])
+  const [addLinkedOpen, setAddLinkedOpen] = useState(false)
+  const [addLinkedServiceId, setAddLinkedServiceId] = useState('')
+  const [addLinkedStaffId, setAddLinkedStaffId] = useState<string | null>(null)
+  const [addLinkedPosition, setAddLinkedPosition] = useState<'before' | 'after'>('after')
+  const [addLinkedChecking, setAddLinkedChecking] = useState(false)
+  const [addLinkedChecked, setAddLinkedChecked] = useState(false)
+  const [addLinkedAvailable, setAddLinkedAvailable] = useState<{ startsAt: Date; endsAt: Date } | null>(null)
+  const [addLinkedSaving, setAddLinkedSaving] = useState(false)
+  const [addLinkedError, setAddLinkedError] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
   const [cancelReasonOpen, setCancelReasonOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
@@ -1009,6 +1022,16 @@ export default function AdminCalendar() {
     setCustomerSidebarLoading(false)
   }
 
+  async function fetchLinkedBookings(comboGroupId: string, excludeBookingId: string) {
+    const { data } = await supabase
+      .from('bookings')
+      .select('id, starts_at, ends_at, service:services(name)')
+      .eq('combo_group_id', comboGroupId)
+      .neq('id', excludeBookingId)
+      .neq('status', 'cancelled')
+    setLinkedBookings((data ?? []) as unknown as Array<{ id: string; starts_at: string; ends_at: string; service: { name: string } | null }>)
+  }
+
   function openBookingDetail(b: RichBooking) {
     setHoverBooking(null)
     setSelectedBooking(b)
@@ -1031,6 +1054,85 @@ export default function AdminCalendar() {
     fetchBookingAddons(b.id).then(setDetailAddons)
     setCustomerBookings([]); setCustomerForms([]); setCustomerMemberships([])
     fetchCustomerSidebar(b.customer_id, b.id)
+    setLinkedBookings([])
+    if (b.combo_group_id) fetchLinkedBookings(b.combo_group_id, b.id)
+    setAddLinkedOpen(false)
+    setAddLinkedError('')
+  }
+
+  function openAddLinkedService() {
+    setAddLinkedOpen(true)
+    setAddLinkedServiceId('')
+    setAddLinkedStaffId(null)
+    setAddLinkedPosition('after')
+    setAddLinkedChecked(false)
+    setAddLinkedAvailable(null)
+    setAddLinkedError('')
+  }
+
+  function checkLinkedAvailability(serviceId: string, position: 'before' | 'after', staffId: string | null) {
+    if (!selectedBooking || !serviceId) return
+    const svc = services.find(s => s.id === serviceId)
+    if (!svc) return
+    setAddLinkedChecking(true)
+    setAddLinkedChecked(false)
+    setAddLinkedAvailable(null)
+
+    const anchorStart = parseISO(selectedBooking.starts_at)
+    const anchorEnd = parseISO(selectedBooking.ends_at)
+    const day = anchorStart
+    const candidateStart = position === 'after' ? anchorEnd : addMinutes(anchorStart, -svc.duration_minutes)
+    const candidateEnd = addMinutes(candidateStart, svc.duration_minutes)
+    const candidateLabel = format(candidateStart, 'HH:mm')
+
+    const dayBookings = bookings.filter(b => isSameDay(parseISO(b.starts_at), day) && b.id !== selectedBooking.id) as unknown as Booking[]
+    const dayBlocks = blockedTimes.filter(bt => isSameDay(parseISO(bt.starts_at), day) && !bt.is_shift_adjustment)
+    const relevantAvailability = staffId ? availability.filter(a => a.staff_id === staffId) : availability
+    const slots = generateTimeSlots(day, relevantAvailability, svc.duration_minutes, dayBookings, dayBlocks, svc.pre_buffer_minutes, svc.post_buffer_minutes)
+
+    setAddLinkedChecking(false)
+    setAddLinkedChecked(true)
+    setAddLinkedAvailable(slots.includes(candidateLabel) ? { startsAt: candidateStart, endsAt: candidateEnd } : null)
+  }
+
+  async function handleAddLinkedService() {
+    if (!selectedBooking || !addLinkedAvailable) return
+    setAddLinkedSaving(true)
+    setAddLinkedError('')
+    const comboGroupId = selectedBooking.combo_group_id ?? crypto.randomUUID()
+    const { data, error } = await supabase
+      .from('bookings')
+      .insert({
+        business_id: BUSINESS_ID,
+        customer_id: selectedBooking.customer_id,
+        staff_id: addLinkedStaffId,
+        service_id: addLinkedServiceId,
+        starts_at: addLinkedAvailable.startsAt.toISOString(),
+        ends_at: addLinkedAvailable.endsAt.toISOString(),
+        status: 'confirmed',
+        notes: `Linked ${addLinkedPosition} ${selectedBooking.service?.name ?? 'booking'}`,
+        combo_group_id: comboGroupId,
+      })
+      .select('id, starts_at, ends_at, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token)')
+      .single()
+    if (error) {
+      setAddLinkedError(error.message)
+      setAddLinkedSaving(false)
+      return
+    }
+    if (!selectedBooking.combo_group_id) {
+      await supabase.from('bookings').update({ combo_group_id: comboGroupId }).eq('id', selectedBooking.id)
+      setSelectedBooking(prev => prev ? { ...prev, combo_group_id: comboGroupId } : null)
+      setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, combo_group_id: comboGroupId } : b))
+    }
+    const rangeStart = viewMode === 'week' ? startOfWeek(selectedDay, { weekStartsOn: 1 }) : startOfDay(selectedDay)
+    const rangeEnd = viewMode === 'week' ? endOfWeek(selectedDay, { weekStartsOn: 1 }) : endOfDay(selectedDay)
+    const newBooking = data as unknown as RichBooking
+    const t = parseISO(newBooking.starts_at)
+    if (t >= rangeStart && t <= rangeEnd) setBookings(prev => [...prev, newBooking])
+    setLinkedBookings(prev => [...prev, { id: newBooking.id, starts_at: newBooking.starts_at, ends_at: newBooking.ends_at, service: newBooking.service }])
+    setAddLinkedOpen(false)
+    setAddLinkedSaving(false)
   }
 
   async function handleCancelWithReason(bookingId: string) {
@@ -2396,6 +2498,23 @@ export default function AdminCalendar() {
                   </dd>
                 </div>
               )}
+              {linkedBookings.length > 0 && (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500 shrink-0">Linked</dt>
+                  <dd className="text-right text-xs space-y-0.5">
+                    {linkedBookings.map(lb => (
+                      <button
+                        key={lb.id}
+                        type="button"
+                        onClick={() => openAttendeeBooking(lb.id)}
+                        className="block w-full text-(--color-primary) hover:underline text-right"
+                      >
+                        {lb.service?.name ?? 'Booking'} · {format(parseISO(lb.starts_at), 'HH:mm')}
+                      </button>
+                    ))}
+                  </dd>
+                </div>
+              )}
               {(selectedBooking.discount_amount ?? 0) > 0 && (
                 <div className="flex justify-between items-center">
                   <dt className="text-gray-500">Discount</dt>
@@ -2419,6 +2538,75 @@ export default function AdminCalendar() {
                 <dd><Badge variant={statusBadgeVariant(selectedBooking.status)} className="capitalize">{selectedBooking.status}</Badge></dd>
               </div>
             </dl>
+
+            {/* Add linked follow-on service */}
+            <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+              {!addLinkedOpen ? (
+                <button
+                  type="button"
+                  onClick={openAddLinkedService}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 uppercase tracking-wide"
+                >
+                  <CalendarPlus className="h-3.5 w-3.5" /> Add Linked Service
+                </button>
+              ) : (
+                <div className="space-y-2.5">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Add Linked Service</p>
+                  <select
+                    value={addLinkedServiceId}
+                    onChange={e => {
+                      const id = e.target.value
+                      setAddLinkedServiceId(id)
+                      if (id) checkLinkedAvailability(id, addLinkedPosition, addLinkedStaffId)
+                    }}
+                    className="w-full h-9 px-2.5 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                  >
+                    <option value="">Select a service…</option>
+                    {services.filter(s => !s.is_group_session && s.id !== selectedBooking.service_id).map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={addLinkedStaffId ?? ''}
+                      onChange={e => {
+                        const id = e.target.value || null
+                        setAddLinkedStaffId(id)
+                        if (addLinkedServiceId) checkLinkedAvailability(addLinkedServiceId, addLinkedPosition, id)
+                      }}
+                      className="h-9 px-2.5 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+                    >
+                      <option value="">Any staff</option>
+                      {staff.filter(s => !s.on_holiday).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                    <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs">
+                      <button type="button" onClick={() => { setAddLinkedPosition('before'); if (addLinkedServiceId) checkLinkedAvailability(addLinkedServiceId, 'before', addLinkedStaffId) }}
+                        className={cn('flex-1 font-medium transition-colors', addLinkedPosition === 'before' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50')}>
+                        Before
+                      </button>
+                      <button type="button" onClick={() => { setAddLinkedPosition('after'); if (addLinkedServiceId) checkLinkedAvailability(addLinkedServiceId, 'after', addLinkedStaffId) }}
+                        className={cn('flex-1 font-medium transition-colors', addLinkedPosition === 'after' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50')}>
+                        After
+                      </button>
+                    </div>
+                  </div>
+                  {addLinkedChecking ? (
+                    <p className="text-xs text-gray-400">Checking availability…</p>
+                  ) : addLinkedChecked && addLinkedAvailable ? (
+                    <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-2.5 py-1.5">
+                      Available: {format(addLinkedAvailable.startsAt, 'HH:mm')}–{format(addLinkedAvailable.endsAt, 'HH:mm')}
+                    </p>
+                  ) : addLinkedChecked ? (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">Not available at that time.</p>
+                  ) : null}
+                  {addLinkedError && <p className="text-xs text-red-600">{addLinkedError}</p>}
+                  <div className="flex gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => setAddLinkedOpen(false)} className="shrink-0">Cancel</Button>
+                    <Button fullWidth size="sm" loading={addLinkedSaving} disabled={!addLinkedAvailable} onClick={handleAddLinkedService}>Add</Button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Saved card / charge balance */}
             <div className="border border-gray-100 rounded-lg p-3 space-y-2">
