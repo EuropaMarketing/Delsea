@@ -37,6 +37,7 @@ import ResetPassword from '@/pages/ResetPassword'
 import AdminLogin from '@/pages/admin/Login'
 import AdminDashboard from '@/pages/admin/Dashboard'
 import AdminCalendar from '@/pages/admin/Calendar'
+import AdminContrastCalendar from '@/pages/admin/ContrastCalendar'
 import AdminBookings from '@/pages/admin/Bookings'
 import AdminServices from '@/pages/admin/Services'
 import AdminStaff from '@/pages/admin/Staff'
@@ -236,6 +237,16 @@ function AppRoutes() {
           <ProtectedRoute adminOnly>
             <AdminLayout>
               <AdminCalendar />
+            </AdminLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/contrast-calendar"
+        element={
+          <ProtectedRoute adminOnly>
+            <AdminLayout>
+              <AdminContrastCalendar />
             </AdminLayout>
           </ProtectedRoute>
         }

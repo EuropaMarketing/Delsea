@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Calendar, List, Scissors, Users, Settings,
-  LogOut, Menu, X, Ticket, UserRound, Banknote, Images, Star, Tag, DoorOpen, Gift, PartyPopper, ClipboardList, CreditCard,
+  LogOut, Menu, X, Ticket, UserRound, Banknote, Images, Star, Tag, DoorOpen, Gift, PartyPopper, ClipboardList, CreditCard, Snowflake,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
@@ -13,6 +13,7 @@ import { CheckInToasts, type CheckInAlert } from '@/components/ui/CheckInToast'
 const navItems = [
   { label: 'Dashboard',  icon: LayoutDashboard, path: '/admin' },
   { label: 'Calendar',   icon: Calendar,         path: '/admin/calendar' },
+  { label: 'Contrast Calendar', icon: Snowflake, path: '/admin/contrast-calendar' },
   { label: 'Bookings',   icon: List,             path: '/admin/bookings' },
   { label: 'Services',   icon: Scissors,         path: '/admin/services' },
   { label: 'Forms',      icon: ClipboardList,    path: '/admin/forms' },
