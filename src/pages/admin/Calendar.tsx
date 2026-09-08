@@ -301,6 +301,10 @@ export default function AdminCalendar() {
   // Move drag (native HTML5 drag-and-drop, reposition to a different time/staff/day)
   const [draggingBookingId, setDraggingBookingId] = useState<string | null>(null)
 
+  // Hover preview card for a booking block
+  const [hoverBooking, setHoverBooking] = useState<RichBooking | null>(null)
+  const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 })
+
   // Current time line
   const [now, setNow] = useState(new Date())
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -707,6 +711,17 @@ export default function AdminCalendar() {
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', bookingId)
     setDraggingBookingId(bookingId)
+    setHoverBooking(null)
+  }
+
+  function handleBookingHover(e: React.MouseEvent<HTMLDivElement>, booking: RichBooking) {
+    if (drag || draggingBookingId) return
+    setHoverBooking(booking)
+    setHoverPos({ x: e.clientX, y: e.clientY })
+  }
+
+  function clearBookingHover() {
+    setHoverBooking(null)
   }
 
   // targetStaffId: pass explicitly (including null for "unassigned") in day view to reassign staff;
@@ -995,6 +1010,7 @@ export default function AdminCalendar() {
   }
 
   function openBookingDetail(b: RichBooking) {
+    setHoverBooking(null)
     setSelectedBooking(b)
     setSelectedBookingForm(null)
     const remaining = bookingPrice(b) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0) - (b.deposit_charged ?? 0)
@@ -1713,9 +1729,11 @@ export default function AdminCalendar() {
                         onDragStart={e => { e.stopPropagation(); handleDragStart(e, booking.id) }}
                         onDragEnd={() => setDraggingBookingId(null)}
                         onClick={() => !isDragging && openBookingDetail(booking)}
+                        onMouseEnter={e => handleBookingHover(e, booking)}
+                        onMouseMove={e => handleBookingHover(e, booking)}
+                        onMouseLeave={clearBookingHover}
                         className={cn('absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden transition-shadow z-20 cursor-pointer', isDragging ? 'shadow-lg' : 'hover:brightness-95', booking.status === 'completed' && 'opacity-50', draggingBookingId === booking.id && 'opacity-30')}
                         style={{ top, height, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
-                        title={`${booking.customer?.name} — ${booking.service?.name}`}
                       >
                         <p className="text-xs font-semibold truncate leading-tight flex items-center gap-1" style={{ color }}>
                           {booking.checked_in_at && <UserCheck className="h-3 w-3 shrink-0" />}
@@ -1793,9 +1811,11 @@ export default function AdminCalendar() {
                     onDragStart={e => { e.stopPropagation(); handleDragStart(e, booking.id) }}
                     onDragEnd={() => setDraggingBookingId(null)}
                     onClick={() => openBookingDetail(booking)}
+                    onMouseEnter={e => handleBookingHover(e, booking)}
+                    onMouseMove={e => handleBookingHover(e, booking)}
+                    onMouseLeave={clearBookingHover}
                     className={cn('absolute left-1 right-1 rounded-md px-2 py-1 overflow-hidden cursor-pointer z-20', booking.status === 'completed' ? 'opacity-50' : 'hover:brightness-95', draggingBookingId === booking.id && 'opacity-30')}
                     style={{ top, height, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
-                    title={`${booking.customer?.name} — ${booking.service?.name}`}
                   >
                     <p className="text-xs font-semibold truncate leading-tight flex items-center gap-1" style={{ color }}>
                       {formAlerts.has(booking.id) && <ClipboardList className="h-3 w-3 shrink-0 text-amber-500" />}
@@ -1921,9 +1941,11 @@ export default function AdminCalendar() {
                         onDragStart={e => { e.stopPropagation(); handleDragStart(e, booking.id) }}
                         onDragEnd={() => setDraggingBookingId(null)}
                         onClick={() => openBookingDetail(booking)}
+                        onMouseEnter={e => handleBookingHover(e, booking)}
+                        onMouseMove={e => handleBookingHover(e, booking)}
+                        onMouseLeave={clearBookingHover}
                         className={cn('absolute rounded-md px-1.5 py-1 overflow-hidden cursor-pointer z-20', booking.status === 'completed' ? 'opacity-50' : 'hover:brightness-95', draggingBookingId === booking.id && 'opacity-30')}
                         style={{ top, height, left: `calc(${widthPct * booking.col}% + 2px)`, width: `calc(${widthPct}% - 4px)`, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
-                        title={`${booking.customer?.name} — ${booking.service?.name} — ${booking.staff?.name ?? 'Unassigned'}`}
                       >
                         <p className="text-xs font-semibold truncate leading-tight" style={{ color }}>
                           {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
@@ -2961,6 +2983,40 @@ export default function AdminCalendar() {
           </div>
         )}
       </Modal>
+
+      {/* ── Hover preview card ── */}
+      {hoverBooking && !selectedBooking && (() => {
+        const color = categoryColorMap[hoverBooking.service?.category] ?? '#7C3AED'
+        const cardWidth = 260
+        const cardMaxHeight = 260
+        const left = Math.max(8, Math.min(hoverPos.x + 14, window.innerWidth - cardWidth - 8))
+        const top = Math.max(8, Math.min(hoverPos.y + 14, window.innerHeight - cardMaxHeight - 8))
+        const cap = slotCapacityMap.get(`${hoverBooking.service_id}|${hoverBooking.starts_at}`)
+        return (
+          <div
+            className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl p-3 pointer-events-none"
+            style={{ left, top, width: cardWidth, borderTop: `3px solid ${color}` }}
+          >
+            <p className="text-xs font-semibold text-gray-400 mb-1">
+              {format(parseISO(hoverBooking.starts_at), 'HH:mm')}–{format(parseISO(hoverBooking.ends_at), 'HH:mm')}
+            </p>
+            <p className="text-sm font-semibold text-gray-900 truncate">{hoverBooking.service?.name}</p>
+            <p className="text-sm text-gray-700 truncate">{hoverBooking.customer?.name}</p>
+            {hoverBooking.staff?.name && <p className="text-xs text-gray-500 mt-1">with {hoverBooking.staff.name}</p>}
+            <div className="flex items-center justify-between mt-2">
+              <span className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+                {formatCurrency(bookingPrice(hoverBooking))}
+                {hoverBooking.price_override != null && (
+                  <span className="text-xs font-normal text-(--color-primary) bg-(--color-primary)/10 px-1.5 py-0.5 rounded">custom</span>
+                )}
+              </span>
+              <Badge variant={statusBadgeVariant(hoverBooking.status)} className="capitalize">{hoverBooking.status}</Badge>
+            </div>
+            {cap && <p className="text-xs text-gray-500 mt-1.5">{cap.taken}/{cap.max} spots booked</p>}
+            {hoverBooking.notes && <p className="text-xs text-gray-500 mt-1.5 line-clamp-2">{hoverBooking.notes}</p>}
+          </div>
+        )
+      })()}
     </div>
   )
 }
