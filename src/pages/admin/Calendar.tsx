@@ -7,7 +7,7 @@ import {
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck, ClipboardList,
-  Clock, CalendarRange, Sparkles, Mail, Phone as PhoneIcon, CalendarClock, Trash2,
+  Clock, CalendarRange, Sparkles, Mail, Phone as PhoneIcon, CalendarClock, Trash2, Cake,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
@@ -40,7 +40,7 @@ type RichBooking = Omit<Booking, 'staff' | 'service' | 'customer' | 'price_overr
   equipment_resource_id?: string | null
   service: { name: string; category: string; price: number }
   staff: { name: string } | null
-  customer: { name: string; email: string; phone: string | null; sumup_card_token: string | null }
+  customer: { name: string; email: string; phone: string | null; sumup_card_token: string | null; date_of_birth: string | null }
   resource: { name: string } | null
   equipment_resource?: { name: string } | null
 }
@@ -401,7 +401,7 @@ export default function AdminCalendar() {
         supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name'),
         supabase
           .from('bookings')
-          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token), resource:resources!resource_id(name)')
+          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token,date_of_birth), resource:resources!resource_id(name)')
           .eq('business_id', BUSINESS_ID)
           .gte('starts_at', dayStart)
           .lte('starts_at', dayEnd)
@@ -657,7 +657,7 @@ export default function AdminCalendar() {
   async function openAttendeeBooking(attendeeId: string) {
     const { data } = await supabase
       .from('bookings')
-      .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token), resource:resources!resource_id(name)')
+      .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token,date_of_birth), resource:resources!resource_id(name)')
       .eq('id', attendeeId)
       .single()
     if (data) {
@@ -1279,7 +1279,7 @@ export default function AdminCalendar() {
         notes: `Linked ${addLinkedPosition} ${selectedBooking.service?.name ?? 'booking'}`,
         combo_group_id: comboGroupId,
       })
-      .select('id, starts_at, ends_at, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token)')
+      .select('id, starts_at, ends_at, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token,date_of_birth)')
       .single()
     if (error) {
       setAddLinkedError(error.message)
@@ -1396,6 +1396,7 @@ export default function AdminCalendar() {
         email: editCustomerEmail,
         phone: editCustomerPhone || null,
         sumup_card_token: editCustomerId === selectedBooking.customer_id ? selectedBooking.customer?.sumup_card_token ?? null : null,
+        date_of_birth: editCustomerId === selectedBooking.customer_id ? selectedBooking.customer?.date_of_birth ?? null : null,
       }
       const serviceObj = { name: newService.name, category: newService.category, price: newService.price }
       const staffObj = matchedStaff ? { name: matchedStaff.name } : null
@@ -1665,7 +1666,7 @@ export default function AdminCalendar() {
         const { data: created, error: bookErr } = await supabase
           .from('bookings')
           .insert(rowsToInsert)
-          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token)')
+          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token,date_of_birth)')
         if (bookErr) throw bookErr
 
         const rangeStart = viewMode === 'week' ? startOfWeek(selectedDay, { weekStartsOn: 1 }) : startOfDay(selectedDay)
@@ -2686,6 +2687,12 @@ export default function AdminCalendar() {
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Email</dt>
                   <dd className="text-gray-700 text-xs">{selectedBooking.customer.email}</dd>
+                </div>
+              )}
+              {selectedBooking.customer?.date_of_birth && (
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-500 flex items-center gap-1.5"><Cake className="h-3.5 w-3.5" /> Birthday</dt>
+                  <dd className="text-gray-700">{format(parseISO(selectedBooking.customer.date_of_birth), 'd MMMM')}</dd>
                 </div>
               )}
               {selectedBooking.staff && selectedBooking.staff_id && (

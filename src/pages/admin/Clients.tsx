@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { format, parseISO, isBefore, isPast } from 'date-fns'
-import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle, Pencil, X, Ban, Trash2, ShieldOff } from 'lucide-react'
+import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle, Pencil, X, Ban, Trash2, ShieldOff, Cake } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
@@ -87,6 +87,7 @@ export default function AdminClients() {
   const [editName, setEditName] = useState('')
   const [editEmail, setEditEmail] = useState('')
   const [editPhone, setEditPhone] = useState('')
+  const [editDob, setEditDob] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
   const [blockModalOpen, setBlockModalOpen] = useState(false)
@@ -263,6 +264,7 @@ export default function AdminClients() {
     setEditName(selected.name)
     setEditEmail(selected.email)
     setEditPhone(selected.phone ?? '')
+    setEditDob(selected.date_of_birth ?? '')
     setEditError('')
     setEditMode(true)
   }
@@ -272,7 +274,7 @@ export default function AdminClients() {
     if (!editName.trim() || !editEmail.trim()) { setEditError('Name and email are required.'); return }
     setEditSaving(true)
     setEditError('')
-    const patch = { name: editName.trim(), email: editEmail.trim().toLowerCase(), phone: editPhone.trim() || null }
+    const patch = { name: editName.trim(), email: editEmail.trim().toLowerCase(), phone: editPhone.trim() || null, date_of_birth: editDob || null }
     const { error } = await supabase.from('customers').update(patch).eq('id', selected.id)
     if (error) {
       setEditError(error.code === '23505' ? 'That email is already used by another client.' : error.message)
@@ -546,6 +548,7 @@ export default function AdminClients() {
                 <Input label="Name" value={editName} onChange={e => setEditName(e.target.value)} required />
                 <Input label="Email" type="email" value={editEmail} onChange={e => setEditEmail(e.target.value)} required />
                 <Input label="Phone" type="tel" value={editPhone} onChange={e => setEditPhone(e.target.value)} placeholder="+44 7700 900000" />
+                <Input label="Date of birth" type="date" value={editDob} onChange={e => setEditDob(e.target.value)} />
                 {editError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{editError}</p>}
                 <div className="flex gap-2 justify-end">
                   <Button variant="secondary" size="sm" onClick={() => setEditMode(false)}>
@@ -565,6 +568,12 @@ export default function AdminClients() {
                 <div className="flex items-center gap-2 text-sm text-gray-600">
                   <Phone className="h-4 w-4 text-gray-400 shrink-0" />
                   <span>{selected.phone}</span>
+                </div>
+              )}
+              {selected.date_of_birth && (
+                <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <Cake className="h-4 w-4 text-gray-400 shrink-0" />
+                  <span>{format(parseISO(selected.date_of_birth), 'd MMMM yyyy')}</span>
                 </div>
               )}
               <div className="flex items-center gap-2 text-sm text-gray-600">
