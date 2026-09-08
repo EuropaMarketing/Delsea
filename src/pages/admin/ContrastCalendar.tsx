@@ -334,6 +334,7 @@ export default function AdminContrastCalendar() {
 
   // Move drag (native HTML5 drag-and-drop, reposition to a different time/staff/day)
   const [draggingBookingId, setDraggingBookingId] = useState<string | null>(null)
+  const [dragOverTime, setDragOverTime] = useState<{ time: string; x: number; y: number } | null>(null)
 
   // Hover preview card for a booking block
   const [hoverBooking, setHoverBooking] = useState<RichBooking | null>(null)
@@ -709,6 +710,15 @@ export default function AdminContrastCalendar() {
     e.dataTransfer.setData('text/plain', bookingId)
     setDraggingBookingId(bookingId)
     setHoverBooking(null)
+    setDragOverTime(null)
+  }
+
+  // Fires continuously as a dragged booking moves over a droppable cell — shows a
+  // live "you'll drop it here at HH:mm" readout so the target time is unambiguous.
+  function handleDragOverCell(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    const time = timeFromPointerY(e, e.currentTarget)
+    setDragOverTime({ time, x: e.clientX, y: e.clientY })
   }
 
   function handleBookingHover(e: React.MouseEvent<HTMLDivElement>, booking: RichBooking) {
@@ -727,6 +737,7 @@ export default function AdminContrastCalendar() {
     e.preventDefault()
     const bookingId = draggingBookingId ?? e.dataTransfer.getData('text/plain')
     setDraggingBookingId(null)
+    setDragOverTime(null)
     const booking = bookings.find(b => b.id === bookingId)
     if (!booking) return
     const newStaffId = targetStaffId === undefined ? booking.staff_id : targetStaffId
@@ -1697,7 +1708,7 @@ export default function AdminContrastCalendar() {
                   className="relative border-r border-gray-100 cursor-crosshair"
                   style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
                   onClick={e => handleCellClick(e, null, day)}
-                  onDragOver={e => e.preventDefault()}
+                  onDragOver={handleDragOverCell}
                   onDrop={e => handleDropBooking(e, day)}
                 >
                   {hours.map(h => (
@@ -1731,7 +1742,7 @@ export default function AdminContrastCalendar() {
                         data-booking="true"
                         draggable
                         onDragStart={e => { e.stopPropagation(); handleDragStart(e, booking.id) }}
-                        onDragEnd={() => setDraggingBookingId(null)}
+                        onDragEnd={() => { setDraggingBookingId(null); setDragOverTime(null) }}
                         onClick={() => openBookingDetail(booking)}
                         onMouseEnter={e => handleBookingHover(e, booking)}
                         onMouseMove={e => handleBookingHover(e, booking)}
@@ -2907,6 +2918,25 @@ export default function AdminContrastCalendar() {
           </div>
         )}
       </Modal>
+
+      {/* ── Live drop-time readout while dragging a booking ── */}
+      {draggingBookingId && dragOverTime && (() => {
+        const draggedBooking = bookings.find(b => b.id === draggingBookingId)
+        const durationMinutes = draggedBooking
+          ? differenceInMinutes(parseISO(draggedBooking.ends_at), parseISO(draggedBooking.starts_at))
+          : null
+        const endTime = durationMinutes != null
+          ? format(addMinutes(new Date(`2000-01-01T${dragOverTime.time}:00`), durationMinutes), 'HH:mm')
+          : null
+        return (
+          <div
+            className="fixed z-50 pointer-events-none px-2.5 py-1.5 rounded-lg bg-gray-900 text-white text-xs font-semibold shadow-lg whitespace-nowrap"
+            style={{ left: dragOverTime.x + 16, top: dragOverTime.y + 16 }}
+          >
+            {dragOverTime.time}{endTime ? ` – ${endTime}` : ''}
+          </div>
+        )
+      })()}
 
       {/* ── Hover preview card ── */}
       {hoverBooking && !selectedBooking && (() => {
