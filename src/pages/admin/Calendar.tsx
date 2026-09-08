@@ -2988,19 +2988,35 @@ export default function AdminCalendar() {
       {hoverBooking && !selectedBooking && (() => {
         const color = categoryColorMap[hoverBooking.service?.category] ?? '#7C3AED'
         const cardWidth = 260
-        const cardMaxHeight = 260
+        const cardMaxHeight = 280
         const left = Math.max(8, Math.min(hoverPos.x + 14, window.innerWidth - cardWidth - 8))
         const top = Math.max(8, Math.min(hoverPos.y + 14, window.innerHeight - cardMaxHeight - 8))
         const cap = slotCapacityMap.get(`${hoverBooking.service_id}|${hoverBooking.starts_at}`)
+        const svc = services.find(s => s.id === hoverBooking.service_id)
+        const apptStart = parseISO(hoverBooking.starts_at)
+        const apptEnd = parseISO(hoverBooking.ends_at)
+        const apptMinutes = differenceInMinutes(apptEnd, apptStart)
+        const preBuffer = svc?.pre_buffer_minutes ?? 0
+        const postBuffer = svc?.post_buffer_minutes ?? 0
+        const hasBuffer = preBuffer > 0 || postBuffer > 0
+        const blockedStart = addMinutes(apptStart, -preBuffer)
+        const blockedEnd = addMinutes(apptEnd, postBuffer)
         return (
           <div
             className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl p-3 pointer-events-none"
             style={{ left, top, width: cardWidth, borderTop: `3px solid ${color}` }}
           >
-            <p className="text-xs font-semibold text-gray-400 mb-1">
-              {format(parseISO(hoverBooking.starts_at), 'HH:mm')}–{format(parseISO(hoverBooking.ends_at), 'HH:mm')}
+            <p className="text-xs font-semibold text-gray-500 mb-0.5">
+              Appt time: {format(apptStart, 'HH:mm')}–{format(apptEnd, 'HH:mm')} <span className="text-gray-400 font-normal">({apptMinutes} min)</span>
             </p>
-            <p className="text-sm font-semibold text-gray-900 truncate">{hoverBooking.service?.name}</p>
+            {hasBuffer && (
+              <p className="text-xs text-gray-400 mb-1">
+                Blocked time: {format(blockedStart, 'HH:mm')}–{format(blockedEnd, 'HH:mm')}
+                {preBuffer > 0 && ` · +${preBuffer}min prep`}
+                {postBuffer > 0 && ` · +${postBuffer}min set-down`}
+              </p>
+            )}
+            <p className={cn('text-sm font-semibold text-gray-900 truncate', hasBuffer ? 'mt-1.5' : 'mt-1')}>{hoverBooking.service?.name}</p>
             <p className="text-sm text-gray-700 truncate">{hoverBooking.customer?.name}</p>
             {hoverBooking.staff?.name && <p className="text-xs text-gray-500 mt-1">with {hoverBooking.staff.name}</p>}
             <div className="flex items-center justify-between mt-2">
