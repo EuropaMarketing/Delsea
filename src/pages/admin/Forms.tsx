@@ -14,12 +14,10 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 type ServiceForm = {
   id: string
-  service_id: string | null
   title: string
   description: string | null
   is_active: boolean
   validity_months: number
-  service?: { name: string } | null
 }
 
 type Section = {
@@ -40,7 +38,6 @@ type FormField = {
   options: { follow_up_label?: string; description?: string; choices?: string[] }
 }
 
-type Service = { id: string; name: string }
 type ResponseMap = Record<string, string | boolean | string[] | { ec_name?: string; ec_phone?: string; ec_relationship?: string }>
 
 const FIELD_TYPES: { type: FormField['field_type']; label: string; icon: typeof Type; color: string }[] = [
@@ -334,7 +331,6 @@ function PreviewModal({ form, sections, fields, onClose }: {
 // ─── Main page ─────────────────────────────────────────────────────────────────
 export default function AdminForms() {
   const [forms, setForms] = useState<ServiceForm[]>([])
-  const [services, setServices] = useState<Service[]>([])
   const [selectedForm, setSelectedForm] = useState<ServiceForm | null>(null)
   const [sections, setSections] = useState<Section[]>([])
   const [fields, setFields] = useState<FormField[]>([])
@@ -362,18 +358,29 @@ export default function AdminForms() {
 
   // New form
   const [newFormOpen, setNewFormOpen] = useState(false)
-  const [newServiceId, setNewServiceId] = useState('')
   const [newTitle, setNewTitle] = useState('Health Questionnaire')
   const [creating, setCreating] = useState(false)
 
+  // Which services (by name) currently have each form assigned — assignment now happens
+  // from the Services page, so this is a reverse lookup purely for display here.
+  const [serviceUsage, setServiceUsage] = useState<Map<string, string[]>>(new Map())
+
   useEffect(() => {
     async function load() {
-      const [fr, sr] = await Promise.all([
-        supabase.from('service_forms').select('*, service:services(name)').eq('business_id', BUSINESS_ID).order('created_at'),
-        supabase.from('services').select('id, name').eq('business_id', BUSINESS_ID).eq('is_active', true).order('name'),
+      const [fr, ur] = await Promise.all([
+        supabase.from('service_forms').select('*').eq('business_id', BUSINESS_ID).order('created_at'),
+        supabase.from('services').select('name, form_id').eq('business_id', BUSINESS_ID).not('form_id', 'is', null),
       ])
       if (fr.data) setForms(fr.data as ServiceForm[])
-      if (sr.data) setServices(sr.data as Service[])
+      if (ur.data) {
+        const map = new Map<string, string[]>()
+        for (const row of ur.data as { name: string; form_id: string }[]) {
+          const arr = map.get(row.form_id) ?? []
+          arr.push(row.name)
+          map.set(row.form_id, arr)
+        }
+        setServiceUsage(map)
+      }
       setLoading(false)
     }
     load()
@@ -397,17 +404,16 @@ export default function AdminForms() {
   }
 
   async function createForm() {
-    if (!newServiceId || !newTitle.trim()) return
+    if (!newTitle.trim()) return
     setCreating(true)
     const { data } = await supabase
       .from('service_forms')
-      .insert({ business_id: BUSINESS_ID, service_id: newServiceId, title: newTitle.trim(), validity_months: 6 })
-      .select('*, service:services(name)').single()
+      .insert({ business_id: BUSINESS_ID, title: newTitle.trim(), validity_months: 6 })
+      .select('*').single()
     if (data) {
       const form = data as ServiceForm
       setForms(p => [...p, form])
       setNewFormOpen(false)
-      setNewServiceId('')
       setNewTitle('Health Questionnaire')
       await openForm(form)
     }
@@ -583,7 +589,11 @@ export default function AdminForms() {
               }`}>
               <div className="min-w-0">
                 <p className="font-medium text-gray-900 text-sm truncate">{form.title}</p>
-                <p className="text-xs text-gray-500 mt-0.5">{form.service?.name ?? 'All services'}</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {(serviceUsage.get(form.id) ?? []).length > 0
+                    ? `Used by ${(serviceUsage.get(form.id) ?? []).join(', ')}`
+                    : 'Not assigned to any service'}
+                </p>
               </div>
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 mt-0.5 ${form.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                 {form.is_active ? 'Active' : 'Inactive'}
@@ -822,18 +832,13 @@ export default function AdminForms() {
       {/* New form modal */}
       <Modal open={newFormOpen} onClose={() => setNewFormOpen(false)} title="New Health Form" size="sm">
         <div className="space-y-4">
-          <div>
-            <label className="text-sm font-medium text-gray-700 block mb-1.5">Service</label>
-            <select value={newServiceId} onChange={e => setNewServiceId(e.target.value)}
-              className="w-full h-10 px-3 text-sm border border-gray-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-(--color-primary)">
-              <option value="">Select a service…</option>
-              {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </div>
           <Input label="Form title" value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="Health Questionnaire" />
+          <p className="text-xs text-gray-400">
+            Assign this form to one or more services afterwards from the Services page.
+          </p>
           <div className="flex gap-3">
             <Button variant="secondary" fullWidth onClick={() => setNewFormOpen(false)}>Cancel</Button>
-            <Button fullWidth loading={creating} disabled={!newServiceId || !newTitle.trim()} onClick={createForm}>Create Form</Button>
+            <Button fullWidth loading={creating} disabled={!newTitle.trim()} onClick={createForm}>Create Form</Button>
           </div>
         </div>
       </Modal>

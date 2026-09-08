@@ -248,18 +248,18 @@ export default function MyBookings() {
           if (upcomingConfirmed.length && customerIds.length) {
             const serviceIds = [...new Set(upcomingConfirmed.map(b => b.service_id))]
             const bookingIds = upcomingConfirmed.map(b => b.id)
-            const [svcFormsRes, bookingFormsRes] = await Promise.all([
-              supabase.from('service_forms').select('id, service_id').in('service_id', serviceIds).eq('is_active', true),
+            const [servicesRes, bookingFormsRes] = await Promise.all([
+              supabase.from('services').select('id, form:service_forms(id, is_active)').in('id', serviceIds),
               supabase.from('booking_forms').select('booking_id, form_id').in('booking_id', bookingIds),
             ])
-            const svcForms = (svcFormsRes.data ?? []) as { id: string; service_id: string }[]
+            const serviceRows = (servicesRes.data ?? []) as unknown as { id: string; form: { id: string; is_active: boolean } | null }[]
             const bookingFormRows = (bookingFormsRes.data ?? []) as { booking_id: string; form_id: string }[]
 
             const requiredFormIdsByBooking: Record<string, string[]> = {}
             for (const booking of upcomingConfirmed) {
               const ids: string[] = []
-              const svcForm = svcForms.find(f => f.service_id === booking.service_id)
-              if (svcForm) ids.push(svcForm.id)
+              const svcForm = serviceRows.find(s => s.id === booking.service_id)?.form
+              if (svcForm?.is_active) ids.push(svcForm.id)
               for (const row of bookingFormRows.filter(r => r.booking_id === booking.id)) {
                 if (!ids.includes(row.form_id)) ids.push(row.form_id)
               }

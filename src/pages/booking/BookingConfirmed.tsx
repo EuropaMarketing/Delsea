@@ -39,13 +39,13 @@ function useRequiredForm(bookingId: string | undefined, serviceId: string | unde
     let cancelled = false
 
     async function check() {
-      const { data: serviceForm } = await supabase
-        .from('service_forms')
-        .select('id, title')
-        .eq('service_id', serviceId as string)
-        .eq('is_active', true)
+      const { data: service } = await supabase
+        .from('services')
+        .select('form:service_forms(id, title, is_active)')
+        .eq('id', serviceId as string)
         .maybeSingle()
-      if (!serviceForm || cancelled) return
+      const serviceForm = (service as unknown as { form: { id: string; title: string; is_active: boolean } | null } | null)?.form
+      if (!serviceForm?.is_active || cancelled) return
 
       const { data: booking } = await supabase
         .from('bookings')

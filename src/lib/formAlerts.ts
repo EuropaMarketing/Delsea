@@ -12,20 +12,16 @@ export async function checkBookingForm(
   customerId: string,
   bookingId?: string,
 ): Promise<BookingFormStatus> {
-  const [serviceFormRes, bookingFormsRes] = await Promise.all([
-    supabase
-      .from('service_forms')
-      .select('id, title')
-      .eq('service_id', serviceId)
-      .eq('is_active', true)
-      .maybeSingle(),
+  const [serviceRes, bookingFormsRes] = await Promise.all([
+    supabase.from('services').select('form:service_forms(id, title, is_active)').eq('id', serviceId).maybeSingle(),
     bookingId
       ? supabase.from('booking_forms').select('form:service_forms(id, title)').eq('booking_id', bookingId)
       : Promise.resolve({ data: [] as { form: { id: string; title: string } | null }[] }),
   ])
 
   const forms: { id: string; title: string }[] = []
-  if (serviceFormRes.data) forms.push(serviceFormRes.data)
+  const svcForm = (serviceRes.data as unknown as { form: { id: string; title: string; is_active: boolean } | null } | null)?.form
+  if (svcForm?.is_active) forms.push({ id: svcForm.id, title: svcForm.title })
   const bookingFormRows = (bookingFormsRes.data ?? []) as unknown as { form: { id: string; title: string } | null }[]
   for (const row of bookingFormRows) {
     if (row.form && !forms.some(f => f.id === row.form!.id)) forms.push(row.form)
@@ -58,16 +54,20 @@ export async function loadFormAlertSet(
   if (!bookings.length) return new Set()
 
   const bookingIds = bookings.map(b => b.id)
-  const [formsRes, bookingFormsRes] = await Promise.all([
+  const serviceIds = [...new Set(bookings.map(b => b.service_id).filter(Boolean))]
+  const [servicesRes, bookingFormsRes] = await Promise.all([
     supabase
-      .from('service_forms')
-      .select('service_id, id')
+      .from('services')
+      .select('id, form:service_forms(id, is_active)')
       .eq('business_id', businessId)
-      .eq('is_active', true),
+      .in('id', serviceIds),
     supabase.from('booking_forms').select('booking_id, form_id').in('booking_id', bookingIds),
   ])
 
-  const formByService = new Map((formsRes.data ?? []).map(f => [f.service_id as string, f.id as string]))
+  const serviceRows = (servicesRes.data ?? []) as unknown as { id: string; form: { id: string; is_active: boolean } | null }[]
+  const formByService = new Map(
+    serviceRows.filter(s => s.form?.is_active).map(s => [s.id, s.form!.id]),
+  )
   const adhocByBooking = new Map<string, string[]>()
   for (const row of (bookingFormsRes.data ?? [])) {
     const arr = adhocByBooking.get(row.booking_id) ?? []

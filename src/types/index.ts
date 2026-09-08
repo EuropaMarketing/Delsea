@@ -55,6 +55,7 @@ export interface Service {
   commission_rate: number | null
   is_event_only: boolean
   hide_from_main_calendar?: boolean
+  form_id?: string | null
   variants?: ServiceVariant[]
   addons?: ServiceAddon[]
 }

@@ -18,12 +18,13 @@ const empty: Omit<Service, 'id' | 'business_id'> = {
   name: '', description: null, duration_minutes: 60, price: 0, category: 'General', is_active: true,
   is_self_service: false, is_group_session: false, max_capacity: null, deposit_type: 'none', deposit_value: 0,
   resource_id: null, pre_buffer_minutes: 0, post_buffer_minutes: 0,
-  commission_type: null, commission_rate: null, is_event_only: false,
+  commission_type: null, commission_rate: null, is_event_only: false, form_id: null,
 }
 
 export default function AdminServices() {
   const [services, setServices] = useState<Service[]>([])
   const [resources, setResources] = useState<Resource[]>([])
+  const [availableForms, setAvailableForms] = useState<{ id: string; title: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
@@ -63,16 +64,18 @@ export default function AdminServices() {
   useEffect(() => { load() }, [])
 
   async function load() {
-    const [svcRes, resRes] = await Promise.all([
+    const [svcRes, resRes, formsRes] = await Promise.all([
       supabase
         .from('services')
         .select('*, variants:service_variants(id, name, duration_minutes, price, sort_order, is_active)')
         .eq('business_id', BUSINESS_ID)
         .order('category').order('name'),
       supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).order('name'),
+      supabase.from('service_forms').select('id, title').eq('business_id', BUSINESS_ID).eq('is_active', true).order('title'),
     ])
     if (svcRes.data) setServices(svcRes.data as Service[])
     if (resRes.data) setResources(resRes.data as Resource[])
+    if (formsRes.data) setAvailableForms(formsRes.data as { id: string; title: string }[])
     setLoading(false)
   }
 
@@ -85,7 +88,7 @@ export default function AdminServices() {
 
   async function openEdit(service: Service) {
     setEditTarget(service)
-    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, is_self_service: service.is_self_service, is_group_session: service.is_group_session, max_capacity: service.max_capacity, deposit_type: service.deposit_type, deposit_value: service.deposit_value, resource_id: service.resource_id ?? null, pre_buffer_minutes: service.pre_buffer_minutes ?? 0, post_buffer_minutes: service.post_buffer_minutes ?? 0, commission_type: service.commission_type ?? null, commission_rate: service.commission_rate ?? null, is_event_only: service.is_event_only ?? false })
+    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, is_self_service: service.is_self_service, is_group_session: service.is_group_session, max_capacity: service.max_capacity, deposit_type: service.deposit_type, deposit_value: service.deposit_value, resource_id: service.resource_id ?? null, pre_buffer_minutes: service.pre_buffer_minutes ?? 0, post_buffer_minutes: service.post_buffer_minutes ?? 0, commission_type: service.commission_type ?? null, commission_rate: service.commission_rate ?? null, is_event_only: service.is_event_only ?? false, form_id: service.form_id ?? null })
     setErrors({})
     setVariantForm({ name: '', duration_minutes: 60, price: '' })
     setAddingVariant(false)
@@ -868,6 +871,20 @@ export default function AdminServices() {
               )}
             </div>
           )}
+
+          {/* Form */}
+          <div className="border border-gray-100 rounded-xl p-4 space-y-2 bg-gray-50">
+            <p className="text-sm font-semibold text-gray-700">Form</p>
+            <select
+              value={form.form_id ?? ''}
+              onChange={e => setForm(f => ({ ...f, form_id: e.target.value || null }))}
+              className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+            >
+              <option value="">No form required</option>
+              {availableForms.map(f => <option key={f.id} value={f.id}>{f.title}</option>)}
+            </select>
+            <p className="text-xs text-gray-400">Customers must complete this form before a booking for this service can take place. Manage forms under Forms.</p>
+          </div>
 
           {/* Deposit */}
           <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
