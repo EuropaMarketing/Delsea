@@ -7,7 +7,7 @@ import {
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck, ClipboardList,
-  Sparkles, Mail, Phone as PhoneIcon, CalendarClock, ListFilter,
+  Sparkles, Mail, Phone as PhoneIcon, CalendarClock,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
@@ -182,13 +182,10 @@ export default function AdminContrastCalendar() {
   const [loading, setLoading] = useState(true)
   const [availability, setAvailability] = useState<Availability[]>([])
 
-  // Which group-session services appear on this calendar — persisted server-side via
-  // services.hide_from_main_calendar, so the choice is shared across admins/devices and
-  // the main Calendar excludes them. Multiple services can be shown together here so
-  // everything sharing the room lands on one view with no risk of a hidden clash.
-  const [contrastServiceIds, setContrastServiceIds] = useState<string[]>([])
+  // This calendar always shows every active group-session service for the business —
+  // no manual per-service selection, so nothing can be missed and nothing can clash unseen.
   const [roomServices, setRoomServices] = useState<Service[]>([])
-  const [roomPickerOpen, setRoomPickerOpen] = useState(false)
+  const contrastServiceIds = useMemo(() => roomServices.map(s => s.id), [roomServices])
 
 
   // Session attendee modal (open group-session slots)
@@ -386,16 +383,7 @@ export default function AdminContrastCalendar() {
     })
   }, [])
 
-  // Toggles whether a service appears on this calendar, persisted via hide_from_main_calendar
-  // so the choice is shared across admins/devices and the main Calendar excludes it.
-  async function toggleRoomService(id: string) {
-    const turningOn = !contrastServiceIds.includes(id)
-    setContrastServiceIds(prev => turningOn ? [...prev, id] : prev.filter(x => x !== id))
-    setRoomServices(prev => prev.map(s => s.id === id ? { ...s, hide_from_main_calendar: turningOn } : s))
-    await supabase.from('services').update({ hide_from_main_calendar: turningOn }).eq('id', id)
-  }
-
-  // Candidate group-session services for the room picker — loaded once, independent of date range
+  // Every active group-session service for the business — this calendar always shows all of them
   useEffect(() => {
     supabase
       .from('services')
@@ -404,18 +392,7 @@ export default function AdminContrastCalendar() {
       .eq('is_active', true)
       .eq('is_group_session', true)
       .order('name')
-      .then(({ data }) => {
-        const list = (data ?? []) as Service[]
-        setRoomServices(list)
-        const flagged = list.filter(s => s.hide_from_main_calendar).map(s => s.id)
-        if (flagged.length) { setContrastServiceIds(flagged); return }
-        const guesses = list.filter(s => /contrast/i.test(s.name))
-        if (guesses.length) {
-          setContrastServiceIds(guesses.map(s => s.id))
-          Promise.all(guesses.map(s => supabase.from('services').update({ hide_from_main_calendar: true }).eq('id', s.id)))
-        }
-      })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+      .then(({ data }) => setRoomServices((data ?? []) as Service[]))
   }, [])
 
   useEffect(() => {
@@ -1624,25 +1601,6 @@ export default function AdminContrastCalendar() {
     )
   }
 
-  if (contrastServiceIds.length === 0) {
-    return (
-      <div>
-        <h1 className="text-xl font-bold text-gray-900 mb-4">Contrast Calendar</h1>
-        <div className="border border-gray-200 rounded-xl p-8 text-center bg-white">
-          <p className="text-sm text-gray-600 mb-4">Choose which group-session services should appear on this calendar.</p>
-          <div className="max-w-xs mx-auto space-y-2 text-left">
-            {roomServices.map(s => (
-              <label key={s.id} className="flex items-center gap-2.5 text-sm text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-lg px-3 py-2 cursor-pointer transition-colors">
-                <input type="checkbox" checked={contrastServiceIds.includes(s.id)} onChange={() => toggleRoomService(s.id)} className="accent-(--color-primary)" />
-                {s.name}
-              </label>
-            ))}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR + i)
   const todaySelected = isToday(selectedDay)
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(selectedDay, { weekStartsOn: 1 }), i))
@@ -1660,26 +1618,6 @@ export default function AdminContrastCalendar() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="relative">
-            <Button variant="secondary" size="sm" onClick={() => setRoomPickerOpen(o => !o)}>
-              <ListFilter className="h-3.5 w-3.5" />
-              Services ({contrastServiceIds.length})
-            </Button>
-            {roomPickerOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setRoomPickerOpen(false)} />
-                <div className="absolute right-0 top-full mt-1.5 z-50 bg-white border border-gray-200 rounded-xl shadow-xl p-2 w-64">
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2 py-1.5">Shown on this calendar</p>
-                  {roomServices.map(s => (
-                    <label key={s.id} className="flex items-center gap-2.5 text-sm text-gray-700 hover:bg-gray-50 rounded-lg px-2 py-1.5 cursor-pointer transition-colors">
-                      <input type="checkbox" checked={contrastServiceIds.includes(s.id)} onChange={() => toggleRoomService(s.id)} className="accent-(--color-primary)" />
-                      {s.name}
-                    </label>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
           <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
             <button
               onClick={() => setViewMode('week')}

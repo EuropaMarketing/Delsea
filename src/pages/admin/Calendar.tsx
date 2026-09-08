@@ -406,7 +406,7 @@ export default function AdminCalendar() {
           .gte('starts_at', dayStart)
           .lte('starts_at', dayEnd)
           .neq('status', 'cancelled'),
-        supabase.from('services').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('hide_from_main_calendar', false).order('name'),
+        supabase.from('services').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('is_group_session', false).order('name'),
         supabase
           .from('blocked_times')
           .select('id, staff_id, starts_at, ends_at, reason, is_shift_adjustment')
@@ -422,8 +422,8 @@ export default function AdminCalendar() {
           .not('event_date', 'is', null)
           .gte('event_date', format(rangeStart, 'yyyy-MM-dd'))
           .lte('event_date', format(rangeEnd, 'yyyy-MM-dd')),
-        // Services with their own dedicated calendar (e.g. Contrast Room) are excluded here entirely
-        supabase.from('services').select('id').eq('business_id', BUSINESS_ID).eq('hide_from_main_calendar', true),
+        // Group-session services live only on the Contrast Calendar, never here
+        supabase.from('services').select('id').eq('business_id', BUSINESS_ID).eq('is_group_session', true),
       ])
       const hiddenIds = new Set((hiddenRes.data ?? []).map(r => r.id))
       if (staffRes.data) setStaff(staffRes.data as Staff[])
