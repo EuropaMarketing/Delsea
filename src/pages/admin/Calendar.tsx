@@ -688,13 +688,16 @@ export default function AdminCalendar() {
   function getStaffDayStatus(member: Staff, day: Date):
     | { kind: 'holiday' }
     | { kind: 'not_scheduled' }
+    | { kind: 'day_off'; originalStart: string; originalEnd: string }
     | { kind: 'scheduled'; start: string; end: string; adjusted: boolean } {
     if (member.on_holiday) return { kind: 'holiday' }
     const dow = getDay(day)
     const avail = availability.find(a => a.staff_id === member.id && a.day_of_week === dow)
     if (!avail) return { kind: 'not_scheduled' }
-    let start = avail.start_time.slice(0, 5)
-    let end = avail.end_time.slice(0, 5)
+    const originalStart = avail.start_time.slice(0, 5)
+    const originalEnd = avail.end_time.slice(0, 5)
+    let start = originalStart
+    let end = originalEnd
     let adjusted = false
     const dayStr = format(day, 'yyyy-MM-dd')
     for (const bt of blockedTimes) {
@@ -705,6 +708,10 @@ export default function AdminCalendar() {
       if (btStart <= start) { start = btEnd; adjusted = true }
       if (btEnd >= end) { end = btStart; adjusted = true }
     }
+    // A block covering the whole window (e.g. "Delete Shift") trims both ends at
+    // once and inverts start/end — that's "no hours today", not a literal 18:00–09:00
+    // shift. Keep the original hours around so the admin can still restore them.
+    if (start >= end) return { kind: 'day_off', originalStart, originalEnd }
     return { kind: 'scheduled', start, end, adjusted }
   }
 
@@ -716,18 +723,34 @@ export default function AdminCalendar() {
 
   function openShiftAdjust(member: Staff) {
     const status = getStaffDayStatus(member, selectedDay)
-    if (status.kind !== 'scheduled') return
-    setShiftAdjustFor(member)
-    setShiftStart(status.start)
-    setShiftEnd(status.end)
-    setShiftReason('')
-    setShiftError('')
+    if (status.kind === 'scheduled') {
+      setShiftAdjustFor(member)
+      setShiftStart(status.start)
+      setShiftEnd(status.end)
+      setShiftReason('')
+      setShiftError('')
+    } else if (status.kind === 'day_off') {
+      // Pre-fill with their normal hours so hitting Save immediately restores the day.
+      setShiftAdjustFor(member)
+      setShiftStart(status.originalStart)
+      setShiftEnd(status.originalEnd)
+      setShiftReason('')
+      setShiftError('')
+    }
+  }
+
+  // Every existing shift-adjustment block for this staff member on this day —
+  // used so Save/Delete always start from a clean slate instead of layering
+  // narrower blocks on top of ones that can never be widened back out.
+  function existingAdjustmentBlocks(staffId: string, day: Date): BlockedTime[] {
+    const dayStr = format(day, 'yyyy-MM-dd')
+    return blockedTimes.filter(bt =>
+      bt.staff_id === staffId && bt.is_shift_adjustment && format(parseISO(bt.starts_at), 'yyyy-MM-dd') === dayStr,
+    )
   }
 
   async function handleSaveShiftAdjust() {
     if (!shiftAdjustFor) return
-    const status = getStaffDayStatus(shiftAdjustFor, selectedDay)
-    if (status.kind !== 'scheduled') return
     const dow = getDay(selectedDay)
     const avail = availability.find(a => a.staff_id === shiftAdjustFor.id && a.day_of_week === dow)
     if (!avail) return
@@ -738,8 +761,19 @@ export default function AdminCalendar() {
       setShiftError(`Adjusted hours must fall within their normal shift (${originalStart}–${originalEnd}).`)
       return
     }
-    const rows: Array<{ staff_id: string; starts_at: string; ends_at: string; reason: string | null; is_shift_adjustment: boolean }> = []
+    setShiftSaving(true)
+    setShiftError('')
     const dayStr = format(selectedDay, 'yyyy-MM-dd')
+
+    // Replace any existing adjustment for the day outright — e.g. typing the
+    // original hours back in and saving fully restores/undoes a prior narrowing
+    // or a full-day delete, rather than being a no-op.
+    const existing = existingAdjustmentBlocks(shiftAdjustFor.id, selectedDay)
+    if (existing.length) {
+      await supabase.from('blocked_times').delete().in('id', existing.map(bt => bt.id))
+    }
+
+    const rows: Array<{ staff_id: string; starts_at: string; ends_at: string; reason: string | null; is_shift_adjustment: boolean }> = []
     if (shiftStart > originalStart) {
       rows.push({
         staff_id: shiftAdjustFor.id,
@@ -756,46 +790,54 @@ export default function AdminCalendar() {
         reason: shiftReason.trim() || 'Shift adjusted', is_shift_adjustment: true,
       })
     }
-    if (rows.length === 0) { setShiftError('No change to save.'); return }
-    setShiftSaving(true)
-    setShiftError('')
-    const { data, error } = await supabase
-      .from('blocked_times')
-      .insert(rows)
-      .select('id, staff_id, starts_at, ends_at, reason, is_shift_adjustment')
-    if (error) {
-      setShiftError(error.message)
-    } else {
-      setBlockedTimes(prev => [...prev, ...(data as BlockedTime[])])
-      setShiftAdjustFor(null)
+
+    let inserted: BlockedTime[] = []
+    if (rows.length > 0) {
+      const { data, error } = await supabase
+        .from('blocked_times')
+        .insert(rows)
+        .select('id, staff_id, starts_at, ends_at, reason, is_shift_adjustment')
+      if (error) { setShiftError(error.message); setShiftSaving(false); return }
+      inserted = data as BlockedTime[]
     }
+    const existingIds = new Set(existing.map(bt => bt.id))
+    setBlockedTimes(prev => [...prev.filter(bt => !existingIds.has(bt.id)), ...inserted])
+    setShiftAdjustFor(null)
     setShiftSaving(false)
   }
 
-  // Blocks out the staff member's entire remaining working window for the day —
-  // existing bookings are left untouched, this only stops new ones being made.
+  // Blocks out the staff member's entire working window for the day — existing
+  // bookings are left untouched, this only stops new ones being made.
   async function handleDeleteShift() {
     if (!shiftAdjustFor) return
-    const status = getStaffDayStatus(shiftAdjustFor, selectedDay)
-    if (status.kind !== 'scheduled') return
+    const dow = getDay(selectedDay)
+    const avail = availability.find(a => a.staff_id === shiftAdjustFor.id && a.day_of_week === dow)
+    if (!avail) return
     setShiftSaving(true)
     setShiftError('')
     const dayStr = format(selectedDay, 'yyyy-MM-dd')
+
+    const existing = existingAdjustmentBlocks(shiftAdjustFor.id, selectedDay)
+    if (existing.length) {
+      await supabase.from('blocked_times').delete().in('id', existing.map(bt => bt.id))
+    }
+
     const { data, error } = await supabase
       .from('blocked_times')
       .insert({
         staff_id: shiftAdjustFor.id,
-        starts_at: new Date(`${dayStr}T${status.start}:00`).toISOString(),
-        ends_at: new Date(`${dayStr}T${status.end}:00`).toISOString(),
+        starts_at: new Date(`${dayStr}T${avail.start_time.slice(0, 5)}:00`).toISOString(),
+        ends_at: new Date(`${dayStr}T${avail.end_time.slice(0, 5)}:00`).toISOString(),
         reason: shiftReason.trim() || 'Shift removed for the day',
         is_shift_adjustment: true,
       })
       .select('id, staff_id, starts_at, ends_at, reason, is_shift_adjustment')
       .single()
+    const existingIds = new Set(existing.map(bt => bt.id))
     if (error) {
       setShiftError(error.message)
     } else {
-      setBlockedTimes(prev => [...prev, data as BlockedTime])
+      setBlockedTimes(prev => [...prev.filter(bt => !existingIds.has(bt.id)), data as BlockedTime])
       setShiftAdjustFor(null)
     }
     setShiftSaving(false)
@@ -1773,6 +1815,7 @@ export default function AdminCalendar() {
                       <p className="text-sm font-medium text-gray-900 truncate">{member.name}</p>
                       {status.kind === 'holiday' && <p className="text-xs text-amber-600">On Holiday</p>}
                       {status.kind === 'not_scheduled' && <p className="text-xs text-gray-400">Not scheduled</p>}
+                      {status.kind === 'day_off' && <p className="text-xs text-red-500 font-medium">Shift removed today</p>}
                       {status.kind === 'scheduled' && (
                         <p className="text-xs text-gray-500">
                           {status.start}–{status.end}
@@ -1781,10 +1824,10 @@ export default function AdminCalendar() {
                       )}
                     </div>
                   </div>
-                  {status.kind === 'scheduled' && (
+                  {(status.kind === 'scheduled' || status.kind === 'day_off') && (
                     <button
                       onClick={() => openShiftAdjust(member)}
-                      title="Adjust shift for this day"
+                      title={status.kind === 'day_off' ? 'Restore shift for this day' : 'Adjust shift for this day'}
                       className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 shrink-0"
                     >
                       <Clock className="h-3.5 w-3.5" />
@@ -1851,6 +1894,16 @@ export default function AdminCalendar() {
                     {dayStatus.start}–{dayStatus.end}
                   </button>
                 )}
+                {dayStatus.kind === 'day_off' && (
+                  <button
+                    onClick={() => openShiftAdjust(member)}
+                    title="Restore shift for this day"
+                    className="flex items-center gap-1 mx-auto mt-1 text-xs text-red-500 hover:text-red-700 font-medium"
+                  >
+                    <Clock className="h-3 w-3" />
+                    Shift removed
+                  </button>
+                )}
               </div>
             </div>
             )
@@ -1905,6 +1958,16 @@ export default function AdminCalendar() {
                       <span className="text-3xl leading-none">✈︎</span>
                       <p className="text-xs font-bold text-amber-700">On Holiday</p>
                       <p className="text-xs text-amber-500">No availability</p>
+                    </div>
+                  )}
+
+                  {!member.on_holiday && dayStatus.kind === 'day_off' && (
+                    <div
+                      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1.5"
+                      style={{ backgroundColor: 'rgba(229,231,235,0.55)', backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 14px, rgba(107,114,128,0.08) 14px, rgba(107,114,128,0.08) 28px)' }}
+                    >
+                      <p className="text-xs font-bold text-gray-600">Shift Removed</p>
+                      <p className="text-xs text-gray-400">No availability today</p>
                     </div>
                   )}
 

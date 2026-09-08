@@ -22,14 +22,14 @@ type Section = {
 type FormField = {
   id: string
   section_id: string
-  field_type: 'heading' | 'yes_no' | 'text' | 'textarea' | 'checkbox' | 'emergency_contact' | 'dropdown' | 'multi_select'
+  field_type: 'heading' | 'yes_no' | 'text' | 'textarea' | 'checkbox' | 'emergency_contact' | 'dropdown' | 'multi_select' | 'signature'
   label: string
   required: boolean
   position: number
   options: { follow_up_label?: string; description?: string; choices?: string[] }
 }
 
-type ResponseMap = Record<string, string | boolean | string[] | { ec_name?: string; ec_phone?: string; ec_relationship?: string }>
+type ResponseMap = Record<string, string | boolean | string[] | { ec_name?: string; ec_phone?: string; ec_relationship?: string } | { signature_name?: string; signed_at?: string }>
 
 export default function FormPage() {
   const { formId } = useParams<{ formId: string }>()
@@ -121,6 +121,9 @@ export default function FormPage() {
         if (!ec?.ec_name?.trim() || !ec?.ec_phone?.trim()) errs.add(field.id)
       } else if (field.field_type === 'multi_select') {
         if (!Array.isArray(val) || val.length === 0) errs.add(field.id)
+      } else if (field.field_type === 'signature') {
+        const sig = val as { signature_name?: string } | undefined
+        if (!sig?.signature_name?.trim()) errs.add(field.id)
       } else {
         if (!String(val ?? '').trim()) errs.add(field.id)
       }
@@ -332,6 +335,36 @@ export default function FormPage() {
                   </div>
                 </div>
                 {hasError && <p className="text-xs text-red-500">Name and phone number are required</p>}
+              </div>
+            )
+          }
+
+          if (field.field_type === 'signature') {
+            const sig = (val as { signature_name?: string; signed_at?: string }) ?? {}
+            return (
+              <div key={field.id} className="border-b border-gray-100 pb-5 space-y-2">
+                <p className="text-sm font-medium text-gray-800">
+                  {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
+                </p>
+                <input
+                  type="text"
+                  value={sig.signature_name ?? ''}
+                  onChange={e => setResponse(field.id, { ...sig, signature_name: e.target.value })}
+                  onBlur={() => { if (sig.signature_name?.trim()) setResponse(field.id, { ...sig, signed_at: new Date().toISOString() }) }}
+                  placeholder="Type your full name to sign"
+                  className={`w-full h-11 px-3 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) ${hasError ? 'border-red-300' : 'border-gray-200'}`}
+                />
+                {sig.signature_name && (
+                  <div className="border-b-2 border-gray-300 pt-1 pb-2 px-1">
+                    <p className="text-3xl leading-tight text-gray-800" style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive" }}>
+                      {sig.signature_name}
+                    </p>
+                  </div>
+                )}
+                {sig.signed_at && (
+                  <p className="text-xs text-gray-400">Signed {format(parseISO(sig.signed_at), "d MMM yyyy 'at' HH:mm")}</p>
+                )}
+                {hasError && <p className="text-xs text-red-500">A signature is required</p>}
               </div>
             )
           }

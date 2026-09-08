@@ -24,6 +24,10 @@ type ClientMembership = {
   tokens_remaining: number
   purchased_at: string
   expires_at: string | null
+  status: 'active' | 'paused' | 'suspended'
+  pause_start: string | null
+  pause_end: string | null
+  pause_reason: string | null
   plan: { name: string; expiry_type: MembershipExpiryType } | null
 }
 
@@ -31,6 +35,13 @@ function membershipExpiryText(m: ClientMembership): string {
   if (m.expires_at) return format(parseISO(m.expires_at), 'd MMM yyyy')
   if (m.plan?.expiry_type === 'until_cancelled') return 'Until cancelled'
   return 'No expiry'
+}
+
+// A 'paused' membership with a pause_end in the past has already lapsed back to normal use
+function membershipOnHold(m: ClientMembership): boolean {
+  if (m.status === 'suspended') return true
+  if (m.status === 'paused') return !m.pause_end || isBefore(new Date(), parseISO(m.pause_end))
+  return false
 }
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
@@ -63,6 +74,12 @@ export default function AdminClients() {
   const [selected, setSelected] = useState<ClientRow | null>(null)
   const [memberships, setMemberships] = useState<ClientMembership[]>([])
   const [membershipsLoading, setMembershipsLoading] = useState(false)
+  const [membershipActionTarget, setMembershipActionTarget] = useState<ClientMembership | null>(null)
+  const [pauseMode, setPauseMode] = useState<'pause' | 'suspend'>('pause')
+  const [pauseEndDate, setPauseEndDate] = useState('')
+  const [pauseReason, setPauseReason] = useState('')
+  const [membershipActionSaving, setMembershipActionSaving] = useState(false)
+  const [membershipActionError, setMembershipActionError] = useState('')
   const [detailTab, setDetailTab] = useState<'overview' | 'forms'>('overview')
   const [clientForms, setClientForms] = useState<ClientFormResponse[]>([])
   const [formsLoading, setFormsLoading] = useState(false)
@@ -157,19 +174,75 @@ export default function AdminClients() {
       setDeleteModalOpen(false)
       setDeleteConfirmText('')
       setDeleteError('')
+      setMembershipActionTarget(null)
       return
     }
     setMembershipsLoading(true)
-    supabase
-      .from('customer_memberships')
-      .select('id, tokens_remaining, purchased_at, expires_at, plan:membership_plans(name, expiry_type)')
-      .eq('customer_id', selected.id)
-      .order('purchased_at', { ascending: false })
-      .then(({ data }) => {
-        setMemberships((data ?? []) as unknown as ClientMembership[])
-        setMembershipsLoading(false)
-      })
+    loadMemberships(selected.id).then(() => setMembershipsLoading(false))
   }, [selected?.id])
+
+  async function loadMemberships(customerId: string) {
+    const { data } = await supabase
+      .from('customer_memberships')
+      .select('id, tokens_remaining, purchased_at, expires_at, status, pause_start, pause_end, pause_reason, plan:membership_plans(name, expiry_type)')
+      .eq('customer_id', customerId)
+      .order('purchased_at', { ascending: false })
+    setMemberships((data ?? []) as unknown as ClientMembership[])
+  }
+
+  function openMembershipAction(m: ClientMembership) {
+    setMembershipActionTarget(m)
+    setPauseMode('pause')
+    setPauseEndDate('')
+    setPauseReason('')
+    setMembershipActionError('')
+  }
+
+  async function handlePauseMembership() {
+    if (!membershipActionTarget || !selected) return
+    if (!pauseEndDate) { setMembershipActionError('Choose a resume date.'); return }
+    setMembershipActionSaving(true)
+    setMembershipActionError('')
+    const { error } = await supabase.rpc('pause_membership', {
+      p_membership_id: membershipActionTarget.id,
+      p_pause_end: new Date(`${pauseEndDate}T23:59:59`).toISOString(),
+      p_reason: pauseReason.trim() || null,
+    })
+    if (error) {
+      setMembershipActionError(error.message)
+      setMembershipActionSaving(false)
+      return
+    }
+    await loadMemberships(selected.id)
+    setMembershipActionTarget(null)
+    setMembershipActionSaving(false)
+  }
+
+  async function handleSuspendMembership() {
+    if (!membershipActionTarget || !selected) return
+    setMembershipActionSaving(true)
+    setMembershipActionError('')
+    const { error } = await supabase.rpc('suspend_membership', {
+      p_membership_id: membershipActionTarget.id,
+      p_reason: pauseReason.trim() || null,
+    })
+    if (error) {
+      setMembershipActionError(error.message)
+      setMembershipActionSaving(false)
+      return
+    }
+    await loadMemberships(selected.id)
+    setMembershipActionTarget(null)
+    setMembershipActionSaving(false)
+  }
+
+  async function handleResumeMembership(id: string) {
+    if (!selected) return
+    setMembershipActionSaving(true)
+    await supabase.rpc('resume_membership', { p_membership_id: id })
+    await loadMemberships(selected.id)
+    setMembershipActionSaving(false)
+  }
 
   useEffect(() => {
     if (!selected || detailTab !== 'forms') return
@@ -526,22 +599,53 @@ export default function AdminClients() {
                 <div className="space-y-2">
                   {memberships.map((m) => {
                     const expired = !!m.expires_at && isPast(parseISO(m.expires_at))
+                    const onHold = membershipOnHold(m)
                     return (
-                      <div key={m.id} className={`flex items-center gap-4 px-3 py-2.5 rounded-lg border ${expired ? 'bg-gray-50 border-gray-200 opacity-60' : 'bg-white border-gray-200'}`}>
-                        <Ticket className="h-4 w-4 text-gray-400 shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">{m.plan?.name ?? '—'}</p>
-                          <p className="text-xs text-gray-500">
-                            {expired ? 'Expired' : 'Expires'}: {membershipExpiryText(m)}
-                          </p>
+                      <div key={m.id} className={`px-3 py-2.5 rounded-lg border ${expired || onHold ? 'bg-gray-50 border-gray-200' : 'bg-white border-gray-200'} ${expired ? 'opacity-60' : ''}`}>
+                        <div className="flex items-center gap-4">
+                          <Ticket className="h-4 w-4 text-gray-400 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">{m.plan?.name ?? '—'}</p>
+                            <p className="text-xs text-gray-500">
+                              {expired ? 'Expired' : 'Expires'}: {membershipExpiryText(m)}
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className={`text-lg font-bold ${m.tokens_remaining === 0 ? 'text-red-500' : expired ? 'text-gray-400' : 'text-gray-900'}`}>
+                              {m.tokens_remaining}
+                            </p>
+                            <p className="text-xs text-gray-400">sessions left</p>
+                          </div>
+                          {expired && <Badge variant="default">Expired</Badge>}
+                          {!expired && onHold && <Badge variant="warning">{m.status === 'suspended' ? 'Suspended' : 'Paused'}</Badge>}
                         </div>
-                        <div className="text-right shrink-0">
-                          <p className={`text-lg font-bold ${m.tokens_remaining === 0 ? 'text-red-500' : expired ? 'text-gray-400' : 'text-gray-900'}`}>
-                            {m.tokens_remaining}
-                          </p>
-                          <p className="text-xs text-gray-400">sessions left</p>
-                        </div>
-                        {expired && <Badge variant="default">Expired</Badge>}
+                        {!expired && (
+                          <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-gray-100">
+                            <p className="text-xs text-gray-400 truncate">
+                              {onHold && m.status === 'paused' && m.pause_end && `Paused until ${format(parseISO(m.pause_end), 'd MMM yyyy')}`}
+                              {onHold && m.status === 'suspended' && 'Suspended indefinitely'}
+                              {onHold && m.pause_reason && ` · ${m.pause_reason}`}
+                            </p>
+                            {onHold ? (
+                              <button
+                                type="button"
+                                onClick={() => handleResumeMembership(m.id)}
+                                disabled={membershipActionSaving}
+                                className="text-xs font-medium text-(--color-primary) hover:underline disabled:opacity-50 shrink-0"
+                              >
+                                Resume
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => openMembershipAction(m)}
+                                className="text-xs font-medium text-gray-500 hover:text-gray-700 shrink-0"
+                              >
+                                Pause / Suspend
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -625,6 +729,49 @@ export default function AdminClients() {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Pause / suspend membership modal */}
+      <Modal open={!!membershipActionTarget} onClose={() => setMembershipActionTarget(null)} title="Pause / Suspend Membership" size="sm">
+        {membershipActionTarget && (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">{membershipActionTarget.plan?.name ?? 'Membership'}</p>
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+              <button
+                type="button"
+                onClick={() => setPauseMode('pause')}
+                className={`flex-1 py-2 font-medium transition-colors ${pauseMode === 'pause' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+              >
+                Pause
+              </button>
+              <button
+                type="button"
+                onClick={() => setPauseMode('suspend')}
+                className={`flex-1 py-2 font-medium transition-colors ${pauseMode === 'suspend' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+              >
+                Suspend
+              </button>
+            </div>
+            {pauseMode === 'pause' ? (
+              <>
+                <p className="text-xs text-gray-500">Set the period they won't be charged or able to use this membership — it resumes automatically once this date passes.</p>
+                <Input label="Resume on" type="date" value={pauseEndDate} onChange={(e) => setPauseEndDate(e.target.value)} required />
+              </>
+            ) : (
+              <p className="text-xs text-gray-500">Suspends indefinitely with no resume date — use Resume on the client record when it should become usable again.</p>
+            )}
+            <Input label="Reason (optional)" value={pauseReason} onChange={(e) => setPauseReason(e.target.value)} placeholder="e.g. Unwell, resuming in October" />
+            {membershipActionError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{membershipActionError}</p>}
+            <div className="flex gap-2 justify-end pt-1">
+              <Button variant="secondary" size="sm" onClick={() => setMembershipActionTarget(null)}>Cancel</Button>
+              {pauseMode === 'pause' ? (
+                <Button size="sm" loading={membershipActionSaving} disabled={!pauseEndDate} onClick={handlePauseMembership}>Pause Membership</Button>
+              ) : (
+                <Button size="sm" variant="danger" loading={membershipActionSaving} onClick={handleSuspendMembership}>Suspend Membership</Button>
+              )}
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   )

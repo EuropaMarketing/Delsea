@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
+import { format, parseISO } from 'date-fns'
 import {
   Plus, Pencil, Trash2, ChevronUp, ChevronDown, ClipboardList,
   ToggleRight, Type, AlignLeft, CheckSquare, Phone, Heading1, X, Save, Eye, EyeOff,
-  ChevronRight, ChevronLeft, CheckCircle2, List, ListChecks,
+  ChevronRight, ChevronLeft, CheckCircle2, List, ListChecks, PenTool,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/Button'
@@ -31,14 +32,14 @@ type FormField = {
   id: string
   form_id: string
   section_id: string
-  field_type: 'heading' | 'yes_no' | 'text' | 'textarea' | 'checkbox' | 'emergency_contact' | 'dropdown' | 'multi_select'
+  field_type: 'heading' | 'yes_no' | 'text' | 'textarea' | 'checkbox' | 'emergency_contact' | 'dropdown' | 'multi_select' | 'signature'
   label: string
   required: boolean
   position: number
   options: { follow_up_label?: string; description?: string; choices?: string[] }
 }
 
-type ResponseMap = Record<string, string | boolean | string[] | { ec_name?: string; ec_phone?: string; ec_relationship?: string }>
+type ResponseMap = Record<string, string | boolean | string[] | { ec_name?: string; ec_phone?: string; ec_relationship?: string } | { signature_name?: string; signed_at?: string }>
 
 const FIELD_TYPES: { type: FormField['field_type']; label: string; icon: typeof Type; color: string }[] = [
   { type: 'heading',           label: 'Sub-heading',       icon: Heading1,    color: 'text-gray-500 bg-gray-100' },
@@ -49,6 +50,7 @@ const FIELD_TYPES: { type: FormField['field_type']; label: string; icon: typeof 
   { type: 'multi_select',      label: 'Multiple Choice',   icon: ListChecks,  color: 'text-teal-600 bg-teal-50' },
   { type: 'checkbox',          label: 'Acknowledgement',   icon: CheckSquare, color: 'text-green-600 bg-green-50' },
   { type: 'emergency_contact', label: 'Emergency Contact', icon: Phone,       color: 'text-red-600 bg-red-50' },
+  { type: 'signature',         label: 'Signature',         icon: PenTool,     color: 'text-indigo-600 bg-indigo-50' },
 ]
 
 const CHOICE_FIELD_TYPES: FormField['field_type'][] = ['dropdown', 'multi_select']
@@ -166,6 +168,36 @@ function FieldRenderer({
           </div>
         </div>
         {hasError && <p className="text-xs text-red-500">Name and phone number are required</p>}
+      </div>
+    )
+  }
+
+  if (field.field_type === 'signature') {
+    const sig = (val as { signature_name?: string; signed_at?: string }) ?? {}
+    return (
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-gray-800">
+          {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
+        </p>
+        <input
+          type="text"
+          value={sig.signature_name ?? ''}
+          onChange={e => onChange(field.id, { ...sig, signature_name: e.target.value })}
+          onBlur={() => { if (sig.signature_name?.trim()) onChange(field.id, { ...sig, signed_at: new Date().toISOString() }) }}
+          placeholder="Type your full name to sign"
+          className={`w-full h-11 px-3 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) ${hasError ? 'border-red-300' : 'border-gray-200'}`}
+        />
+        {sig.signature_name && (
+          <div className="border-b-2 border-gray-300 pt-1 pb-2 px-1">
+            <p className="text-3xl leading-tight text-gray-800" style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive" }}>
+              {sig.signature_name}
+            </p>
+          </div>
+        )}
+        {sig.signed_at && (
+          <p className="text-xs text-gray-400">Signed {format(parseISO(sig.signed_at), "d MMM yyyy 'at' HH:mm")}</p>
+        )}
+        {hasError && <p className="text-xs text-red-500">A signature is required</p>}
       </div>
     )
   }
