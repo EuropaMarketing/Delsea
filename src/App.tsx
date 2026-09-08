@@ -45,6 +45,7 @@ import AdminSettings from '@/pages/admin/Settings'
 import AdminMemberships from '@/pages/admin/Memberships'
 import AdminClients from '@/pages/admin/Clients'
 import AdminPayroll from '@/pages/admin/Payroll'
+import AdminSales from '@/pages/admin/Sales'
 import AdminPayments from '@/pages/admin/Payments'
 import AdminPortfolio from '@/pages/admin/Portfolio'
 import AdminReviews from '@/pages/admin/Reviews'
@@ -307,6 +308,16 @@ function AppRoutes() {
           <ProtectedRoute adminOnly>
             <AdminLayout>
               <AdminPayroll />
+            </AdminLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/sales"
+        element={
+          <ProtectedRoute adminOnly>
+            <AdminLayout>
+              <AdminSales />
             </AdminLayout>
           </ProtectedRoute>
         }
