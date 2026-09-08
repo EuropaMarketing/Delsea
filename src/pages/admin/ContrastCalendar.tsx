@@ -543,9 +543,11 @@ export default function AdminContrastCalendar() {
   const sessionCapacityMap = useMemo(() => {
     const map = new Map<string, { taken: number; max: number }>()
     for (const session of sessions) {
-      const startsAt = new Date(`${session.event_date}T${session.start_time}`).toISOString()
+      // Compare actual instants, not ISO string formatting — Postgres and
+      // Date#toISOString() don't necessarily render the same timestamp identically.
+      const startsAtMs = new Date(`${session.event_date}T${session.start_time}`).getTime()
       const taken = bookings
-        .filter(b => b.service_id === session.service_id && b.starts_at === startsAt)
+        .filter(b => b.service_id === session.service_id && parseISO(b.starts_at).getTime() === startsAtMs)
         .reduce((sum, b) => sum + (b.spots_booked ?? 1), 0)
       const max = session.max_capacity_override ?? session.service?.max_capacity ?? 8
       map.set(session.id, { taken, max })
@@ -1745,9 +1747,17 @@ export default function AdminContrastCalendar() {
             {/* Day columns */}
             {weekDays.map(day => {
               const dayKey = format(day, 'yyyy-MM-dd')
-              const dayBookings = packOverlaps(bookings.filter(b => isSameDay(parseISO(b.starts_at), day)))
-              const dayBlocks = blockedTimes.filter(bt => isSameDay(parseISO(bt.starts_at), day))
               const daySessions = sessions.filter(s => s.event_date === dayKey)
+              // Attendees of an open session are already represented by the session's own
+              // block (with its capacity count) — render them there only, not as a second
+              // overlapping block for the exact same service + time.
+              const dayBookings = packOverlaps(bookings.filter(b => {
+                if (!isSameDay(parseISO(b.starts_at), day)) return false
+                const bTime = format(parseISO(b.starts_at), 'HH:mm')
+                const coveredBySession = daySessions.some(s => s.service_id === b.service_id && s.start_time.slice(0, 5) === bTime)
+                return !coveredBySession
+              }))
+              const dayBlocks = blockedTimes.filter(bt => isSameDay(parseISO(bt.starts_at), day))
               return (
                 <div
                   key={day.toISOString()}
