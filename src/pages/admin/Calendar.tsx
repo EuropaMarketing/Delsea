@@ -193,6 +193,7 @@ export default function AdminCalendar() {
   const [nbName, setNbName] = useState('')
   const [nbEmail, setNbEmail] = useState('')
   const [nbPhone, setNbPhone] = useState('')
+  const [nbDob, setNbDob] = useState('')
   const [nbNotes, setNbNotes] = useState('')
   const [nbPrice, setNbPrice] = useState('')
   const [nbPriceTouched, setNbPriceTouched] = useState(false)
@@ -989,7 +990,7 @@ export default function AdminCalendar() {
     setNbDate(format(cellPopover.date, 'yyyy-MM-dd'))
     setNbTime(cellPopover.time)
     setNbServiceId(services[0]?.id ?? '')
-    setNbName(''); setNbEmail(''); setNbPhone(''); setNbNotes('')
+    setNbName(''); setNbEmail(''); setNbPhone(''); setNbDob(''); setNbNotes('')
     setNbPrice(services[0] ? (services[0].price / 100).toFixed(2) : '')
     setNbPriceTouched(false)
     setNbSpotsBooked(1)
@@ -1588,7 +1589,7 @@ export default function AdminCalendar() {
     if (query.length < 2) { setNbSuggestions([]); setNbShowSuggestions(false); return }
     const { data } = await supabase
       .from('customers')
-      .select('id, name, email, phone, business_id, user_id, created_at')
+      .select('id, name, email, phone, date_of_birth, business_id, user_id, created_at')
       .eq('business_id', BUSINESS_ID)
       .ilike('name', `%${query}%`)
       .order('name')
@@ -1681,13 +1682,16 @@ export default function AdminCalendar() {
         const { data: customer, error: custErr } = await supabase
           .from('customers')
           .upsert(
-            { business_id: BUSINESS_ID, name: nbName.trim(), email: nbEmail.trim().toLowerCase(), phone: nbPhone.trim() || null },
+            { business_id: BUSINESS_ID, name: nbName.trim(), email: nbEmail.trim().toLowerCase(), phone: nbPhone.trim() || null, date_of_birth: nbDob || null },
             { onConflict: 'business_id,email' },
           )
           .select('id')
           .single()
         if (custErr) throw custErr
         customerId = customer.id
+      } else if (nbDob) {
+        // Existing customer picked from suggestions — only touch DOB if the admin filled one in
+        await supabase.from('customers').update({ date_of_birth: nbDob }).eq('id', customerId)
       }
 
       const rowsToInsert: Record<string, unknown>[] = []
@@ -2593,7 +2597,7 @@ export default function AdminCalendar() {
                   <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
                     {nbSuggestions.map(c => (
                       <button key={c.id} type="button" className="w-full px-3 py-2.5 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
-                        onMouseDown={() => { setNbName(c.name); setNbEmail(c.email); setNbPhone(c.phone ?? ''); setNbSelectedCustomerId(c.id); setNbShowSuggestions(false) }}>
+                        onMouseDown={() => { setNbName(c.name); setNbEmail(c.email); setNbPhone(c.phone ?? ''); setNbDob(c.date_of_birth ?? ''); setNbSelectedCustomerId(c.id); setNbShowSuggestions(false) }}>
                         <p className="text-sm font-medium text-gray-900">{c.name}</p>
                         <p className="text-xs text-gray-500">{c.email}{c.phone ? ` · ${c.phone}` : ''}</p>
                       </button>
@@ -2603,6 +2607,7 @@ export default function AdminCalendar() {
               </div>
               <Input label="Email" type="email" value={nbEmail} onChange={e => setNbEmail(e.target.value)} required placeholder="jane@example.com" />
               <Input label="Phone" type="tel" value={nbPhone} onChange={e => setNbPhone(e.target.value)} placeholder="+44 7700 900000" />
+              <Input label="Date of birth (optional)" type="date" value={nbDob} onChange={e => setNbDob(e.target.value)} />
               <Textarea label="Notes" value={nbNotes} onChange={e => setNbNotes(e.target.value)} placeholder="Optional notes…" />
             </>
           )}
