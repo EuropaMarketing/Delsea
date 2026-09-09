@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { format, parseISO } from 'date-fns'
 import {
   Plus, Pencil, Trash2, ChevronUp, ChevronDown, ClipboardList,
   ToggleRight, Type, AlignLeft, CheckSquare, Phone, Heading1, X, Save, Eye, EyeOff,
@@ -10,6 +9,7 @@ import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Card } from '@/components/ui/Card'
 import { Modal } from '@/components/ui/Modal'
+import { FieldRenderer, type FormField, type Section, type ResponseMap } from '@/components/FormFiller'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
@@ -20,26 +20,6 @@ type ServiceForm = {
   is_active: boolean
   validity_months: number
 }
-
-type Section = {
-  id: string
-  form_id: string
-  title: string
-  position: number
-}
-
-type FormField = {
-  id: string
-  form_id: string
-  section_id: string
-  field_type: 'heading' | 'yes_no' | 'text' | 'textarea' | 'checkbox' | 'emergency_contact' | 'dropdown' | 'multi_select' | 'signature'
-  label: string
-  required: boolean
-  position: number
-  options: { follow_up_label?: string; description?: string; choices?: string[] }
-}
-
-type ResponseMap = Record<string, string | boolean | string[] | { ec_name?: string; ec_phone?: string; ec_relationship?: string } | { signature_name?: string; signed_at?: string }>
 
 const FIELD_TYPES: { type: FormField['field_type']; label: string; icon: typeof Type; color: string }[] = [
   { type: 'heading',           label: 'Sub-heading',       icon: Heading1,    color: 'text-gray-500 bg-gray-100' },
@@ -57,221 +37,6 @@ const CHOICE_FIELD_TYPES: FormField['field_type'][] = ['dropdown', 'multi_select
 
 function fieldMeta(type: FormField['field_type']) {
   return FIELD_TYPES.find(f => f.type === type) ?? FIELD_TYPES[0]
-}
-
-// ─── Shared field renderer used by both editor preview and customer page ───────
-function FieldRenderer({
-  field,
-  responses,
-  errors,
-  onChange,
-  onEcChange,
-}: {
-  field: FormField
-  responses: ResponseMap
-  errors: Set<string>
-  onChange: (id: string, val: ResponseMap[string]) => void
-  onEcChange: (id: string, key: 'ec_name' | 'ec_phone' | 'ec_relationship', val: string) => void
-}) {
-  const val = responses[field.id]
-  const hasError = errors.has(field.id)
-
-  if (field.field_type === 'heading') {
-    return <h3 className="font-semibold text-gray-800 text-base pt-2 border-b border-gray-100 pb-2">{field.label}</h3>
-  }
-
-  if (field.field_type === 'yes_no') {
-    return (
-      <div className="space-y-2.5">
-        <p className="text-sm font-medium text-gray-800">
-          {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
-        </p>
-        <div className="flex gap-3">
-          {(['yes', 'no'] as const).map(opt => (
-            <button
-              key={opt}
-              type="button"
-              onClick={() => onChange(field.id, opt)}
-              className={`w-28 h-11 rounded-xl border-2 text-sm font-semibold transition-all ${
-                val === opt
-                  ? 'border-(--color-primary) bg-(--color-primary) text-white'
-                  : 'border-gray-200 text-gray-700 hover:border-gray-400 bg-white'
-              }`}
-            >
-              {opt === 'yes' ? 'Yes' : 'No'}
-            </button>
-          ))}
-        </div>
-        {hasError && <p className="text-xs text-red-500">Please select Yes or No</p>}
-        {val === 'yes' && field.options?.follow_up_label && (
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">{field.options.follow_up_label}</label>
-            <textarea
-              rows={2}
-              value={(responses[`${field.id}_followup`] as string) ?? ''}
-              onChange={e => onChange(`${field.id}_followup`, e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none resize-none focus:ring-2 focus:ring-(--color-primary)"
-            />
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  if (field.field_type === 'checkbox') {
-    return (
-      <div className="space-y-1.5">
-        <label className="flex gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={!!val}
-            onChange={e => onChange(field.id, e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-(--color-primary) shrink-0"
-          />
-          <span className="text-sm text-gray-800">
-            {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
-          </span>
-        </label>
-        {field.options?.description && (
-          <p className="text-xs text-gray-400 ml-7">{field.options.description}</p>
-        )}
-        {hasError && <p className="text-xs text-red-500 ml-7">This acknowledgement is required</p>}
-      </div>
-    )
-  }
-
-  if (field.field_type === 'emergency_contact') {
-    const ec = (val as { ec_name?: string; ec_phone?: string; ec_relationship?: string }) ?? {}
-    return (
-      <div className="space-y-3">
-        <p className="text-sm font-medium text-gray-800">
-          {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">Full name</label>
-            <input type="text" value={ec.ec_name ?? ''} onChange={e => onEcChange(field.id, 'ec_name', e.target.value)}
-              placeholder="Jane Smith"
-              className={`w-full h-10 px-3 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) ${hasError && !ec.ec_name ? 'border-red-300' : 'border-gray-200'}`} />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">Phone number</label>
-            <input type="tel" value={ec.ec_phone ?? ''} onChange={e => onEcChange(field.id, 'ec_phone', e.target.value)}
-              placeholder="07700 900000"
-              className={`w-full h-10 px-3 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) ${hasError && !ec.ec_phone ? 'border-red-300' : 'border-gray-200'}`} />
-          </div>
-          <div className="sm:col-span-2">
-            <label className="text-xs font-medium text-gray-600 block mb-1">Relationship</label>
-            <input type="text" value={ec.ec_relationship ?? ''} onChange={e => onEcChange(field.id, 'ec_relationship', e.target.value)}
-              placeholder="e.g. Partner, Parent, Friend"
-              className="w-full h-10 px-3 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)" />
-          </div>
-        </div>
-        {hasError && <p className="text-xs text-red-500">Name and phone number are required</p>}
-      </div>
-    )
-  }
-
-  if (field.field_type === 'signature') {
-    const sig = (val as { signature_name?: string; signed_at?: string }) ?? {}
-    return (
-      <div className="space-y-2">
-        <p className="text-sm font-medium text-gray-800">
-          {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
-        </p>
-        <input
-          type="text"
-          value={sig.signature_name ?? ''}
-          onChange={e => onChange(field.id, { ...sig, signature_name: e.target.value })}
-          onBlur={() => { if (sig.signature_name?.trim()) onChange(field.id, { ...sig, signed_at: new Date().toISOString() }) }}
-          placeholder="Type your full name to sign"
-          className={`w-full h-11 px-3 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) ${hasError ? 'border-red-300' : 'border-gray-200'}`}
-        />
-        {sig.signature_name && (
-          <div className="border-b-2 border-gray-300 pt-1 pb-2 px-1">
-            <p className="text-3xl leading-tight text-gray-800" style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive" }}>
-              {sig.signature_name}
-            </p>
-          </div>
-        )}
-        {sig.signed_at && (
-          <p className="text-xs text-gray-400">Signed {format(parseISO(sig.signed_at), "d MMM yyyy 'at' HH:mm")}</p>
-        )}
-        {hasError && <p className="text-xs text-red-500">A signature is required</p>}
-      </div>
-    )
-  }
-
-  if (field.field_type === 'text') {
-    return (
-      <div>
-        <label className="text-sm font-medium text-gray-800 block mb-2">
-          {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-        <input type="text" value={(val as string) ?? ''} onChange={e => onChange(field.id, e.target.value)}
-          className={`w-full h-10 px-3 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) ${hasError ? 'border-red-300' : 'border-gray-200'}`} />
-        {hasError && <p className="text-xs text-red-500 mt-1">This field is required</p>}
-      </div>
-    )
-  }
-
-  if (field.field_type === 'textarea') {
-    return (
-      <div>
-        <label className="text-sm font-medium text-gray-800 block mb-2">
-          {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-        <textarea rows={3} value={(val as string) ?? ''} onChange={e => onChange(field.id, e.target.value)}
-          className={`w-full px-3 py-2 text-sm border rounded-lg outline-none resize-none focus:ring-2 focus:ring-(--color-primary) ${hasError ? 'border-red-300' : 'border-gray-200'}`} />
-        {hasError && <p className="text-xs text-red-500 mt-1">This field is required</p>}
-      </div>
-    )
-  }
-
-  if (field.field_type === 'dropdown') {
-    const choices = field.options?.choices ?? []
-    return (
-      <div>
-        <label className="text-sm font-medium text-gray-800 block mb-2">
-          {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-        <select value={(val as string) ?? ''} onChange={e => onChange(field.id, e.target.value)}
-          className={`w-full h-10 px-3 text-sm border rounded-lg bg-white outline-none focus:ring-2 focus:ring-(--color-primary) ${hasError ? 'border-red-300' : 'border-gray-200'}`}>
-          <option value="">Select…</option>
-          {choices.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        {hasError && <p className="text-xs text-red-500 mt-1">This field is required</p>}
-      </div>
-    )
-  }
-
-  if (field.field_type === 'multi_select') {
-    const choices = field.options?.choices ?? []
-    const selected = Array.isArray(val) ? val : []
-    function toggle(choice: string) {
-      const next = selected.includes(choice) ? selected.filter(c => c !== choice) : [...selected, choice]
-      onChange(field.id, next)
-    }
-    return (
-      <div>
-        <p className="text-sm font-medium text-gray-800 mb-2">
-          {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
-        </p>
-        <div className="space-y-1.5">
-          {choices.map(c => (
-            <label key={c} className="flex items-center gap-2.5 cursor-pointer">
-              <input type="checkbox" checked={selected.includes(c)} onChange={() => toggle(c)}
-                className="h-4 w-4 rounded border-gray-300 accent-(--color-primary) shrink-0" />
-              <span className="text-sm text-gray-800">{c}</span>
-            </label>
-          ))}
-        </div>
-        {hasError && <p className="text-xs text-red-500 mt-1">Select at least one option</p>}
-      </div>
-    )
-  }
-
-  return null
 }
 
 // ─── Preview modal ─────────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ import { supabase } from './supabase'
 export type BookingFormStatus = {
   needsForm: boolean
   formTitle: string | null
+  missingForms: { id: string; title: string }[]
 }
 
 type FormRow = { id: string; title: string; is_active: boolean }
@@ -55,7 +56,7 @@ export async function checkBookingForm(
     if (row.form && !forms.some(f => f.id === row.form!.id)) forms.push(row.form)
   }
 
-  if (!forms.length) return { needsForm: false, formTitle: null }
+  if (!forms.length) return { needsForm: false, formTitle: null, missingForms: [] }
 
   const { data: responses } = await supabase
     .from('form_responses')
@@ -70,6 +71,7 @@ export async function checkBookingForm(
   return {
     needsForm: missing.length > 0,
     formTitle: missing.length ? missing.map(f => f.title).join(', ') : null,
+    missingForms: missing,
   }
 }
 

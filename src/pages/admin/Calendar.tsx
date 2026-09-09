@@ -7,11 +7,12 @@ import {
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck, ClipboardList,
-  Clock, CalendarRange, Sparkles, Mail, Phone as PhoneIcon, CalendarClock, Trash2, Cake,
+  Clock, CalendarRange, Sparkles, Mail, Phone as PhoneIcon, CalendarClock, Trash2, Cake, PenTool,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
 import { generateTimeSlots } from '@/lib/slots'
+import { AdminFormFiller } from '@/components/FormFiller'
 import { useAuthStore } from '@/store/authStore'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { Modal } from '@/components/ui/Modal'
@@ -261,6 +262,7 @@ export default function AdminCalendar() {
   const [editMode, setEditMode] = useState(false)
   const [formAlerts, setFormAlerts] = useState<Set<string>>(new Set())
   const [selectedBookingForm, setSelectedBookingForm] = useState<BookingFormStatus | null>(null)
+  const [fillFormTarget, setFillFormTarget] = useState<{ id: string; title: string } | null>(null)
   const [editNotes, setEditNotes] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
@@ -690,6 +692,14 @@ export default function AdminCalendar() {
     await supabase.from('booking_forms').delete().eq('id', id)
     await fetchBookingForms(selectedBooking.id)
     checkBookingForm(selectedBooking.service_id, selectedBooking.customer_id, selectedBooking.id).then(setSelectedBookingForm)
+  }
+
+  function sendFormReminder(form: { id: string; title: string }) {
+    if (!selectedBooking?.customer?.email) return
+    const link = `${window.location.origin}/forms/${form.id}?bookingId=${selectedBooking.id}`
+    const subject = `Please complete: ${form.title}`
+    const body = `Hi ${selectedBooking.customer?.name ?? ''},\n\nBefore your appointment on ${format(parseISO(selectedBooking.starts_at), 'EEEE d MMMM')} at ${format(parseISO(selectedBooking.starts_at), 'HH:mm')}, please complete the following form:\n\n${form.title}\n${link}\n\nThanks!`
+    window.location.href = `mailto:${selectedBooking.customer.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
   }
 
   function sessionStartsAt(session: SessionRow): string {
@@ -2718,11 +2728,32 @@ export default function AdminCalendar() {
             {selectedBookingForm?.needsForm && (
               <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
                 <ClipboardList className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                <div>
+                <div className="flex-1 min-w-0">
                   <p className="text-xs font-semibold text-amber-800">Health form not completed</p>
                   <p className="text-xs text-amber-700 mt-0.5">
                     Customer must complete <span className="font-medium">{selectedBookingForm.formTitle}</span> before this session can take place.
                   </p>
+                  <div className="mt-2 space-y-1.5">
+                    {selectedBookingForm.missingForms.map(f => (
+                      <div key={f.id} className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-amber-800 font-medium">{f.title}:</span>
+                        <button
+                          onClick={() => sendFormReminder(f)}
+                          disabled={!selectedBooking.customer?.email}
+                          title={!selectedBooking.customer?.email ? 'No email on file for this customer' : 'Opens your email app with a pre-filled reminder'}
+                          className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <Mail className="h-3 w-3" /> Send Reminder
+                        </button>
+                        <button
+                          onClick={() => setFillFormTarget(f)}
+                          className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors"
+                        >
+                          <PenTool className="h-3 w-3" /> Fill Out Now
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -3599,6 +3630,23 @@ export default function AdminCalendar() {
           </div>
         )
       })()}
+
+      {fillFormTarget && selectedBooking && (
+        <AdminFormFiller
+          open={!!fillFormTarget}
+          onClose={() => setFillFormTarget(null)}
+          formId={fillFormTarget.id}
+          formTitle={fillFormTarget.title}
+          businessId={BUSINESS_ID}
+          customerId={selectedBooking.customer_id}
+          customerName={selectedBooking.customer?.name ?? 'this customer'}
+          bookingId={selectedBooking.id}
+          onSaved={() => {
+            setFillFormTarget(null)
+            checkBookingForm(selectedBooking.service_id, selectedBooking.customer_id, selectedBooking.id).then(setSelectedBookingForm)
+          }}
+        />
+      )}
     </div>
   )
 }
