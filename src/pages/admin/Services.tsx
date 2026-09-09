@@ -18,7 +18,7 @@ const empty: Omit<Service, 'id' | 'business_id'> = {
   name: '', description: null, duration_minutes: 60, price: 0, category: 'General', is_active: true,
   is_self_service: false, is_group_session: false, max_capacity: null, deposit_type: 'none', deposit_value: 0,
   resource_id: null, pre_buffer_minutes: 0, post_buffer_minutes: 0,
-  commission_type: null, commission_rate: null, is_event_only: false, form_id: null,
+  commission_type: null, commission_rate: null, is_event_only: false, form_id: null, returning_form_id: null,
 }
 
 export default function AdminServices() {
@@ -88,7 +88,7 @@ export default function AdminServices() {
 
   async function openEdit(service: Service) {
     setEditTarget(service)
-    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, is_self_service: service.is_self_service, is_group_session: service.is_group_session, max_capacity: service.max_capacity, deposit_type: service.deposit_type, deposit_value: service.deposit_value, resource_id: service.resource_id ?? null, pre_buffer_minutes: service.pre_buffer_minutes ?? 0, post_buffer_minutes: service.post_buffer_minutes ?? 0, commission_type: service.commission_type ?? null, commission_rate: service.commission_rate ?? null, is_event_only: service.is_event_only ?? false, form_id: service.form_id ?? null })
+    setForm({ name: service.name, description: service.description, duration_minutes: service.duration_minutes, price: service.price, category: service.category, is_active: service.is_active, is_self_service: service.is_self_service, is_group_session: service.is_group_session, max_capacity: service.max_capacity, deposit_type: service.deposit_type, deposit_value: service.deposit_value, resource_id: service.resource_id ?? null, pre_buffer_minutes: service.pre_buffer_minutes ?? 0, post_buffer_minutes: service.post_buffer_minutes ?? 0, commission_type: service.commission_type ?? null, commission_rate: service.commission_rate ?? null, is_event_only: service.is_event_only ?? false, form_id: service.form_id ?? null, returning_form_id: service.returning_form_id ?? null })
     setErrors({})
     setVariantForm({ name: '', duration_minutes: 60, price: '' })
     setAddingVariant(false)
@@ -872,18 +872,36 @@ export default function AdminServices() {
             </div>
           )}
 
-          {/* Form */}
-          <div className="border border-gray-100 rounded-xl p-4 space-y-2 bg-gray-50">
-            <p className="text-sm font-semibold text-gray-700">Form</p>
-            <select
-              value={form.form_id ?? ''}
-              onChange={e => setForm(f => ({ ...f, form_id: e.target.value || null }))}
-              className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
-            >
-              <option value="">No form required</option>
-              {availableForms.map(f => <option key={f.id} value={f.id}>{f.title}</option>)}
-            </select>
-            <p className="text-xs text-gray-400">Customers must complete this form before a booking for this service can take place. Manage forms under Forms.</p>
+          {/* Forms */}
+          <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
+            <p className="text-sm font-semibold text-gray-700">Forms</p>
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">New Client Form</label>
+              <select
+                value={form.form_id ?? ''}
+                onChange={e => setForm(f => ({ ...f, form_id: e.target.value || null }))}
+                className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+              >
+                <option value="">No form required</option>
+                {availableForms.map(f => <option key={f.id} value={f.id}>{f.title}</option>)}
+              </select>
+              <p className="text-xs text-gray-400 mt-1">Required before a booking for this service can take place, unless a valid response is already on file.</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Returning Client Form</label>
+              <select
+                value={form.returning_form_id ?? ''}
+                onChange={e => setForm(f => ({ ...f, returning_form_id: e.target.value || null }))}
+                className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
+              >
+                <option value="">None</option>
+                {availableForms.map(f => <option key={f.id} value={f.id}>{f.title}</option>)}
+              </select>
+              <p className="text-xs text-gray-400 mt-1">
+                Shown instead of the New Client Form once a customer already has a valid response to it on file.
+              </p>
+            </div>
+            <p className="text-xs text-gray-400">Manage forms under Forms.</p>
           </div>
 
           {/* Deposit */}

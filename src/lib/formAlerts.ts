@@ -5,23 +5,51 @@ export type BookingFormStatus = {
   formTitle: string | null
 }
 
-/** Targeted check for a single booking's detail panel — covers both the
- *  service's own form (if any) and any forms attached directly to this booking. */
+type FormRow = { id: string; title: string; is_active: boolean }
+
+/** Targeted check for a single booking's detail panel. Decides between the
+ *  service's New Client Form and Returning Client Form (if a valid response to
+ *  the New Client Form is already on file, the returning form applies instead),
+ *  plus any forms attached directly to this booking. */
 export async function checkBookingForm(
   serviceId: string,
   customerId: string,
   bookingId?: string,
 ): Promise<BookingFormStatus> {
   const [serviceRes, bookingFormsRes] = await Promise.all([
-    supabase.from('services').select('form:service_forms(id, title, is_active)').eq('id', serviceId).maybeSingle(),
+    supabase.from('services').select('form_id, returning_form_id').eq('id', serviceId).maybeSingle(),
     bookingId
       ? supabase.from('booking_forms').select('form:service_forms(id, title)').eq('booking_id', bookingId)
       : Promise.resolve({ data: [] as { form: { id: string; title: string } | null }[] }),
   ])
 
+  const newFormId = serviceRes.data?.form_id ?? null
+  const returningFormId = serviceRes.data?.returning_form_id ?? null
+  const linkedFormIds = [newFormId, returningFormId].filter((id): id is string => !!id)
+
+  const { data: linkedFormRows } = linkedFormIds.length
+    ? await supabase.from('service_forms').select('id, title, is_active').in('id', linkedFormIds)
+    : { data: [] as FormRow[] }
+  const formById = new Map((linkedFormRows ?? []).map(f => [f.id, f]))
+  const newForm = newFormId ? formById.get(newFormId) : undefined
+  const returningForm = returningFormId ? formById.get(returningFormId) : undefined
+
   const forms: { id: string; title: string }[] = []
-  const svcForm = (serviceRes.data as unknown as { form: { id: string; title: string; is_active: boolean } | null } | null)?.form
-  if (svcForm?.is_active) forms.push({ id: svcForm.id, title: svcForm.title })
+  if (newForm?.is_active) {
+    const { data: newFormResponse } = await supabase
+      .from('form_responses')
+      .select('id')
+      .eq('customer_id', customerId)
+      .eq('form_id', newForm.id)
+      .gt('expires_at', new Date().toISOString())
+      .maybeSingle()
+    if (newFormResponse && returningForm?.is_active) {
+      forms.push(returningForm)
+    } else {
+      forms.push(newForm)
+    }
+  }
+
   const bookingFormRows = (bookingFormsRes.data ?? []) as unknown as { form: { id: string; title: string } | null }[]
   for (const row of bookingFormRows) {
     if (row.form && !forms.some(f => f.id === row.form!.id)) forms.push(row.form)
@@ -45,8 +73,9 @@ export async function checkBookingForm(
   }
 }
 
-/** Batch check for list views — returns booking IDs that need a form (via their
- *  service or attached directly to the booking) but haven't completed one. */
+/** Batch check for list views — returns booking IDs that need a form (their
+ *  service's New/Returning Client Form, or one attached directly to the booking)
+ *  but haven't completed one. Same New-vs-Returning logic as checkBookingForm. */
 export async function loadFormAlertSet(
   businessId: string,
   bookings: Array<{ id: string; service_id: string; customer_id: string }>,
@@ -58,16 +87,35 @@ export async function loadFormAlertSet(
   const [servicesRes, bookingFormsRes] = await Promise.all([
     supabase
       .from('services')
-      .select('id, form:service_forms(id, is_active)')
+      .select('id, form_id, returning_form_id')
       .eq('business_id', businessId)
       .in('id', serviceIds),
     supabase.from('booking_forms').select('booking_id, form_id').in('booking_id', bookingIds),
   ])
 
-  const serviceRows = (servicesRes.data ?? []) as unknown as { id: string; form: { id: string; is_active: boolean } | null }[]
-  const formByService = new Map(
-    serviceRows.filter(s => s.form?.is_active).map(s => [s.id, s.form!.id]),
-  )
+  const services = (servicesRes.data ?? []) as { id: string; form_id: string | null; returning_form_id: string | null }[]
+  const serviceById = new Map(services.map(s => [s.id, s]))
+  const linkedFormIds = [...new Set(services.flatMap(s => [s.form_id, s.returning_form_id]).filter((id): id is string => !!id))]
+
+  const { data: linkedFormRows } = linkedFormIds.length
+    ? await supabase.from('service_forms').select('id, is_active').in('id', linkedFormIds)
+    : { data: [] as { id: string; is_active: boolean }[] }
+  const activeFormIds = new Set((linkedFormRows ?? []).filter(f => f.is_active).map(f => f.id))
+
+  // Which customers already have a valid response to which "new client" forms —
+  // needed up front to decide, per booking, whether the returning form applies.
+  const customerIds = [...new Set(bookings.map(b => b.customer_id))]
+  const newFormIds = [...new Set(services.map(s => s.form_id).filter((id): id is string => !!id && activeFormIds.has(id)))]
+  const { data: newFormResponses } = newFormIds.length && customerIds.length
+    ? await supabase
+        .from('form_responses')
+        .select('customer_id, form_id')
+        .in('customer_id', customerIds)
+        .in('form_id', newFormIds)
+        .gt('expires_at', new Date().toISOString())
+    : { data: [] as { customer_id: string; form_id: string }[] }
+  const hasValidNewForm = new Set((newFormResponses ?? []).map(r => `${r.customer_id}:${r.form_id}`))
+
   const adhocByBooking = new Map<string, string[]>()
   for (const row of (bookingFormsRes.data ?? [])) {
     const arr = adhocByBooking.get(row.booking_id) ?? []
@@ -78,8 +126,15 @@ export async function loadFormAlertSet(
   const requiredByBooking = new Map<string, string[]>()
   for (const b of bookings) {
     const ids: string[] = []
-    const svcForm = b.service_id ? formByService.get(b.service_id) : undefined
-    if (svcForm) ids.push(svcForm)
+    const svc = b.service_id ? serviceById.get(b.service_id) : undefined
+    if (svc?.form_id && activeFormIds.has(svc.form_id)) {
+      const alreadyHasNewForm = hasValidNewForm.has(`${b.customer_id}:${svc.form_id}`)
+      if (alreadyHasNewForm && svc.returning_form_id && activeFormIds.has(svc.returning_form_id)) {
+        ids.push(svc.returning_form_id)
+      } else {
+        ids.push(svc.form_id)
+      }
+    }
     for (const fid of adhocByBooking.get(b.id) ?? []) {
       if (!ids.includes(fid)) ids.push(fid)
     }
@@ -87,14 +142,14 @@ export async function loadFormAlertSet(
   }
   if (!requiredByBooking.size) return new Set()
 
-  const customerIds = [...new Set(bookings.filter(b => requiredByBooking.has(b.id)).map(b => b.customer_id))]
-  const allFormIds = [...new Set([...requiredByBooking.values()].flat())]
+  const finalCustomerIds = [...new Set(bookings.filter(b => requiredByBooking.has(b.id)).map(b => b.customer_id))]
+  const allRequiredFormIds = [...new Set([...requiredByBooking.values()].flat())]
 
   const { data: responses } = await supabase
     .from('form_responses')
     .select('customer_id, form_id')
-    .in('customer_id', customerIds)
-    .in('form_id', allFormIds)
+    .in('customer_id', finalCustomerIds)
+    .in('form_id', allRequiredFormIds)
     .gt('expires_at', new Date().toISOString())
 
   const done = new Set((responses ?? []).map(r => `${r.customer_id}:${r.form_id}`))

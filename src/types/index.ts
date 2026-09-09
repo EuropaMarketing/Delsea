@@ -56,6 +56,7 @@ export interface Service {
   is_event_only: boolean
   hide_from_main_calendar?: boolean
   form_id?: string | null
+  returning_form_id?: string | null
   variants?: ServiceVariant[]
   addons?: ServiceAddon[]
 }

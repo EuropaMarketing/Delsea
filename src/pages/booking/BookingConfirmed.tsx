@@ -39,30 +39,50 @@ function useRequiredForm(bookingId: string | undefined, serviceId: string | unde
     let cancelled = false
 
     async function check() {
+      // New Client Form applies unless a valid response is already on file, in
+      // which case the Returning Client Form (if any) applies instead.
       const { data: service } = await supabase
         .from('services')
-        .select('form:service_forms(id, title, is_active)')
+        .select('form_id, returning_form_id')
         .eq('id', serviceId as string)
         .maybeSingle()
-      const serviceForm = (service as unknown as { form: { id: string; title: string; is_active: boolean } | null } | null)?.form
-      if (!serviceForm?.is_active || cancelled) return
+      const newFormId = service?.form_id ?? null
+      const returningFormId = service?.returning_form_id ?? null
+      const linkedIds = [newFormId, returningFormId].filter((id): id is string => !!id)
+      if (!linkedIds.length || cancelled) return
 
-      const { data: booking } = await supabase
-        .from('bookings')
-        .select('customer_id')
-        .eq('id', bookingId as string)
-        .single()
+      const [{ data: forms }, { data: booking }] = await Promise.all([
+        supabase.from('service_forms').select('id, title, is_active').in('id', linkedIds),
+        supabase.from('bookings').select('customer_id').eq('id', bookingId as string).single(),
+      ])
       if (!booking?.customer_id || cancelled) return
 
-      const { data: response } = await supabase
+      const formById = new Map((forms ?? []).map(f => [f.id, f]))
+      const newForm = newFormId ? formById.get(newFormId) : undefined
+      const returningForm = returningFormId ? formById.get(returningFormId) : undefined
+      if (!newForm?.is_active) return
+
+      const { data: newFormResponse } = await supabase
         .from('form_responses')
         .select('id')
         .eq('customer_id', booking.customer_id)
-        .eq('form_id', serviceForm.id)
+        .eq('form_id', newForm.id)
+        .gt('expires_at', new Date().toISOString())
+        .maybeSingle()
+      if (cancelled) return
+
+      if (!newFormResponse) { setForm({ id: newForm.id, title: newForm.title }); return }
+      if (!returningForm?.is_active) return
+
+      const { data: returningFormResponse } = await supabase
+        .from('form_responses')
+        .select('id')
+        .eq('customer_id', booking.customer_id)
+        .eq('form_id', returningForm.id)
         .gt('expires_at', new Date().toISOString())
         .maybeSingle()
 
-      if (!response && !cancelled) setForm({ id: serviceForm.id, title: serviceForm.title })
+      if (!returningFormResponse && !cancelled) setForm({ id: returningForm.id, title: returningForm.title })
     }
 
     check()

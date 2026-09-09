@@ -401,15 +401,21 @@ export default function AdminForms() {
     async function load() {
       const [fr, ur] = await Promise.all([
         supabase.from('service_forms').select('*').eq('business_id', BUSINESS_ID).order('created_at'),
-        supabase.from('services').select('name, form_id').eq('business_id', BUSINESS_ID).not('form_id', 'is', null),
+        supabase.from('services').select('name, form_id, returning_form_id').eq('business_id', BUSINESS_ID)
+          .or('form_id.not.is.null,returning_form_id.not.is.null'),
       ])
       if (fr.data) setForms(fr.data as ServiceForm[])
       if (ur.data) {
         const map = new Map<string, string[]>()
-        for (const row of ur.data as { name: string; form_id: string }[]) {
-          const arr = map.get(row.form_id) ?? []
-          arr.push(row.name)
-          map.set(row.form_id, arr)
+        const add = (formId: string | null, label: string) => {
+          if (!formId) return
+          const arr = map.get(formId) ?? []
+          arr.push(label)
+          map.set(formId, arr)
+        }
+        for (const row of ur.data as { name: string; form_id: string | null; returning_form_id: string | null }[]) {
+          add(row.form_id, row.name)
+          add(row.returning_form_id, `${row.name} (returning)`)
         }
         setServiceUsage(map)
       }

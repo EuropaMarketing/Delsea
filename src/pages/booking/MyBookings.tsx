@@ -249,17 +249,40 @@ export default function MyBookings() {
             const serviceIds = [...new Set(upcomingConfirmed.map(b => b.service_id))]
             const bookingIds = upcomingConfirmed.map(b => b.id)
             const [servicesRes, bookingFormsRes] = await Promise.all([
-              supabase.from('services').select('id, form:service_forms(id, is_active)').in('id', serviceIds),
+              supabase.from('services').select('id, form_id, returning_form_id').in('id', serviceIds),
               supabase.from('booking_forms').select('booking_id, form_id').in('booking_id', bookingIds),
             ])
-            const serviceRows = (servicesRes.data ?? []) as unknown as { id: string; form: { id: string; is_active: boolean } | null }[]
+            const serviceRows = (servicesRes.data ?? []) as { id: string; form_id: string | null; returning_form_id: string | null }[]
             const bookingFormRows = (bookingFormsRes.data ?? []) as { booking_id: string; form_id: string }[]
+
+            // New Client Form applies unless the customer already has a valid response to
+            // it, in which case the Returning Client Form (if any) applies instead.
+            const linkedFormIds = [...new Set(serviceRows.flatMap(s => [s.form_id, s.returning_form_id]).filter((id): id is string => !!id))]
+            const { data: linkedFormRows } = linkedFormIds.length
+              ? await supabase.from('service_forms').select('id, is_active').in('id', linkedFormIds)
+              : { data: [] as { id: string; is_active: boolean }[] }
+            const activeFormIds = new Set((linkedFormRows ?? []).filter(f => f.is_active).map(f => f.id))
+
+            const newFormIds = [...new Set(serviceRows.map(s => s.form_id).filter((id): id is string => !!id && activeFormIds.has(id)))]
+            const { data: newFormResponses } = newFormIds.length
+              ? await supabase.from('form_responses').select('customer_id, form_id')
+                  .in('customer_id', customerIds).in('form_id', newFormIds)
+                  .gt('expires_at', new Date().toISOString())
+              : { data: [] as { customer_id: string; form_id: string }[] }
+            const hasValidNewForm = new Set((newFormResponses ?? []).map(r => `${r.customer_id}:${r.form_id}`))
 
             const requiredFormIdsByBooking: Record<string, string[]> = {}
             for (const booking of upcomingConfirmed) {
               const ids: string[] = []
-              const svcForm = serviceRows.find(s => s.id === booking.service_id)?.form
-              if (svcForm?.is_active) ids.push(svcForm.id)
+              const svc = serviceRows.find(s => s.id === booking.service_id)
+              if (svc?.form_id && activeFormIds.has(svc.form_id)) {
+                const alreadyHasNewForm = hasValidNewForm.has(`${booking.customer_id}:${svc.form_id}`)
+                if (alreadyHasNewForm && svc.returning_form_id && activeFormIds.has(svc.returning_form_id)) {
+                  ids.push(svc.returning_form_id)
+                } else {
+                  ids.push(svc.form_id)
+                }
+              }
               for (const row of bookingFormRows.filter(r => r.booking_id === booking.id)) {
                 if (!ids.includes(row.form_id)) ids.push(row.form_id)
               }
