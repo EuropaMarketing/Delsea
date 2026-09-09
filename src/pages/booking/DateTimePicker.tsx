@@ -48,6 +48,13 @@ export default function DateTimePicker() {
   const service = services.find((s) => s.id === draft.serviceId)
   const staffMember = staff.find((s) => s.id === draft.staffId)
 
+  // So an existing booking's own set-down time is respected when checking a
+  // candidate slot, not just the new booking's own buffer.
+  const serviceBuffers = useMemo(
+    () => new Map(services.map((s) => [s.id, { pre: s.pre_buffer_minutes ?? 0, post: s.post_buffer_minutes ?? 0 }])),
+    [services],
+  )
+
   if (!draft.serviceId) { navigate('/book'); return null }
 
   // Load staff availability schedule (day-of-week rules) — skipped for group sessions
@@ -193,7 +200,7 @@ export default function DateTimePicker() {
           const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
           return isBefore(s, dEnd) && isAfter(e, dStart)
         })
-        map.set(dayKey, generateTimeSlots(day, availability, duration, bks, blk, preBuffer, postBuffer, minNoticeMinutes))
+        map.set(dayKey, generateTimeSlots(day, availability, duration, bks, blk, preBuffer, postBuffer, minNoticeMinutes, serviceBuffers))
       } else if (draft.staffId) {
         // Specific staff selected — only their availability, bookings and blocks matter
         const staffAvail = availability.filter(a => a.staff_id === draft.staffId)
@@ -203,7 +210,7 @@ export default function DateTimePicker() {
           const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
           return isBefore(s, dEnd) && isAfter(e, dStart)
         })
-        map.set(dayKey, generateTimeSlots(day, staffAvail, duration, bks, blk, preBuffer, postBuffer, minNoticeMinutes))
+        map.set(dayKey, generateTimeSlots(day, staffAvail, duration, bks, blk, preBuffer, postBuffer, minNoticeMinutes, serviceBuffers))
       } else {
         // Any staff — generate slots per-staff and union them so one member's
         // leave block doesn't suppress the availability of other team members
@@ -216,7 +223,7 @@ export default function DateTimePicker() {
             const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
             return isBefore(s, dEnd) && isAfter(e, dStart)
           })
-          for (const slot of generateTimeSlots(day, staffAvail, duration, staffBks, staffBlk, preBuffer, postBuffer, minNoticeMinutes)) {
+          for (const slot of generateTimeSlots(day, staffAvail, duration, staffBks, staffBlk, preBuffer, postBuffer, minNoticeMinutes, serviceBuffers)) {
             slotSet.add(slot)
           }
         }
@@ -335,7 +342,7 @@ export default function DateTimePicker() {
               const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
               return isBefore(s, dEnd) && isAfter(e, dStart)
             })
-            daySlots = generateTimeSlots(day, availability, dur, dayBks, dayBlk, service.pre_buffer_minutes, service.post_buffer_minutes, minNoticeMinutes)
+            daySlots = generateTimeSlots(day, availability, dur, dayBks, dayBlk, service.pre_buffer_minutes, service.post_buffer_minutes, minNoticeMinutes, serviceBuffers)
           } else if (draft.staffId) {
             const staffAvail = availability.filter(a => a.staff_id === draft.staffId)
             const dayBks = bks.filter(b => b.starts_at.startsWith(dayKey) && b.staff_id === draft.staffId)
@@ -344,7 +351,7 @@ export default function DateTimePicker() {
               const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
               return isBefore(s, dEnd) && isAfter(e, dStart)
             })
-            daySlots = generateTimeSlots(day, staffAvail, dur, dayBks, dayBlk, service.pre_buffer_minutes, service.post_buffer_minutes, minNoticeMinutes)
+            daySlots = generateTimeSlots(day, staffAvail, dur, dayBks, dayBlk, service.pre_buffer_minutes, service.post_buffer_minutes, minNoticeMinutes, serviceBuffers)
           } else {
             const slotSet = new Set<string>()
             for (const staffId of activeStaffIds) {
@@ -355,7 +362,7 @@ export default function DateTimePicker() {
                 const s = new Date(bt.starts_at), e = new Date(bt.ends_at)
                 return isBefore(s, dEnd) && isAfter(e, dStart)
               })
-              for (const slot of generateTimeSlots(day, staffAvail, dur, staffBks, staffBlk, service.pre_buffer_minutes, service.post_buffer_minutes, minNoticeMinutes)) {
+              for (const slot of generateTimeSlots(day, staffAvail, dur, staffBks, staffBlk, service.pre_buffer_minutes, service.post_buffer_minutes, minNoticeMinutes, serviceBuffers)) {
                 slotSet.add(slot)
               }
             }

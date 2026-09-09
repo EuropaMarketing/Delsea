@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   format, addDays, subDays, addWeeks, subWeeks, addMonths, startOfDay, endOfDay, startOfWeek, endOfWeek,
-  parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday, isSameDay, getDay, isPast,
+  parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday, isSameDay, getDay, isPast, isBefore, isAfter,
 } from 'date-fns'
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
@@ -516,6 +516,13 @@ export default function AdminCalendar() {
     return Object.fromEntries(cats.map((c, i) => [c, SERVICE_COLORS[i % SERVICE_COLORS.length]]))
   }, [bookings])
 
+  // So an existing booking's own set-down time is respected when checking a
+  // candidate slot for conflicts, not just the new booking's own buffer.
+  const serviceBuffers = useMemo(
+    () => new Map(services.map(s => [s.id, { pre: s.pre_buffer_minutes ?? 0, post: s.post_buffer_minutes ?? 0 }])),
+    [services],
+  )
+
   // Aggregate capacity per group-session slot (service_id + starts_at) for the "X/Y" badge on calendar blocks.
   const slotCapacityMap = useMemo(() => {
     const map = new Map<string, { taken: number; max: number }>()
@@ -590,6 +597,54 @@ export default function AdminCalendar() {
       .filter(b => b.id !== excludeBookingId)
       .reduce((sum, b) => sum + (b.spots_booked ?? 1), 0)
     return { taken, max: service.max_capacity ?? 8 }
+  }
+
+  // Live, buffer-aware conflict check for a staff member at an admin-chosen time —
+  // the manual "New Booking" flow inserts directly rather than picking from a
+  // generated slot list, so this is its only protection against double-booking.
+  // Always queries fresh (not the currently-loaded view state) so it's correct
+  // even when the chosen date falls outside the calendar's visible range.
+  async function checkStaffConflict(
+    staffId: string,
+    startsAt: Date,
+    endsAt: Date,
+    preBuffer: number,
+    postBuffer: number,
+    excludeBookingId?: string,
+  ): Promise<boolean> {
+    const dayStart = startOfDay(startsAt).toISOString()
+    const dayEnd = endOfDay(startsAt).toISOString()
+    const [bookRes, blockRes] = await Promise.all([
+      supabase
+        .from('bookings')
+        .select('id, starts_at, ends_at, service_id')
+        .eq('staff_id', staffId)
+        .neq('status', 'cancelled')
+        .gte('starts_at', dayStart)
+        .lte('starts_at', dayEnd),
+      supabase
+        .from('blocked_times')
+        .select('starts_at, ends_at')
+        .eq('staff_id', staffId)
+        .lt('starts_at', dayEnd)
+        .gt('ends_at', dayStart),
+    ])
+    const bufferedNewStart = addMinutes(startsAt, -preBuffer)
+    const bufferedNewEnd = addMinutes(endsAt, postBuffer)
+
+    const bookingConflict = (bookRes.data ?? []).some(b => {
+      if (excludeBookingId && b.id === excludeBookingId) return false
+      const buf = serviceBuffers.get(b.service_id)
+      const bStart = addMinutes(parseISO(b.starts_at), -(buf?.pre ?? 0))
+      const bEnd = addMinutes(parseISO(b.ends_at), buf?.post ?? 0)
+      return isBefore(bufferedNewStart, bEnd) && isAfter(bufferedNewEnd, bStart)
+    })
+    const blockConflict = (blockRes.data ?? []).some(bt => {
+      const bStart = parseISO(bt.starts_at)
+      const bEnd = parseISO(bt.ends_at)
+      return isBefore(bufferedNewStart, bEnd) && isAfter(bufferedNewEnd, bStart)
+    })
+    return bookingConflict || blockConflict
   }
 
   async function fetchBookingAddons(bookingId: string): Promise<BookingAddon[]> {
@@ -1244,7 +1299,7 @@ export default function AdminCalendar() {
     const dayBookings = bookings.filter(b => isSameDay(parseISO(b.starts_at), day) && b.id !== selectedBooking.id) as unknown as Booking[]
     const dayBlocks = blockedTimes.filter(bt => isSameDay(parseISO(bt.starts_at), day) && !bt.is_shift_adjustment)
     const relevantAvailability = staffId ? availability.filter(a => a.staff_id === staffId) : availability
-    const slots = generateTimeSlots(day, relevantAvailability, svc.duration_minutes, dayBookings, dayBlocks, svc.pre_buffer_minutes, svc.post_buffer_minutes)
+    const slots = generateTimeSlots(day, relevantAvailability, svc.duration_minutes, dayBookings, dayBlocks, svc.pre_buffer_minutes, svc.post_buffer_minutes, 5, serviceBuffers)
 
     setAddLinkedChecking(false)
     setAddLinkedChecked(true)
@@ -1351,11 +1406,22 @@ export default function AdminCalendar() {
     const newService = services.find(s => s.id === editServiceId)
     if (!newService) { setEditError('Select a service.'); return }
     if (!editDate || !editTime) { setEditError('Date and time are required.'); return }
+    const selectedAddons = availableAddons.filter(a => editAddonIds.has(a.id))
+    const addonExtraDuration = selectedAddons.reduce((sum, a) => sum + a.duration_minutes, 0)
+    const startsAt = new Date(`${editDate}T${editTime}:00`)
+    const endsAt = addMinutes(startsAt, newService.duration_minutes + addonExtraDuration)
     if (newService.is_group_session) {
-      const startsAtISO = new Date(`${editDate}T${editTime}:00`).toISOString()
-      const cap = await fetchSlotCapacity(editServiceId, startsAtISO, selectedBooking.id)
+      const cap = await fetchSlotCapacity(editServiceId, startsAt.toISOString(), selectedBooking.id)
       if (cap && cap.taken + editSpotsBooked > cap.max) {
         setEditError(`Not enough spots available. Only ${Math.max(cap.max - cap.taken, 0)} spot(s) remaining.`)
+        return
+      }
+    } else if (editStaffId) {
+      const conflict = await checkStaffConflict(
+        editStaffId, startsAt, endsAt, newService.pre_buffer_minutes, newService.post_buffer_minutes, selectedBooking.id,
+      )
+      if (conflict) {
+        setEditError('This staff member is already booked at this time (including their set-down time). Choose a different time or staff member.')
         return
       }
     }
@@ -1364,10 +1430,6 @@ export default function AdminCalendar() {
     const matchedResource = resources.find((r) => r.id === editResourceId) ?? null
     const matchedEquipment = equipmentResources.find((r) => r.id === editEquipmentResourceId) ?? null
     const matchedStaff = editStaffId ? staff.find(s => s.id === editStaffId) ?? null : null
-    const selectedAddons = availableAddons.filter(a => editAddonIds.has(a.id))
-    const addonExtraDuration = selectedAddons.reduce((sum, a) => sum + a.duration_minutes, 0)
-    const startsAt = new Date(`${editDate}T${editTime}:00`)
-    const endsAt = addMinutes(startsAt, newService.duration_minutes + addonExtraDuration)
     const enteredPrice = editPrice.trim() ? Math.round(parseFloat(editPrice) * 100) : newService.price
     const priceOverride = Number.isFinite(enteredPrice) && enteredPrice !== newService.price ? enteredPrice : null
 
@@ -1635,6 +1697,14 @@ export default function AdminCalendar() {
         if (service.is_group_session) {
           const cap = await fetchSlotCapacity(nbServiceId, occStart.toISOString())
           if (cap && cap.taken + nbSpotsBooked > cap.max) {
+            skipped.push(format(occStart, 'EEE d MMM yyyy, HH:mm'))
+            continue
+          }
+        } else if (nbStaffId) {
+          const conflict = await checkStaffConflict(
+            nbStaffId, occStart, occEnd, service.pre_buffer_minutes, service.post_buffer_minutes,
+          )
+          if (conflict) {
             skipped.push(format(occStart, 'EEE d MMM yyyy, HH:mm'))
             continue
           }
@@ -2539,7 +2609,7 @@ export default function AdminCalendar() {
           {nbError && <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{nbError}</p>}
           {nbSkippedDates.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 space-y-1">
-              <p className="text-xs font-semibold text-amber-800">{nbSkippedDates.length} occurrence{nbSkippedDates.length !== 1 ? 's' : ''} skipped — not enough capacity:</p>
+              <p className="text-xs font-semibold text-amber-800">{nbSkippedDates.length} occurrence{nbSkippedDates.length !== 1 ? 's' : ''} skipped — not enough capacity, or the staff member is already booked (including their set-down time) at:</p>
               <ul className="text-xs text-amber-700 list-disc list-inside">
                 {nbSkippedDates.map(d => <li key={d}>{d}</li>)}
               </ul>

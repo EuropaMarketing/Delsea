@@ -13,6 +13,9 @@ export function generateTimeSlots(
   preBuffer = 0,
   postBuffer = 0,
   minNoticeMinutes = 5,
+  // service_id -> that service's own pre/post buffer, so an existing booking's set-down
+  // time (e.g. massage + 10 min) is respected too, not just the new slot's own buffer.
+  serviceBuffers?: Map<string, { pre: number; post: number }>,
 ): string[] {
   const dayOfWeek = getDay(date)
   const rawDayAvail = availability.filter((a) => a.day_of_week === dayOfWeek)
@@ -52,11 +55,13 @@ export function generateTimeSlots(
         continue
       }
 
-      // Check overlap with bookings (against the full buffered window)
+      // Check overlap with bookings — the full buffered window on both sides, so an
+      // existing booking's own set-down time can't be booked into either.
       const overlapsBooking = existingBookings.some((b) => {
         if (b.status === 'cancelled') return false
-        const bStart = parseISO(b.starts_at)
-        const bEnd = parseISO(b.ends_at)
+        const buf = serviceBuffers?.get(b.service_id)
+        const bStart = addMinutes(parseISO(b.starts_at), -(buf?.pre ?? 0))
+        const bEnd = addMinutes(parseISO(b.ends_at), buf?.post ?? 0)
         return isBefore(slotWindowStart, bEnd) && isAfter(slotWindowEnd, bStart)
       })
 

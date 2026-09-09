@@ -523,6 +523,13 @@ export default function AdminContrastCalendar() {
     return Object.fromEntries(cats.map((c, i) => [c, SERVICE_COLORS[i % SERVICE_COLORS.length]]))
   }, [bookings])
 
+  // So an existing booking's own set-down time is respected when checking a
+  // candidate slot for conflicts, not just the new booking's own buffer.
+  const serviceBuffers = useMemo(
+    () => new Map(services.map(s => [s.id, { pre: s.pre_buffer_minutes ?? 0, post: s.post_buffer_minutes ?? 0 }])),
+    [services],
+  )
+
   // Aggregate capacity per group-session slot (service_id + starts_at) for the "X/Y" badge on calendar blocks.
   const slotCapacityMap = useMemo(() => {
     const map = new Map<string, { taken: number; max: number }>()
@@ -1149,7 +1156,7 @@ export default function AdminContrastCalendar() {
     const dayBookings = bookings.filter(b => isSameDay(parseISO(b.starts_at), day) && b.id !== selectedBooking.id) as unknown as Booking[]
     const dayBlocks = blockedTimes.filter(bt => isSameDay(parseISO(bt.starts_at), day) && !bt.is_shift_adjustment)
     const relevantAvailability = staffId ? availability.filter(a => a.staff_id === staffId) : availability
-    const slots = generateTimeSlots(day, relevantAvailability, svc.duration_minutes, dayBookings, dayBlocks, svc.pre_buffer_minutes, svc.post_buffer_minutes)
+    const slots = generateTimeSlots(day, relevantAvailability, svc.duration_minutes, dayBookings, dayBlocks, svc.pre_buffer_minutes, svc.post_buffer_minutes, 5, serviceBuffers)
 
     setAddLinkedChecking(false)
     setAddLinkedChecked(true)

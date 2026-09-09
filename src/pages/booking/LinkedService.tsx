@@ -86,7 +86,9 @@ export default function LinkedService() {
     const candidateLabel = format(candidateStart, 'HH:mm')
 
     const minNoticeMinutes = (config.minNoticeHours ?? DEFAULT_MIN_NOTICE_HOURS) * 60
-    const slots = generateTimeSlots(day, availability, svc.duration_minutes, bookings, blockedTimes, svc.pre_buffer_minutes, svc.post_buffer_minutes, minNoticeMinutes)
+    // So an existing booking's own set-down time is respected, not just this candidate's.
+    const serviceBuffers = new Map(services.map((s) => [s.id, { pre: s.pre_buffer_minutes ?? 0, post: s.post_buffer_minutes ?? 0 }]))
+    const slots = generateTimeSlots(day, availability, svc.duration_minutes, bookings, blockedTimes, svc.pre_buffer_minutes, svc.post_buffer_minutes, minNoticeMinutes, serviceBuffers)
 
     setChecking(false)
     setChecked(true)
