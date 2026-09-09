@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { format, parseISO, isBefore, isPast } from 'date-fns'
-import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle, Pencil, X, Ban, Trash2, ShieldOff, Cake } from 'lucide-react'
+import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle, Pencil, X, Ban, Trash2, ShieldOff, Cake, Plus } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
@@ -99,6 +99,13 @@ export default function AdminClients() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [newClientOpen, setNewClientOpen] = useState(false)
+  const [newClientName, setNewClientName] = useState('')
+  const [newClientEmail, setNewClientEmail] = useState('')
+  const [newClientPhone, setNewClientPhone] = useState('')
+  const [newClientDob, setNewClientDob] = useState('')
+  const [newClientSaving, setNewClientSaving] = useState(false)
+  const [newClientError, setNewClientError] = useState('')
 
   async function loadClients(): Promise<ClientRow[]> {
     const [custRes, bkRes, blockedRes] = await Promise.all([
@@ -259,6 +266,44 @@ export default function AdminClients() {
       })
   }, [selected?.id, detailTab])
 
+  function openNewClient() {
+    setNewClientName('')
+    setNewClientEmail('')
+    setNewClientPhone('')
+    setNewClientDob('')
+    setNewClientError('')
+    setNewClientOpen(true)
+  }
+
+  async function handleCreateClient() {
+    if (!newClientName.trim() || !newClientEmail.trim()) {
+      setNewClientError('Name and email are required.')
+      return
+    }
+    setNewClientSaving(true)
+    setNewClientError('')
+    const { data, error } = await supabase
+      .from('customers')
+      .insert({
+        business_id: BUSINESS_ID,
+        name: newClientName.trim(),
+        email: newClientEmail.trim().toLowerCase(),
+        phone: newClientPhone.trim() || null,
+        date_of_birth: newClientDob || null,
+      })
+      .select('id')
+      .single()
+    if (error) {
+      setNewClientError(error.code === '23505' ? 'A client with that email already exists.' : error.message)
+      setNewClientSaving(false)
+      return
+    }
+    const rows = await loadClients()
+    setSelected(rows.find(r => r.id === data.id) ?? null)
+    setNewClientOpen(false)
+    setNewClientSaving(false)
+  }
+
   function openEditClient() {
     if (!selected) return
     setEditName(selected.name)
@@ -362,8 +407,13 @@ export default function AdminClients() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-gray-900">Clients</h1>
-        <span className="text-sm text-gray-400">{clients.length} total</span>
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-bold text-gray-900">Clients</h1>
+          <span className="text-sm text-gray-400">{clients.length} total</span>
+        </div>
+        <Button size="sm" onClick={openNewClient}>
+          <Plus className="h-4 w-4" /> New Client
+        </Button>
       </div>
 
       <div className="relative mb-4">
@@ -709,6 +759,21 @@ export default function AdminClients() {
           <div className="flex gap-2 justify-end pt-1">
             <Button variant="secondary" size="sm" onClick={() => setBlockModalOpen(false)}>Cancel</Button>
             <Button size="sm" variant="danger" loading={blocking} onClick={handleBlockClient}>Block Client</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* New client modal */}
+      <Modal open={newClientOpen} onClose={() => setNewClientOpen(false)} title="New Client" size="sm">
+        <div className="space-y-3">
+          <Input label="Name" value={newClientName} onChange={(e) => setNewClientName(e.target.value)} required />
+          <Input label="Email" type="email" value={newClientEmail} onChange={(e) => setNewClientEmail(e.target.value)} required />
+          <Input label="Phone" type="tel" value={newClientPhone} onChange={(e) => setNewClientPhone(e.target.value)} placeholder="+44 7700 900000" />
+          <Input label="Date of birth" type="date" value={newClientDob} onChange={(e) => setNewClientDob(e.target.value)} />
+          {newClientError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{newClientError}</p>}
+          <div className="flex gap-2 justify-end pt-1">
+            <Button variant="secondary" size="sm" onClick={() => setNewClientOpen(false)}>Cancel</Button>
+            <Button size="sm" loading={newClientSaving} onClick={handleCreateClient}>Create Client</Button>
           </div>
         </div>
       </Modal>
