@@ -299,6 +299,7 @@ export default function AdminContrastCalendar() {
   const [editPriceTouched, setEditPriceTouched] = useState(false)
   const [editSpotsBooked, setEditSpotsBooked] = useState(1)
   const [editSlotCapacity, setEditSlotCapacity] = useState<{ taken: number; max: number } | null>(null)
+  const [editScope, setEditScope] = useState<'one' | 'series'>('one')
   const [cancelScope, setCancelScope] = useState<'one' | 'series'>('one')
   // Add-ons in edit mode
   const [availableAddons, setAvailableAddons] = useState<AvailableAddon[]>([])
@@ -1012,6 +1013,7 @@ export default function AdminContrastCalendar() {
     setEditPriceTouched(false)
     setEditSpotsBooked(selectedBooking.spots_booked ?? 1)
     setEditSlotCapacity(null)
+    setEditScope('one')
 
     const currentAddons = await fetchBookingAddons(selectedBooking.id)
     const currentIds = new Set(currentAddons.map(a => a.addon_id))
@@ -1294,74 +1296,109 @@ export default function AdminContrastCalendar() {
     const enteredPrice = editPrice.trim() ? Math.round(parseFloat(editPrice) * 100) : newService.price
     const priceOverride = Number.isFinite(enteredPrice) && enteredPrice !== newService.price ? enteredPrice : null
 
+    // Fields synced to every future occurrence when the admin chooses "this and all
+    // future" — notes and add-ons stay per-occurrence since they're usually one-off.
+    const seriesSharedFields = {
+      customer_id: editCustomerId,
+      service_id: editServiceId,
+      staff_id: editStaffId,
+      price_override: priceOverride,
+      resource_id: editResourceId,
+      equipment_resource_id: editEquipmentResourceId,
+      spots_booked: newService.is_group_session ? editSpotsBooked : 1,
+    }
+
     const { error } = await supabase
       .from('bookings')
       .update({
-        customer_id: editCustomerId,
-        service_id: editServiceId,
-        staff_id: editStaffId,
+        ...seriesSharedFields,
         starts_at: startsAt.toISOString(),
         ends_at: endsAt.toISOString(),
-        price_override: priceOverride,
         notes: editNotes.trim() || null,
-        resource_id: editResourceId,
-        equipment_resource_id: editEquipmentResourceId,
-        spots_booked: newService.is_group_session ? editSpotsBooked : 1,
       })
       .eq('id', selectedBooking.id)
     if (error) {
       setEditError(error.message)
-    } else {
-      const resourceObj = matchedResource ? { name: matchedResource.name } : null
-      const equipmentObj = matchedEquipment ? { name: matchedEquipment.name } : null
-      const customerObj = {
-        name: editCustomerName,
-        email: editCustomerEmail,
-        phone: editCustomerPhone || null,
-        sumup_card_token: editCustomerId === selectedBooking.customer_id ? selectedBooking.customer?.sumup_card_token ?? null : null,
-        date_of_birth: editCustomerId === selectedBooking.customer_id ? selectedBooking.customer?.date_of_birth ?? null : null,
-      }
-      const serviceObj = { name: newService.name, category: newService.category, price: newService.price }
-      const staffObj = matchedStaff ? { name: matchedStaff.name } : null
-      const patch = {
-        customer_id: editCustomerId,
-        customer: customerObj,
-        service_id: editServiceId,
-        service: serviceObj,
-        staff_id: editStaffId,
-        staff: staffObj,
-        starts_at: startsAt.toISOString(),
-        ends_at: endsAt.toISOString(),
-        price_override: priceOverride,
-        notes: editNotes.trim() || null,
-        resource_id: editResourceId,
-        resource: resourceObj,
-        equipment_resource_id: editEquipmentResourceId,
-        equipment_resource: equipmentObj,
-        spots_booked: newService.is_group_session ? editSpotsBooked : 1,
-      }
-      setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, ...patch } : b))
-      setSelectedBooking(prev => prev ? { ...prev, ...patch } : null)
-
-      const addonsToAdd = [...editAddonIds].filter(id => !originalAddonIds.has(id))
-      const addonsToRemove = [...originalAddonIds].filter(id => !editAddonIds.has(id))
-      if (addonsToAdd.length) {
-        await supabase.from('booking_addons').insert(
-          addonsToAdd.map(addonId => ({
-            booking_id: selectedBooking.id,
-            addon_id: addonId,
-            price: availableAddons.find(a => a.id === addonId)?.price ?? 0,
-          })),
-        )
-      }
-      if (addonsToRemove.length) {
-        await supabase.from('booking_addons').delete().eq('booking_id', selectedBooking.id).in('addon_id', addonsToRemove)
-      }
-      fetchBookingAddons(selectedBooking.id).then(setDetailAddons)
-
-      await refreshActivityLog(selectedBooking.id)
-      setEditMode(false)
+      setEditSaving(false)
+      return
     }
+
+    // Recurring series — sync the shared fields + new time-of-day to every future
+    // occurrence, but each keeps its own calendar date; only this occurrence can move day.
+    let seriesUpdates: { id: string; starts_at: string; ends_at: string }[] = []
+    if (editScope === 'series' && selectedBooking.recurrence_id) {
+      const { data: futureRows } = await supabase
+        .from('bookings')
+        .select('id, starts_at')
+        .eq('recurrence_id', selectedBooking.recurrence_id)
+        .neq('id', selectedBooking.id)
+        .gte('starts_at', selectedBooking.starts_at)
+        .neq('status', 'cancelled')
+      if (futureRows?.length) {
+        seriesUpdates = futureRows.map(row => {
+          const occDate = format(parseISO(row.starts_at), 'yyyy-MM-dd')
+          const occStart = new Date(`${occDate}T${editTime}:00`)
+          const occEnd = addMinutes(occStart, newService.duration_minutes + addonExtraDuration)
+          return { id: row.id, starts_at: occStart.toISOString(), ends_at: occEnd.toISOString() }
+        })
+        await Promise.all(seriesUpdates.map(u =>
+          supabase.from('bookings').update({ ...seriesSharedFields, starts_at: u.starts_at, ends_at: u.ends_at }).eq('id', u.id)
+        ))
+      }
+    }
+
+    const resourceObj = matchedResource ? { name: matchedResource.name } : null
+    const equipmentObj = matchedEquipment ? { name: matchedEquipment.name } : null
+    const customerObj = {
+      name: editCustomerName,
+      email: editCustomerEmail,
+      phone: editCustomerPhone || null,
+      sumup_card_token: editCustomerId === selectedBooking.customer_id ? selectedBooking.customer?.sumup_card_token ?? null : null,
+      date_of_birth: editCustomerId === selectedBooking.customer_id ? selectedBooking.customer?.date_of_birth ?? null : null,
+    }
+    const serviceObj = { name: newService.name, category: newService.category, price: newService.price }
+    const staffObj = matchedStaff ? { name: matchedStaff.name } : null
+    const sharedPatch = {
+      customer_id: editCustomerId,
+      customer: customerObj,
+      service_id: editServiceId,
+      service: serviceObj,
+      staff_id: editStaffId,
+      staff: staffObj,
+      price_override: priceOverride,
+      resource_id: editResourceId,
+      resource: resourceObj,
+      equipment_resource_id: editEquipmentResourceId,
+      equipment_resource: equipmentObj,
+      spots_booked: newService.is_group_session ? editSpotsBooked : 1,
+    }
+    setBookings(prev => prev.map(b => {
+      if (b.id === selectedBooking.id) {
+        return { ...b, ...sharedPatch, starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(), notes: editNotes.trim() || null }
+      }
+      const su = seriesUpdates.find(u => u.id === b.id)
+      return su ? { ...b, ...sharedPatch, starts_at: su.starts_at, ends_at: su.ends_at } : b
+    }))
+    setSelectedBooking(prev => prev ? { ...prev, ...sharedPatch, starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(), notes: editNotes.trim() || null } : null)
+
+    const addonsToAdd = [...editAddonIds].filter(id => !originalAddonIds.has(id))
+    const addonsToRemove = [...originalAddonIds].filter(id => !editAddonIds.has(id))
+    if (addonsToAdd.length) {
+      await supabase.from('booking_addons').insert(
+        addonsToAdd.map(addonId => ({
+          booking_id: selectedBooking.id,
+          addon_id: addonId,
+          price: availableAddons.find(a => a.id === addonId)?.price ?? 0,
+        })),
+      )
+    }
+    if (addonsToRemove.length) {
+      await supabase.from('booking_addons').delete().eq('booking_id', selectedBooking.id).in('addon_id', addonsToRemove)
+    }
+    fetchBookingAddons(selectedBooking.id).then(setDetailAddons)
+
+    await refreshActivityLog(selectedBooking.id)
+    setEditMode(false)
     setEditSaving(false)
   }
 
@@ -2957,6 +2994,27 @@ export default function AdminContrastCalendar() {
               )}
               {editVoucherError && <p className="text-xs text-red-600">{editVoucherError}</p>}
             </div>
+
+            {selectedBooking.recurrence_id && (
+              <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">This is part of a recurring series</p>
+                <div className="flex flex-col gap-1.5">
+                  <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                    <input type="radio" name="editScope" checked={editScope === 'one'} onChange={() => setEditScope('one')} className="accent-(--color-primary)" />
+                    Just this occurrence
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                    <input type="radio" name="editScope" checked={editScope === 'series'} onChange={() => setEditScope('series')} className="accent-(--color-primary)" />
+                    This and all future occurrences
+                  </label>
+                </div>
+                {editScope === 'series' && (
+                  <p className="text-xs text-gray-400">
+                    Service, staff, price, resource and the time of day will update on every future occurrence — each keeps its own date. Notes and add-on changes only apply here.
+                  </p>
+                )}
+              </div>
+            )}
 
             {editError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{editError}</p>}
             <div className="flex gap-2 pt-1">
