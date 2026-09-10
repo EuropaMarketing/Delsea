@@ -1625,15 +1625,23 @@ export default function AdminCalendar() {
     setNbSaving(true)
     setNbError('')
     try {
-      const rows = occurrenceDates.map(d => ({
-        business_id: BUSINESS_ID,
-        service_id: nbServiceId,
-        event_date: format(d, 'yyyy-MM-dd'),
-        start_time: nbTime,
-        staff_id: nbStaffId,
-        max_capacity_override: nbSpotsBooked,
-        resource_id: null,
-      }))
+      const rows: { business_id: string; service_id: string; event_date: string; start_time: string; staff_id: string | null; max_capacity_override: number; resource_id: string | null; recurrence_id?: string }[] =
+        occurrenceDates.map(d => ({
+          business_id: BUSINESS_ID,
+          service_id: nbServiceId,
+          event_date: format(d, 'yyyy-MM-dd'),
+          start_time: nbTime,
+          staff_id: nbStaffId,
+          max_capacity_override: nbSpotsBooked,
+          resource_id: null,
+        }))
+      // Real recurrence link between sibling sessions created together — lets any
+      // future "apply to all" feature (e.g. on the Contrast Calendar) find every
+      // occurrence exactly rather than guessing by day-of-week.
+      if (rows.length > 1) {
+        const recurrenceId = crypto.randomUUID()
+        rows.forEach(row => { row.recurrence_id = recurrenceId })
+      }
       const { data, error } = await supabase
         .from('service_sessions')
         .insert(rows)

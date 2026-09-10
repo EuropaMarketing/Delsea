@@ -142,6 +142,7 @@ type SessionRow = {
   staff_id: string | null
   resource_id: string | null
   max_capacity_override: number | null
+  recurrence_id: string | null
   service: { name: string; category: string; max_capacity: number | null; duration_minutes: number } | null
 }
 
@@ -440,7 +441,7 @@ export default function AdminContrastCalendar() {
           supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'equipment').order('name'),
         supabase
           .from('service_sessions')
-          .select('id, service_id, event_date, start_time, staff_id, resource_id, max_capacity_override, service:services(name,category,max_capacity,duration_minutes)')
+          .select('id, service_id, event_date, start_time, staff_id, resource_id, max_capacity_override, recurrence_id, service:services(name,category,max_capacity,duration_minutes)')
           .eq('business_id', BUSINESS_ID)
           .in('service_id', contrastServiceIds)
           .eq('is_active', true)
@@ -731,15 +732,30 @@ export default function AdminContrastCalendar() {
   // can optionally apply to the whole recurring pattern rather than just this slot.
   async function loadMatchingSessions(session: SessionRow) {
     setMatchingSessionsLoading(true)
-    const { data } = await supabase
-      .from('service_sessions')
-      .select('id, event_date')
-      .eq('service_id', session.service_id)
-      .eq('start_time', session.start_time)
-      .eq('is_active', true)
-      .gte('event_date', format(new Date(), 'yyyy-MM-dd'))
-    const targetDow = getDay(parseISO(session.event_date))
-    setMatchingSessions((data ?? []).filter(r => getDay(parseISO(r.event_date)) === targetDow))
+    if (session.recurrence_id) {
+      // Real link (sessions created together via the repeat option) — exact match,
+      // works for daily/weekly/monthly repeats alike.
+      const { data } = await supabase
+        .from('service_sessions')
+        .select('id, event_date')
+        .eq('recurrence_id', session.recurrence_id)
+        .eq('is_active', true)
+        .gte('event_date', format(new Date(), 'yyyy-MM-dd'))
+      setMatchingSessions(data ?? [])
+    } else {
+      // Legacy sessions with no recurrence_id (created before this existed, or
+      // added one at a time) — fall back to guessing by day-of-week, which only
+      // holds up for a weekly pattern.
+      const { data } = await supabase
+        .from('service_sessions')
+        .select('id, event_date')
+        .eq('service_id', session.service_id)
+        .eq('start_time', session.start_time)
+        .eq('is_active', true)
+        .gte('event_date', format(new Date(), 'yyyy-MM-dd'))
+      const targetDow = getDay(parseISO(session.event_date))
+      setMatchingSessions((data ?? []).filter(r => getDay(parseISO(r.event_date)) === targetDow))
+    }
     setMatchingSessionsLoading(false)
   }
 
@@ -1599,22 +1615,30 @@ export default function AdminContrastCalendar() {
     setNbSaving(true)
     setNbError('')
     try {
-      const rows = occurrenceDates.flatMap(d => dailyTimes.map(t => ({
-        business_id: BUSINESS_ID,
-        service_id: nbServiceId,
-        event_date: format(d, 'yyyy-MM-dd'),
-        start_time: t,
-        staff_id: nbStaffId,
-        max_capacity_override: nbSpotsBooked,
-        resource_id: null,
-      })))
+      const rows: { business_id: string; service_id: string; event_date: string; start_time: string; staff_id: string | null; max_capacity_override: number; resource_id: string | null; recurrence_id?: string }[] =
+        occurrenceDates.flatMap(d => dailyTimes.map(t => ({
+          business_id: BUSINESS_ID,
+          service_id: nbServiceId,
+          event_date: format(d, 'yyyy-MM-dd'),
+          start_time: t,
+          staff_id: nbStaffId,
+          max_capacity_override: nbSpotsBooked,
+          resource_id: null,
+        })))
       if (rows.length > MAX_TOTAL_SESSION_ROWS) {
         throw new Error(`That would create ${rows.length} sessions — please narrow the date range or time window (max ${MAX_TOTAL_SESSION_ROWS}).`)
+      }
+      // A real recurrence link so "apply to all future sessions" (edit/cancel) can
+      // find every sibling occurrence exactly, instead of guessing by day-of-week —
+      // a guess that silently breaks for anything other than a weekly repeat.
+      if (rows.length > 1) {
+        const recurrenceId = crypto.randomUUID()
+        rows.forEach(row => { row.recurrence_id = recurrenceId })
       }
       const { data, error } = await supabase
         .from('service_sessions')
         .insert(rows)
-        .select('id, service_id, event_date, start_time, staff_id, max_capacity_override, service:services(name,category,max_capacity,duration_minutes)')
+        .select('id, service_id, event_date, start_time, staff_id, resource_id, max_capacity_override, recurrence_id, service:services(name,category,max_capacity,duration_minutes)')
       if (error) throw error
       const rangeStart = viewMode === 'month' ? startOfMonth(selectedDay) : startOfWeek(selectedDay, { weekStartsOn: 1 })
       const rangeEnd = viewMode === 'month' ? endOfMonth(selectedDay) : endOfWeek(selectedDay, { weekStartsOn: 1 })
