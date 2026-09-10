@@ -165,8 +165,9 @@ export default function AdminCalendar() {
   const [availability, setAvailability] = useState<Availability[]>([])
   const authStaffId = useAuthStore(s => s.staffId)
 
-  // Staff view filter + roster panel
-  const [staffFilter, setStaffFilter] = useState<'all' | 'mine' | string>('all')
+  // Staff view filter + roster panel. "scheduled" is the default — only staff on
+  // shift the selected day get a column, so columns change as you flick between days.
+  const [staffFilter, setStaffFilter] = useState<'all' | 'scheduled' | 'mine' | string>('scheduled')
   const [rosterOpen, setRosterOpen] = useState(false)
 
   // Shift adjustment popover
@@ -1791,8 +1792,20 @@ export default function AdminCalendar() {
       : null
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(selectedDay, { weekStartsOn: 1 }), i))
 
-  const resolvedStaffFilterId = staffFilter === 'all' ? null : staffFilter === 'mine' ? authStaffId : staffFilter
-  const visibleStaff = resolvedStaffFilterId ? staff.filter(s => s.id === resolvedStaffFilterId) : staff
+  const resolvedStaffFilterId = staffFilter === 'all' || staffFilter === 'scheduled' ? null : staffFilter === 'mine' ? authStaffId : staffFilter
+  // Staff with an existing booking or session today keep their column even if their
+  // shift was removed/they're on holiday — the "scheduled" filter hides empty columns,
+  // it never hides an appointment that's already on the books.
+  const dayStr = format(selectedDay, 'yyyy-MM-dd')
+  const staffIdsWithActivityToday = new Set([
+    ...bookings.filter(b => isSameDay(parseISO(b.starts_at), selectedDay)).map(b => b.staff_id),
+    ...sessions.filter(s => s.event_date === dayStr).map(s => s.staff_id),
+  ].filter((id): id is string => !!id))
+  const visibleStaff = resolvedStaffFilterId
+    ? staff.filter(s => s.id === resolvedStaffFilterId)
+    : staffFilter === 'scheduled'
+      ? staff.filter(s => getStaffDayStatus(s, selectedDay).kind === 'scheduled' || staffIdsWithActivityToday.has(s.id))
+      : staff
 
   return (
     <div className={cn(drag && 'select-none')}>
@@ -1826,6 +1839,7 @@ export default function AdminCalendar() {
             onChange={e => setStaffFilter(e.target.value)}
             className="h-9 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
           >
+            <option value="scheduled">Scheduled</option>
             <option value="all">All staff</option>
             {authStaffId && staff.some(s => s.id === authStaffId) && <option value="mine">Just me</option>}
             {staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
