@@ -140,6 +140,7 @@ type SessionRow = {
   event_date: string
   start_time: string
   staff_id: string | null
+  resource_id: string | null
   max_capacity_override: number | null
   service: { name: string; category: string; max_capacity: number | null; duration_minutes: number } | null
 }
@@ -198,6 +199,17 @@ export default function AdminContrastCalendar() {
   const [sessionCancelScope, setSessionCancelScope] = useState<'one' | 'all'>('one')
   const [matchingSessions, setMatchingSessions] = useState<{ id: string; event_date: string }[]>([])
   const [matchingSessionsLoading, setMatchingSessionsLoading] = useState(false)
+  // Editing the session slot itself (date/time/staff/room/capacity) — separate from
+  // editing an individual attendee's booking, which reuses the regular booking Edit.
+  const [sessionEditOpen, setSessionEditOpen] = useState(false)
+  const [sessionEditSaving, setSessionEditSaving] = useState(false)
+  const [sessionEditError, setSessionEditError] = useState('')
+  const [sessionEditScope, setSessionEditScope] = useState<'one' | 'all'>('one')
+  const [sessEditDate, setSessEditDate] = useState('')
+  const [sessEditTime, setSessEditTime] = useState('')
+  const [sessEditStaffId, setSessEditStaffId] = useState('')
+  const [sessEditResourceId, setSessEditResourceId] = useState('')
+  const [sessEditCapacity, setSessEditCapacity] = useState('')
 
   // New booking modal
   const [nbModalOpen, setNbModalOpen] = useState(false)
@@ -428,7 +440,7 @@ export default function AdminContrastCalendar() {
           supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).eq('resource_type', 'equipment').order('name'),
         supabase
           .from('service_sessions')
-          .select('id, service_id, event_date, start_time, staff_id, max_capacity_override, service:services(name,category,max_capacity,duration_minutes)')
+          .select('id, service_id, event_date, start_time, staff_id, resource_id, max_capacity_override, service:services(name,category,max_capacity,duration_minutes)')
           .eq('business_id', BUSINESS_ID)
           .in('service_id', contrastServiceIds)
           .eq('is_active', true)
@@ -715,24 +727,97 @@ export default function AdminContrastCalendar() {
   }
 
   // Looks up every other future session for this service that falls at the same
-  // time of day and day of week (e.g. every Tuesday 16:00), so cancelling can
-  // optionally apply to the whole recurring pattern rather than just this slot.
+  // time of day and day of week (e.g. every Tuesday 16:00), so cancelling or editing
+  // can optionally apply to the whole recurring pattern rather than just this slot.
+  async function loadMatchingSessions(session: SessionRow) {
+    setMatchingSessionsLoading(true)
+    const { data } = await supabase
+      .from('service_sessions')
+      .select('id, event_date')
+      .eq('service_id', session.service_id)
+      .eq('start_time', session.start_time)
+      .eq('is_active', true)
+      .gte('event_date', format(new Date(), 'yyyy-MM-dd'))
+    const targetDow = getDay(parseISO(session.event_date))
+    setMatchingSessions((data ?? []).filter(r => getDay(parseISO(r.event_date)) === targetDow))
+    setMatchingSessionsLoading(false)
+  }
+
   async function openSessionCancel() {
     if (!selectedSession) return
     setSessionCancelOpen(true)
     setCancelReason('')
     setSessionCancelScope('one')
-    setMatchingSessionsLoading(true)
-    const { data } = await supabase
-      .from('service_sessions')
-      .select('id, event_date')
-      .eq('service_id', selectedSession.service_id)
-      .eq('start_time', selectedSession.start_time)
-      .eq('is_active', true)
-      .gte('event_date', format(new Date(), 'yyyy-MM-dd'))
-    const targetDow = getDay(parseISO(selectedSession.event_date))
-    setMatchingSessions((data ?? []).filter(r => getDay(parseISO(r.event_date)) === targetDow))
-    setMatchingSessionsLoading(false)
+    loadMatchingSessions(selectedSession)
+  }
+
+  function openSessionEdit() {
+    if (!selectedSession) return
+    setSessionEditOpen(true)
+    setSessionEditError('')
+    setSessionEditScope('one')
+    setSessEditDate(selectedSession.event_date)
+    setSessEditTime(selectedSession.start_time.slice(0, 5))
+    setSessEditStaffId(selectedSession.staff_id ?? '')
+    setSessEditResourceId(selectedSession.resource_id ?? '')
+    setSessEditCapacity(selectedSession.max_capacity_override != null ? String(selectedSession.max_capacity_override) : '')
+    loadMatchingSessions(selectedSession)
+  }
+
+  async function handleSaveSessionEdit() {
+    if (!selectedSession || !sessEditDate || !sessEditTime) { setSessionEditError('Date and time are required.'); return }
+    const cap = sessionCapacityMap.get(selectedSession.id)
+    const newCapacity = sessEditCapacity.trim() ? parseInt(sessEditCapacity) : null
+    if (newCapacity != null && cap && newCapacity < cap.taken) {
+      setSessionEditError(`Capacity can't be less than the ${cap.taken} spot(s) already booked.`)
+      return
+    }
+    setSessionEditSaving(true)
+    setSessionEditError('')
+
+    const applyToAll = sessionEditScope === 'all' && matchingSessions.length > 1
+    const targets = applyToAll ? matchingSessions : [{ id: selectedSession.id, event_date: selectedSession.event_date }]
+
+    for (const target of targets) {
+      const isAnchor = target.id === selectedSession.id
+      // Only the occurrence being directly edited can move to a different date —
+      // the rest of the series keeps its own date and just picks up the new time.
+      const targetDate = isAnchor ? sessEditDate : target.event_date
+      const oldStartsAt = isAnchor ? sessionStartsAt(selectedSession) : new Date(`${target.event_date}T${selectedSession.start_time}`).toISOString()
+      const newStartsAt = new Date(`${targetDate}T${sessEditTime}:00`)
+
+      await supabase
+        .from('service_sessions')
+        .update({
+          event_date: targetDate,
+          start_time: `${sessEditTime}:00`,
+          staff_id: sessEditStaffId || null,
+          resource_id: sessEditResourceId || null,
+          max_capacity_override: newCapacity,
+        })
+        .eq('id', target.id)
+
+      const { data: attendeeRows } = await supabase
+        .from('bookings')
+        .select('id, starts_at, ends_at')
+        .eq('service_id', selectedSession.service_id)
+        .eq('starts_at', oldStartsAt)
+        .neq('status', 'cancelled')
+      if (attendeeRows?.length) {
+        await Promise.all(attendeeRows.map(b => {
+          const durationMs = parseISO(b.ends_at).getTime() - parseISO(b.starts_at).getTime()
+          const newEndsAt = new Date(newStartsAt.getTime() + durationMs)
+          return supabase.from('bookings').update({ starts_at: newStartsAt.toISOString(), ends_at: newEndsAt.toISOString() }).eq('id', b.id)
+        }))
+      }
+    }
+
+    setSessionEditOpen(false)
+    setSessionEditSaving(false)
+    setSelectedSession(null)
+    // Simplest reliable refresh — the edit can move sessions/bookings across days
+    // (out of the currently-loaded range) and shift multiple attendee bookings at once.
+    setSelectedDay(d => new Date(d))
   }
 
   async function handleCancelSession(reason: string) {
@@ -3049,7 +3134,73 @@ export default function AdminContrastCalendar() {
         title={selectedSession ? `${selectedSession.service?.name} — ${format(parseISO(selectedSession.event_date), 'EEE d MMM')}, ${selectedSession.start_time.slice(0, 5)}` : ''}
         size="sm"
       >
-        {selectedSession && (
+        {selectedSession && sessionEditOpen ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Date" type="date" value={sessEditDate} onChange={e => setSessEditDate(e.target.value)} required />
+              <Input label="Start time" type="time" value={sessEditTime} onChange={e => setSessEditTime(e.target.value)} required />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1 block">Instructor</label>
+              <select value={sessEditStaffId} onChange={e => setSessEditStaffId(e.target.value)} className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)">
+                <option value="">No instructor assigned</option>
+                {staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            {resources.length > 0 && (
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Room</label>
+                <select value={sessEditResourceId} onChange={e => setSessEditResourceId(e.target.value)} className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)">
+                  <option value="">No room assigned</option>
+                  {resources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+              </div>
+            )}
+            <Input
+              label="Capacity override (optional)"
+              type="number"
+              min={1}
+              value={sessEditCapacity}
+              onChange={e => setSessEditCapacity(e.target.value)}
+              placeholder={`Default: ${selectedSession.service?.max_capacity ?? 8}`}
+            />
+
+            {matchingSessionsLoading ? (
+              <p className="text-xs text-gray-400">Checking for other recurring sessions at this time…</p>
+            ) : matchingSessions.length > 1 && (
+              <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">This is part of a recurring pattern</p>
+                <div className="space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setSessionEditScope('one')}
+                    className={cn('w-full text-left text-xs px-2.5 py-2 rounded-lg border transition-colors', sessionEditScope === 'one' ? 'border-(--color-primary) bg-(--color-primary)/5 font-medium text-gray-800' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50')}
+                  >
+                    Just this one — {format(parseISO(selectedSession.event_date), 'EEE d MMM')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSessionEditScope('all')}
+                    className={cn('w-full text-left text-xs px-2.5 py-2 rounded-lg border transition-colors', sessionEditScope === 'all' ? 'border-(--color-primary) bg-(--color-primary)/5 font-medium text-gray-800' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50')}
+                  >
+                    All {matchingSessions.length} {format(parseISO(selectedSession.event_date), 'EEEE')} {selectedSession.start_time.slice(0, 5)} sessions (from today onward)
+                  </button>
+                </div>
+                {sessionEditScope === 'all' && (
+                  <p className="text-xs text-gray-400">
+                    Instructor, room and the time of day will update on every future occurrence — each keeps its own date. Any attendees already booked move with their session.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {sessionEditError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{sessionEditError}</p>}
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setSessionEditOpen(false)} className="shrink-0">Back</Button>
+              <Button fullWidth size="sm" loading={sessionEditSaving} onClick={handleSaveSessionEdit}>Save Changes</Button>
+            </div>
+          </div>
+        ) : selectedSession && (
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
               {sessionAttendeesLoading ? '…' : `${sessionCapacityMap.get(selectedSession.id)?.taken ?? 0} of ${sessionCapacityMap.get(selectedSession.id)?.max ?? 8} spots booked`}
@@ -3079,22 +3230,28 @@ export default function AdminContrastCalendar() {
               )}
             </div>
 
-            {(() => {
-              const cap = sessionCapacityMap.get(selectedSession.id)
-              const full = !!cap && cap.taken >= cap.max
-              return (
-                <Button
-                  fullWidth
-                  variant="secondary"
-                  size="sm"
-                  disabled={full}
-                  onClick={() => openAddAttendee(selectedSession)}
-                >
-                  <UserPlus className="h-4 w-4" />
-                  {full ? 'Session Full' : 'Add Attendee'}
-                </Button>
-              )
-            })()}
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={openSessionEdit} className="shrink-0">
+                <Pencil className="h-3.5 w-3.5" />
+                Edit
+              </Button>
+              {(() => {
+                const cap = sessionCapacityMap.get(selectedSession.id)
+                const full = !!cap && cap.taken >= cap.max
+                return (
+                  <Button
+                    fullWidth
+                    variant="secondary"
+                    size="sm"
+                    disabled={full}
+                    onClick={() => openAddAttendee(selectedSession)}
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    {full ? 'Session Full' : 'Add Attendee'}
+                  </Button>
+                )
+              })()}
+            </div>
 
             {sessionCancelOpen ? (
               <div className="border border-red-200 bg-red-50 rounded-lg p-3 space-y-2">
