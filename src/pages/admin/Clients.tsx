@@ -1,21 +1,24 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { format, parseISO, isBefore, isPast } from 'date-fns'
-import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle, Pencil, X, Ban, Trash2, ShieldOff, Cake, Plus } from 'lucide-react'
+import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle, Pencil, X, Ban, Trash2, ShieldOff, Cake, Plus, StickyNote, Save } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Input } from '@/components/ui/Input'
+import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import type { Customer, MembershipExpiryType } from '@/types'
+import type { FormField, Section, ResponseMap } from '@/components/FormFiller'
 
 type ClientFormResponse = {
   id: string
+  form_id: string
   completed_at: string
   expires_at: string
+  responses: ResponseMap
   form: { title: string } | null
 }
 
@@ -51,6 +54,7 @@ type Booking = {
   starts_at: string
   ends_at: string
   status: string
+  notes: string | null
   service: { name: string; price: number } | null
   staff: { name: string } | null
   price_override: number | null
@@ -106,6 +110,15 @@ export default function AdminClients() {
   const [newClientDob, setNewClientDob] = useState('')
   const [newClientSaving, setNewClientSaving] = useState(false)
   const [newClientError, setNewClientError] = useState('')
+  // Staff-only notes — never shown to the customer
+  const [staffNotesDraft, setStaffNotesDraft] = useState('')
+  const [staffNotesSaving, setStaffNotesSaving] = useState(false)
+  // Read-only appointment / completed-form viewers
+  const [viewingBooking, setViewingBooking] = useState<Booking | null>(null)
+  const [viewingFormResponse, setViewingFormResponse] = useState<ClientFormResponse | null>(null)
+  const [viewFormSections, setViewFormSections] = useState<Section[]>([])
+  const [viewFormFields, setViewFormFields] = useState<FormField[]>([])
+  const [viewFormLoading, setViewFormLoading] = useState(false)
 
   async function loadClients(): Promise<ClientRow[]> {
     const [custRes, bkRes, blockedRes] = await Promise.all([
@@ -116,7 +129,7 @@ export default function AdminClients() {
         .order('name'),
       supabase
         .from('bookings')
-        .select('id, customer_id, starts_at, ends_at, status, price_override, service:services(name, price), staff:staff(name)')
+        .select('id, customer_id, starts_at, ends_at, status, notes, price_override, service:services(name, price), staff:staff(name)')
         .eq('business_id', BUSINESS_ID)
         .order('starts_at', { ascending: false }),
       supabase
@@ -183,8 +196,10 @@ export default function AdminClients() {
       setDeleteConfirmText('')
       setDeleteError('')
       setMembershipActionTarget(null)
+      setStaffNotesDraft('')
       return
     }
+    setStaffNotesDraft(selected.internal_notes ?? '')
     setMembershipsLoading(true)
     loadMemberships(selected.id).then(() => setMembershipsLoading(false))
   }, [selected?.id])
@@ -257,7 +272,7 @@ export default function AdminClients() {
     setFormsLoading(true)
     supabase
       .from('form_responses')
-      .select('id, completed_at, expires_at, form:service_forms(title)')
+      .select('id, form_id, completed_at, expires_at, responses, form:service_forms(title)')
       .eq('customer_id', selected.id)
       .order('completed_at', { ascending: false })
       .then(({ data }) => {
@@ -329,6 +344,30 @@ export default function AdminClients() {
       setEditMode(false)
     }
     setEditSaving(false)
+  }
+
+  async function handleSaveStaffNotes() {
+    if (!selected) return
+    setStaffNotesSaving(true)
+    const value = staffNotesDraft.trim() || null
+    const { error } = await supabase.from('customers').update({ internal_notes: value }).eq('id', selected.id)
+    if (!error) {
+      setClients(prev => prev.map(c => c.id === selected.id ? { ...c, internal_notes: value } : c))
+      setSelected(prev => prev ? { ...prev, internal_notes: value } : null)
+    }
+    setStaffNotesSaving(false)
+  }
+
+  async function openFormResponseView(fr: ClientFormResponse) {
+    setViewingFormResponse(fr)
+    setViewFormLoading(true)
+    const [secRes, fieldRes] = await Promise.all([
+      supabase.from('form_sections').select('*').eq('form_id', fr.form_id).order('position'),
+      supabase.from('form_fields').select('*').eq('form_id', fr.form_id).order('position'),
+    ])
+    setViewFormSections((secRes.data ?? []) as Section[])
+    setViewFormFields((fieldRes.data ?? []) as FormField[])
+    setViewFormLoading(false)
   }
 
   async function handleBlockClient() {
@@ -566,7 +605,12 @@ export default function AdminClients() {
                   {clientForms.map(fr => {
                     const valid = !isPast(parseISO(fr.expires_at))
                     return (
-                      <div key={fr.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-gray-200 bg-white">
+                      <button
+                        key={fr.id}
+                        type="button"
+                        onClick={() => openFormResponseView(fr)}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50 text-left transition-colors"
+                      >
                         {valid
                           ? <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
                           : <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />}
@@ -584,7 +628,7 @@ export default function AdminClients() {
                             {valid ? 'until' : 'was'} {format(parseISO(fr.expires_at), 'd MMM yyyy')}
                           </p>
                         </div>
-                      </div>
+                      </button>
                     )
                   })}
                 </div>
@@ -645,6 +689,27 @@ export default function AdminClients() {
                   <p className="font-bold text-gray-900">{stat.value}</p>
                 </div>
               ))}
+            </div>
+
+            {/* Staff-only notes — never shown to the customer */}
+            <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-3 space-y-2">
+              <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide flex items-center gap-1.5">
+                <StickyNote className="h-3.5 w-3.5" /> Staff Notes
+              </p>
+              <Textarea
+                value={staffNotesDraft}
+                onChange={(e) => setStaffNotesDraft(e.target.value)}
+                placeholder="Only visible to staff — e.g. allergy alerts, preferences, behaviour notes…"
+                rows={2}
+                className="bg-white"
+              />
+              {staffNotesDraft !== (selected.internal_notes ?? '') && (
+                <div className="flex justify-end">
+                  <Button size="sm" loading={staffNotesSaving} onClick={handleSaveStaffNotes}>
+                    <Save className="h-3.5 w-3.5" /> Save Note
+                  </Button>
+                </div>
+              )}
             </div>
 
             {/* Memberships */}
@@ -720,7 +785,7 @@ export default function AdminClients() {
                 </h3>
                 <div className="space-y-2">
                   {selectedUpcoming.map((b) => (
-                    <BookingRow key={b.id} booking={b} />
+                    <BookingRow key={b.id} booking={b} onClick={() => setViewingBooking(b)} />
                   ))}
                 </div>
               </div>
@@ -734,7 +799,7 @@ export default function AdminClients() {
                 </h3>
                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                   {selectedPast.map((b) => (
-                    <BookingRow key={b.id} booking={b} />
+                    <BookingRow key={b.id} booking={b} onClick={() => setViewingBooking(b)} />
                   ))}
                 </div>
               </div>
@@ -847,13 +912,146 @@ export default function AdminClients() {
           </div>
         )}
       </Modal>
+
+      {/* Read-only appointment detail */}
+      <Modal open={!!viewingBooking} onClose={() => setViewingBooking(null)} title="Appointment" size="sm">
+        {viewingBooking && (
+          <div className="space-y-4">
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              {[
+                { label: 'Status', value: <Badge variant={statusBadgeVariant(viewingBooking.status)} className="capitalize">{viewingBooking.status}</Badge> },
+                { label: 'Service', value: viewingBooking.service?.name ?? '—' },
+                { label: 'Staff', value: viewingBooking.staff?.name ?? '—' },
+                { label: 'Date', value: format(parseISO(viewingBooking.starts_at), 'EEE d MMM yyyy') },
+                { label: 'Time', value: `${format(parseISO(viewingBooking.starts_at), 'HH:mm')} – ${format(parseISO(viewingBooking.ends_at), 'HH:mm')}` },
+                { label: 'Price', value: formatCurrency(viewingBooking.price_override ?? viewingBooking.service?.price ?? 0) },
+              ].map(({ label, value }) => (
+                <div key={label}>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</dt>
+                  <dd className="font-medium text-gray-900 mt-0.5">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            {viewingBooking.notes && (
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-1">Customer Notes</p>
+                <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3">{viewingBooking.notes}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Read-only completed-form viewer */}
+      <Modal open={!!viewingFormResponse} onClose={() => setViewingFormResponse(null)} title={viewingFormResponse?.form?.title ?? 'Completed Form'} size="md">
+        {viewingFormResponse && (
+          viewFormLoading ? (
+            <p className="text-sm text-gray-400 text-center py-8">Loading…</p>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-xs text-gray-400">
+                Completed {format(parseISO(viewingFormResponse.completed_at), "d MMM yyyy 'at' HH:mm")}
+              </p>
+              {[...viewFormSections].sort((a, b) => a.position - b.position).map(section => {
+                const sectionFields = viewFormFields.filter(f => f.section_id === section.id).sort((a, b) => a.position - b.position)
+                if (!sectionFields.length) return null
+                return (
+                  <div key={section.id} className="space-y-3">
+                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 pb-1.5">{section.title}</h3>
+                    {sectionFields.map(field => (
+                      <ResponseValue key={field.id} field={field} responses={viewingFormResponse.responses} />
+                    ))}
+                  </div>
+                )
+              })}
+            </div>
+          )
+        )}
+      </Modal>
     </div>
   )
 }
 
-function BookingRow({ booking }: { booking: Booking }) {
+function ResponseValue({ field, responses }: { field: FormField; responses: ResponseMap }) {
+  if (field.field_type === 'heading') {
+    return <h4 className="font-semibold text-gray-800 text-sm pt-1">{field.label}</h4>
+  }
+  const val = responses[field.id]
+
+  if (field.field_type === 'emergency_contact') {
+    const ec = (val as { ec_name?: string; ec_phone?: string; ec_relationship?: string }) ?? {}
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+        <p className="text-sm text-gray-800">
+          {ec.ec_name || '—'} {ec.ec_phone && `· ${ec.ec_phone}`} {ec.ec_relationship && `· ${ec.ec_relationship}`}
+        </p>
+      </div>
+    )
+  }
+
+  if (field.field_type === 'signature') {
+    const sig = (val as { signature_name?: string; signed_at?: string }) ?? {}
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+        <p className="text-lg text-gray-800" style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive" }}>{sig.signature_name || '—'}</p>
+        {sig.signed_at && <p className="text-xs text-gray-400">Signed {format(parseISO(sig.signed_at), "d MMM yyyy 'at' HH:mm")}</p>}
+      </div>
+    )
+  }
+
+  if (field.field_type === 'multi_select') {
+    const selected = Array.isArray(val) ? val : []
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+        <p className="text-sm text-gray-800">{selected.length ? selected.join(', ') : '—'}</p>
+      </div>
+    )
+  }
+
+  if (field.field_type === 'checkbox') {
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+        <p className="text-sm text-gray-800">{val ? 'Confirmed' : 'Not confirmed'}</p>
+      </div>
+    )
+  }
+
+  if (field.field_type === 'yes_no') {
+    const followUp = responses[`${field.id}_followup`] as string | undefined
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+        <p className="text-sm text-gray-800 capitalize">{(val as string) || '—'}</p>
+        {followUp && <p className="text-xs text-gray-500 mt-0.5">{followUp}</p>}
+      </div>
+    )
+  }
+
+  if (field.field_type === 'date') {
+    const raw = val as string | undefined
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+        <p className="text-sm text-gray-800">{raw ? format(parseISO(raw), 'd MMM yyyy') : '—'}</p>
+      </div>
+    )
+  }
+
   return (
-    <div className="flex items-center gap-3 py-2 px-3 bg-gray-50 rounded-lg text-sm">
+    <div>
+      <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+      <p className="text-sm text-gray-800 whitespace-pre-wrap">{(val as string) || '—'}</p>
+    </div>
+  )
+}
+
+function BookingRow({ booking, onClick }: { booking: Booking; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="w-full flex items-center gap-3 py-2 px-3 bg-gray-50 hover:bg-gray-100 rounded-lg text-sm text-left transition-colors">
       <CalendarClock className="h-4 w-4 text-gray-400 shrink-0" />
       <div className="flex-1 min-w-0">
         <p className="font-medium text-gray-900 truncate">{booking.service?.name ?? '—'}</p>
@@ -866,6 +1064,6 @@ function BookingRow({ booking }: { booking: Booking }) {
         <span className="font-semibold text-gray-900">{formatCurrency(booking.price_override ?? booking.service?.price ?? 0)}</span>
         <Badge variant={statusBadgeVariant(booking.status)} className="capitalize">{booking.status}</Badge>
       </div>
-    </div>
+    </button>
   )
 }

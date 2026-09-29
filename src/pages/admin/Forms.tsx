@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Plus, Pencil, Trash2, ChevronUp, ChevronDown, ClipboardList,
   ToggleRight, Type, AlignLeft, CheckSquare, Phone, Heading1, X, Save, Eye, EyeOff,
-  ChevronRight, ChevronLeft, CheckCircle2, List, ListChecks, PenTool,
+  ChevronRight, ChevronLeft, CheckCircle2, List, ListChecks, PenTool, CalendarDays, Smartphone,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/Button'
@@ -26,6 +26,8 @@ const FIELD_TYPES: { type: FormField['field_type']; label: string; icon: typeof 
   { type: 'yes_no',            label: 'Yes / No',          icon: ToggleRight, color: 'text-blue-600 bg-blue-50' },
   { type: 'text',              label: 'Short Text',        icon: Type,        color: 'text-violet-600 bg-violet-50' },
   { type: 'textarea',          label: 'Long Text',         icon: AlignLeft,   color: 'text-orange-600 bg-orange-50' },
+  { type: 'date',              label: 'Date',              icon: CalendarDays, color: 'text-amber-600 bg-amber-50' },
+  { type: 'phone',             label: 'Phone Number',      icon: Smartphone,  color: 'text-cyan-600 bg-cyan-50' },
   { type: 'dropdown',          label: 'Dropdown',          icon: List,        color: 'text-pink-600 bg-pink-50' },
   { type: 'multi_select',      label: 'Multiple Choice',   icon: ListChecks,  color: 'text-teal-600 bg-teal-50' },
   { type: 'checkbox',          label: 'Acknowledgement',   icon: CheckSquare, color: 'text-green-600 bg-green-50' },
@@ -298,6 +300,8 @@ export default function AdminForms() {
       type === 'yes_no'  ? 'New question?' :
       type === 'text'    ? 'Your answer' :
       type === 'textarea' ? 'Additional information' :
+      type === 'date'    ? 'Date' :
+      type === 'phone'   ? 'Mobile number' :
       type === 'dropdown' ? 'Select an option' :
       type === 'multi_select' ? 'Select all that apply' :
       type === 'checkbox' ? 'I confirm that I have read and understood the above' :

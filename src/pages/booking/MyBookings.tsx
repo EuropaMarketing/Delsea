@@ -255,8 +255,13 @@ export default function MyBookings() {
             const serviceRows = (servicesRes.data ?? []) as { id: string; form_id: string | null; returning_form_id: string | null }[]
             const bookingFormRows = (bookingFormsRes.data ?? []) as { booking_id: string; form_id: string }[]
 
-            // New Client Form applies unless the customer already has a valid response to
-            // it, in which case the Returning Client Form (if any) applies instead.
+            // New Client Form applies unless the customer already had a valid response to
+            // it BEFORE this booking was made, in which case the Returning Client Form
+            // (if any) applies instead. Anchoring to the booking's own created_at (rather
+            // than "right now") matters: without it, completing the New form flips a
+            // customer to "returning" immediately, so their own just-submitted booking
+            // would start demanding the unrelated, uncompleted Returning form instead —
+            // a permanent false "form not completed" warning on the very form they just did.
             const linkedFormIds = [...new Set(serviceRows.flatMap(s => [s.form_id, s.returning_form_id]).filter((id): id is string => !!id))]
             const { data: linkedFormRows } = linkedFormIds.length
               ? await supabase.from('service_forms').select('id, is_active').in('id', linkedFormIds)
@@ -265,18 +270,27 @@ export default function MyBookings() {
 
             const newFormIds = [...new Set(serviceRows.map(s => s.form_id).filter((id): id is string => !!id && activeFormIds.has(id)))]
             const { data: newFormResponses } = newFormIds.length
-              ? await supabase.from('form_responses').select('customer_id, form_id')
+              ? await supabase.from('form_responses').select('customer_id, form_id, completed_at, expires_at')
                   .in('customer_id', customerIds).in('form_id', newFormIds)
-                  .gt('expires_at', new Date().toISOString())
-              : { data: [] as { customer_id: string; form_id: string }[] }
-            const hasValidNewForm = new Set((newFormResponses ?? []).map(r => `${r.customer_id}:${r.form_id}`))
+              : { data: [] as { customer_id: string; form_id: string; completed_at: string; expires_at: string }[] }
+            const newFormResponsesByKey = new Map<string, { completed_at: string; expires_at: string }[]>()
+            for (const r of (newFormResponses ?? [])) {
+              const key = `${r.customer_id}:${r.form_id}`
+              const arr = newFormResponsesByKey.get(key) ?? []
+              arr.push({ completed_at: r.completed_at, expires_at: r.expires_at })
+              newFormResponsesByKey.set(key, arr)
+            }
+            function hadEarlierValidNewForm(customerId: string, formId: string, cutoff: string): boolean {
+              const rows = newFormResponsesByKey.get(`${customerId}:${formId}`)
+              return !!rows?.some(r => r.completed_at < cutoff && r.expires_at > cutoff)
+            }
 
             const requiredFormIdsByBooking: Record<string, string[]> = {}
             for (const booking of upcomingConfirmed) {
               const ids: string[] = []
               const svc = serviceRows.find(s => s.id === booking.service_id)
               if (svc?.form_id && activeFormIds.has(svc.form_id)) {
-                const alreadyHasNewForm = hasValidNewForm.has(`${booking.customer_id}:${svc.form_id}`)
+                const alreadyHasNewForm = hadEarlierValidNewForm(booking.customer_id, svc.form_id, booking.created_at)
                 if (alreadyHasNewForm && svc.returning_form_id && activeFormIds.has(svc.returning_form_id)) {
                   ids.push(svc.returning_form_id)
                 } else {

@@ -7,7 +7,7 @@ import {
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   Star, Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck, ClipboardList,
-  Clock, CalendarRange, Sparkles, Mail, Phone as PhoneIcon, CalendarClock, Trash2, Cake, PenTool,
+  Clock, CalendarRange, Sparkles, Mail, Phone as PhoneIcon, CalendarClock, Trash2, Cake, PenTool, StickyNote, Save,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
@@ -41,7 +41,7 @@ type RichBooking = Omit<Booking, 'staff' | 'service' | 'customer' | 'price_overr
   equipment_resource_id?: string | null
   service: { name: string; category: string; price: number }
   staff: { name: string } | null
-  customer: { name: string; email: string; phone: string | null; sumup_card_token: string | null; date_of_birth: string | null }
+  customer: { name: string; email: string; phone: string | null; sumup_card_token: string | null; date_of_birth: string | null; internal_notes: string | null }
   resource: { name: string } | null
   equipment_resource?: { name: string } | null
 }
@@ -264,6 +264,9 @@ export default function AdminCalendar() {
   const [formAlerts, setFormAlerts] = useState<Set<string>>(new Set())
   const [selectedBookingForm, setSelectedBookingForm] = useState<BookingFormStatus | null>(null)
   const [fillFormTarget, setFillFormTarget] = useState<{ id: string; title: string } | null>(null)
+  // Staff-only notes — separate from the customer's own booking notes, never shown to the customer
+  const [bookingNotesDraft, setBookingNotesDraft] = useState('')
+  const [bookingNotesSaving, setBookingNotesSaving] = useState(false)
   const [editNotes, setEditNotes] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
@@ -405,7 +408,7 @@ export default function AdminCalendar() {
         supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name'),
         supabase
           .from('bookings')
-          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token,date_of_birth), resource:resources!resource_id(name)')
+          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token,date_of_birth,internal_notes), resource:resources!resource_id(name)')
           .eq('business_id', BUSINESS_ID)
           .gte('starts_at', dayStart)
           .lte('starts_at', dayEnd)
@@ -434,7 +437,7 @@ export default function AdminCalendar() {
       if (bookRes.data) {
         const bks = (bookRes.data as RichBooking[]).filter(b => !hiddenIds.has(b.service_id))
         setBookings(bks)
-        loadFormAlertSet(BUSINESS_ID, bks as Array<{ id: string; service_id: string; customer_id: string }>).then(setFormAlerts)
+        loadFormAlertSet(BUSINESS_ID, bks as Array<{ id: string; service_id: string; customer_id: string; created_at: string }>).then(setFormAlerts)
       }
       if (svcRes.data) setServices(svcRes.data as Service[])
       if (blockRes.data) setBlockedTimes(blockRes.data as BlockedTime[])
@@ -681,7 +684,7 @@ export default function AdminCalendar() {
       setAddFormError(error.message)
     } else {
       await fetchBookingForms(selectedBooking.id)
-      checkBookingForm(selectedBooking.service_id, selectedBooking.customer_id, selectedBooking.id).then(setSelectedBookingForm)
+      checkBookingForm(selectedBooking.service_id, selectedBooking.customer_id, selectedBooking.id, selectedBooking.created_at).then(setSelectedBookingForm)
       setAddFormOpen(false)
       setAddFormId('')
     }
@@ -692,7 +695,7 @@ export default function AdminCalendar() {
     if (!selectedBooking) return
     await supabase.from('booking_forms').delete().eq('id', id)
     await fetchBookingForms(selectedBooking.id)
-    checkBookingForm(selectedBooking.service_id, selectedBooking.customer_id, selectedBooking.id).then(setSelectedBookingForm)
+    checkBookingForm(selectedBooking.service_id, selectedBooking.customer_id, selectedBooking.id, selectedBooking.created_at).then(setSelectedBookingForm)
   }
 
   function sendFormReminder(form: { id: string; title: string }) {
@@ -701,6 +704,18 @@ export default function AdminCalendar() {
     const subject = `Please complete: ${form.title}`
     const body = `Hi ${selectedBooking.customer?.name ?? ''},\n\nBefore your appointment on ${format(parseISO(selectedBooking.starts_at), 'EEEE d MMMM')} at ${format(parseISO(selectedBooking.starts_at), 'HH:mm')}, please complete the following form:\n\n${form.title}\n${link}\n\nThanks!`
     window.location.href = `mailto:${selectedBooking.customer.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+  }
+
+  async function handleSaveBookingNotes() {
+    if (!selectedBooking) return
+    setBookingNotesSaving(true)
+    const value = bookingNotesDraft.trim() || null
+    const { error } = await supabase.from('bookings').update({ internal_notes: value }).eq('id', selectedBooking.id)
+    if (!error) {
+      setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, internal_notes: value } : b))
+      setSelectedBooking(prev => prev ? { ...prev, internal_notes: value } : null)
+    }
+    setBookingNotesSaving(false)
   }
 
   function sessionStartsAt(session: SessionRow): string {
@@ -724,7 +739,7 @@ export default function AdminCalendar() {
   async function openAttendeeBooking(attendeeId: string) {
     const { data } = await supabase
       .from('bookings')
-      .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token,date_of_birth), resource:resources!resource_id(name)')
+      .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token,date_of_birth,internal_notes), resource:resources!resource_id(name)')
       .eq('id', attendeeId)
       .single()
     if (data) {
@@ -1246,6 +1261,7 @@ export default function AdminCalendar() {
     setHoverBooking(null)
     setSelectedBooking(b)
     setSelectedBookingForm(null)
+    setBookingNotesDraft(b.internal_notes ?? '')
     const remaining = bookingPrice(b) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0) - (b.deposit_charged ?? 0)
     setChargeAmount(remaining > 0 ? (remaining / 100).toFixed(2) : '')
     setChargeType('balance')
@@ -1257,7 +1273,7 @@ export default function AdminCalendar() {
     setActivityLog([])
     setActivityLogOpen(false)
     refreshActivityLog(b.id)
-    checkBookingForm(b.service_id, b.customer_id, b.id).then(setSelectedBookingForm)
+    checkBookingForm(b.service_id, b.customer_id, b.id, b.created_at).then(setSelectedBookingForm)
     fetchBookingForms(b.id)
     setDetailCapacity(null)
     fetchSlotCapacity(b.service_id, b.starts_at).then(setDetailCapacity)
@@ -1346,7 +1362,7 @@ export default function AdminCalendar() {
         notes: `Linked ${addLinkedPosition} ${selectedBooking.service?.name ?? 'booking'}`,
         combo_group_id: comboGroupId,
       })
-      .select('id, starts_at, ends_at, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token,date_of_birth)')
+      .select('id, starts_at, ends_at, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token,date_of_birth,internal_notes)')
       .single()
     if (error) {
       setAddLinkedError(error.message)
@@ -1471,6 +1487,7 @@ export default function AdminCalendar() {
         phone: editCustomerPhone || null,
         sumup_card_token: editCustomerId === selectedBooking.customer_id ? selectedBooking.customer?.sumup_card_token ?? null : null,
         date_of_birth: editCustomerId === selectedBooking.customer_id ? selectedBooking.customer?.date_of_birth ?? null : null,
+        internal_notes: editCustomerId === selectedBooking.customer_id ? selectedBooking.customer?.internal_notes ?? null : null,
       }
       const serviceObj = { name: newService.name, category: newService.category, price: newService.price }
       const staffObj = matchedStaff ? { name: matchedStaff.name } : null
@@ -1759,7 +1776,7 @@ export default function AdminCalendar() {
         const { data: created, error: bookErr } = await supabase
           .from('bookings')
           .insert(rowsToInsert)
-          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token,date_of_birth)')
+          .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token,date_of_birth,internal_notes)')
         if (bookErr) throw bookErr
 
         const rangeStart = viewMode === 'week' ? startOfWeek(selectedDay, { weekStartsOn: 1 }) : startOfDay(selectedDay)
@@ -2799,30 +2816,6 @@ export default function AdminCalendar() {
                   )}
                 </dd>
               </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Customer</dt>
-                <dd>
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/admin/clients?edit=${selectedBooking.customer_id}`)}
-                    className="text-(--color-primary) hover:underline font-medium"
-                  >
-                    {selectedBooking.customer?.name}
-                  </button>
-                </dd>
-              </div>
-              {selectedBooking.customer?.email && (
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Email</dt>
-                  <dd className="text-gray-700 text-xs">{selectedBooking.customer.email}</dd>
-                </div>
-              )}
-              {selectedBooking.customer?.date_of_birth && (
-                <div className="flex justify-between items-center">
-                  <dt className="text-gray-500 flex items-center gap-1.5"><Cake className="h-3.5 w-3.5" /> Birthday</dt>
-                  <dd className="text-gray-700">{format(parseISO(selectedBooking.customer.date_of_birth), 'd MMMM')}</dd>
-                </div>
-              )}
               {selectedBooking.staff && selectedBooking.staff_id && (
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Staff</dt>
@@ -2902,6 +2895,27 @@ export default function AdminCalendar() {
                 <dd><Badge variant={statusBadgeVariant(selectedBooking.status)} className="capitalize">{selectedBooking.status}</Badge></dd>
               </div>
             </dl>
+
+            {/* Staff-only notes for this appointment — never shown to the customer */}
+            <div className="border border-amber-200 bg-amber-50/50 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide flex items-center gap-1.5">
+                <StickyNote className="h-3.5 w-3.5" /> Staff Notes
+              </p>
+              <Textarea
+                value={bookingNotesDraft}
+                onChange={e => setBookingNotesDraft(e.target.value)}
+                placeholder="Only visible to staff — e.g. run-of-show reminders for this appointment…"
+                rows={2}
+                className="bg-white"
+              />
+              {bookingNotesDraft !== (selectedBooking.internal_notes ?? '') && (
+                <div className="flex justify-end">
+                  <Button size="sm" loading={bookingNotesSaving} onClick={handleSaveBookingNotes}>
+                    <Save className="h-3.5 w-3.5" /> Save Note
+                  </Button>
+                </div>
+              )}
+            </div>
 
             {/* Add linked follow-on service */}
             <div className="border border-gray-100 rounded-lg p-3 space-y-2">
@@ -3149,14 +3163,20 @@ export default function AdminCalendar() {
             )}
           </div>
 
-          {/* ── Customer sidebar ── */}
+          {/* ── Client sidebar ── */}
           <div className="lg:w-64 shrink-0 lg:border-l lg:border-gray-100 lg:pl-5 space-y-4 lg:max-h-[70vh] lg:overflow-y-auto">
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <div className="h-8 w-8 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-500 shrink-0">
                   {selectedBooking.customer?.name?.charAt(0).toUpperCase() ?? '?'}
                 </div>
-                <p className="font-semibold text-gray-900 text-sm truncate">{selectedBooking.customer?.name}</p>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/admin/clients?edit=${selectedBooking.customer_id}`)}
+                  className="font-semibold text-gray-900 text-sm truncate hover:text-(--color-primary) hover:underline text-left"
+                >
+                  {selectedBooking.customer?.name}
+                </button>
               </div>
               <div className="space-y-1">
                 {selectedBooking.customer?.email && (
@@ -3169,8 +3189,22 @@ export default function AdminCalendar() {
                     <PhoneIcon className="h-3 w-3 shrink-0" />{selectedBooking.customer.phone}
                   </p>
                 )}
+                {selectedBooking.customer?.date_of_birth && (
+                  <p className="flex items-center gap-1.5 text-xs text-gray-500">
+                    <Cake className="h-3 w-3 shrink-0" />{format(parseISO(selectedBooking.customer.date_of_birth), 'd MMMM')}
+                  </p>
+                )}
               </div>
             </div>
+
+            {selectedBooking.customer?.internal_notes && (
+              <div className="border border-amber-200 bg-amber-50/50 rounded-lg p-2.5">
+                <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide flex items-center gap-1.5 mb-1">
+                  <StickyNote className="h-3 w-3" /> Client Notes
+                </p>
+                <p className="text-xs text-amber-900 whitespace-pre-wrap">{selectedBooking.customer.internal_notes}</p>
+              </div>
+            )}
 
             {customerSidebarLoading ? (
               <p className="text-xs text-gray-400">Loading…</p>
@@ -3665,7 +3699,7 @@ export default function AdminCalendar() {
           bookingId={selectedBooking.id}
           onSaved={() => {
             setFillFormTarget(null)
-            checkBookingForm(selectedBooking.service_id, selectedBooking.customer_id, selectedBooking.id).then(setSelectedBookingForm)
+            checkBookingForm(selectedBooking.service_id, selectedBooking.customer_id, selectedBooking.id, selectedBooking.created_at).then(setSelectedBookingForm)
           }}
         />
       )}

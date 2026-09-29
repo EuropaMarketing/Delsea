@@ -136,6 +136,7 @@ export default function Confirmation() {
           p_notes: draft.notes || null,
           p_spots_booked: draft.spotsBooked ?? 1,
           p_session_id: eventSessionId,
+          p_variant_option_id: draft.variantOptionId ?? null,
         })
 
       if (bErr) throw bErr
@@ -291,6 +292,12 @@ export default function Confirmation() {
                   {draft.variantName && <span className="text-gray-400 ml-1">({formatDuration(effectiveDuration)})</span>}
                 </dd>
               </div>
+              {draft.variantOptionName && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Option</dt>
+                  <dd className="text-gray-700">{draft.variantOptionName}</dd>
+                </div>
+              )}
               {selectedAddons.length > 0 && (
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Add-ons</dt>

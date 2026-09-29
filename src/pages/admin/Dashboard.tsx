@@ -56,7 +56,7 @@ export default function Dashboard() {
         const all = todayRes.data as typeof todayBookings
         const visible = all.filter((b) => b.status === 'confirmed' || b.status === 'pending')
         setTodayBookings(visible)
-        loadFormAlertSet(BUSINESS_ID, visible as Array<{ id: string; service_id: string; customer_id: string }>).then(setFormAlerts)
+        loadFormAlertSet(BUSINESS_ID, visible as Array<{ id: string; service_id: string; customer_id: string; created_at: string }>).then(setFormAlerts)
         const todayCompleted = all.filter((b) => b.status === 'completed').length
         if (weekRes.data) {
           const week = weekRes.data as unknown as Array<{ status: string; discount_amount: number; gift_voucher_amount: number; price_override: number | null; service: { price: number } | null }>

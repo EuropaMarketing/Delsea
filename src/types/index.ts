@@ -24,6 +24,15 @@ export interface Staff {
 
 export type DepositType = 'none' | 'fixed' | 'percentage'
 
+export interface ServiceVariantOption {
+  id: string
+  variant_id: string
+  name: string
+  price: number
+  is_active: boolean
+  sort_order: number
+}
+
 export interface ServiceVariant {
   id: string
   service_id: string
@@ -32,6 +41,7 @@ export interface ServiceVariant {
   price: number
   is_active: boolean
   sort_order: number
+  options?: ServiceVariantOption[]
 }
 
 export interface Service {
@@ -100,10 +110,12 @@ export interface Booking {
   staff_id: string | null
   service_id: string
   variant_id?: string | null
+  variant_option_id?: string | null
   starts_at: string
   ends_at: string
   status: BookingStatus
   notes: string | null
+  internal_notes?: string | null
   spots_booked?: number
   resource_id?: string | null
   discount_code_id?: string | null
@@ -130,6 +142,7 @@ export interface Customer {
   email: string
   phone: string | null
   date_of_birth: string | null
+  internal_notes?: string | null
   created_at: string
 }
 
@@ -213,6 +226,8 @@ export interface BookingDraft {
   variantName: string | null
   variantDuration: number | null
   variantPrice: number | null
+  variantOptionId: string | null
+  variantOptionName: string | null
   staffId: string | null
   date: Date | null
   timeSlot: string | null

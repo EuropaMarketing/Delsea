@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { format, parseISO } from 'date-fns'
-import { Download, Gift, CheckCircle2, CreditCard, History, UserCheck, ClipboardList } from 'lucide-react'
+import { Download, Gift, CheckCircle2, CreditCard, History, UserCheck, ClipboardList, Mail, PenTool, StickyNote, Save, Cake, Phone as PhoneIcon } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
+import { AdminFormFiller } from '@/components/FormFiller'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -17,7 +19,7 @@ const PAGE_SIZE = 20
 type ExtBooking = Omit<Booking, 'staff' | 'service' | 'customer'> & {
   service: { name: string; price: number }
   staff: { name: string } | null
-  customer: { name: string; email: string; sumup_card_token: string | null }
+  customer: { name: string; email: string; phone: string | null; date_of_birth: string | null; internal_notes: string | null; sumup_card_token: string | null }
   resource: { name: string } | null
   payment_status: string
   deposit_charged: number
@@ -39,6 +41,7 @@ type ActivityLogEntry = {
 }
 
 export default function AdminBookings() {
+  const navigate = useNavigate()
   const [bookings, setBookings] = useState<ExtBooking[]>([])
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState<string | null>(null)
@@ -64,6 +67,10 @@ export default function AdminBookings() {
   const [activityLogOpen, setActivityLogOpen] = useState(false)
   const [formAlerts, setFormAlerts] = useState<Set<string>>(new Set())
   const [selectedBookingForm, setSelectedBookingForm] = useState<BookingFormStatus | null>(null)
+  const [fillFormTarget, setFillFormTarget] = useState<{ id: string; title: string } | null>(null)
+  // Staff-only notes — separate from the customer's own booking notes, never shown to the customer
+  const [bookingNotesDraft, setBookingNotesDraft] = useState('')
+  const [bookingNotesSaving, setBookingNotesSaving] = useState(false)
 
   useEffect(() => {
     setPage(0)
@@ -86,7 +93,7 @@ export default function AdminBookings() {
     setLoading(true)
     let query = supabase
       .from('bookings')
-      .select('*, service:services(name,price), staff:staff(name), customer:customers(name,email,sumup_card_token), resource:resources!resource_id(name)')
+      .select('*, service:services(name,price), staff:staff(name), customer:customers(name,email,phone,date_of_birth,internal_notes,sumup_card_token), resource:resources!resource_id(name)')
       .eq('business_id', BUSINESS_ID)
       .order('starts_at', { ascending: false })
       .range(pageNum * PAGE_SIZE, (pageNum + 1) * PAGE_SIZE - 1)
@@ -101,7 +108,7 @@ export default function AdminBookings() {
       const incoming = (data ?? []) as ExtBooking[]
       setBookings((prev) => (reset ? incoming : [...prev, ...incoming]))
       setHasMore(incoming.length === PAGE_SIZE)
-      loadFormAlertSet(BUSINESS_ID, incoming as Array<{ id: string; service_id: string; customer_id: string }>)
+      loadFormAlertSet(BUSINESS_ID, incoming as Array<{ id: string; service_id: string; customer_id: string; created_at: string }>)
         .then(newAlerts => setFormAlerts(prev => reset ? newAlerts : new Set([...prev, ...newAlerts])))
     }
     setLoading(false)
@@ -196,6 +203,7 @@ export default function AdminBookings() {
   function openBooking(b: ExtBooking) {
     setSelectedBooking(b)
     setSelectedBookingForm(null)
+    setBookingNotesDraft(b.internal_notes ?? '')
     const remaining = bookingPrice(b) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0) - (b.deposit_charged ?? 0)
     setChargeAmount(remaining > 0 ? (remaining / 100).toFixed(2) : '')
     setChargeType('balance')
@@ -206,7 +214,27 @@ export default function AdminBookings() {
     setActivityLog([])
     setActivityLogOpen(false)
     refreshActivityLog(b.id)
-    checkBookingForm(b.service_id, b.customer_id, b.id).then(setSelectedBookingForm)
+    checkBookingForm(b.service_id, b.customer_id, b.id, b.created_at).then(setSelectedBookingForm)
+  }
+
+  function sendFormReminder(form: { id: string; title: string }) {
+    if (!selectedBooking?.customer?.email) return
+    const link = `${window.location.origin}/forms/${form.id}?bookingId=${selectedBooking.id}`
+    const subject = `Please complete: ${form.title}`
+    const body = `Hi ${selectedBooking.customer?.name ?? ''},\n\nBefore your appointment on ${format(parseISO(selectedBooking.starts_at), 'EEEE d MMMM')} at ${format(parseISO(selectedBooking.starts_at), 'HH:mm')}, please complete the following form:\n\n${form.title}\n${link}\n\nThanks!`
+    window.location.href = `mailto:${selectedBooking.customer.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+  }
+
+  async function handleSaveBookingNotes() {
+    if (!selectedBooking) return
+    setBookingNotesSaving(true)
+    const value = bookingNotesDraft.trim() || null
+    const { error } = await supabase.from('bookings').update({ internal_notes: value }).eq('id', selectedBooking.id)
+    if (!error) {
+      setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, internal_notes: value } : b))
+      setSelectedBooking(prev => prev ? { ...prev, internal_notes: value } : null)
+    }
+    setBookingNotesSaving(false)
   }
 
   async function handleChargeBalance(bookingId: string) {
@@ -389,18 +417,40 @@ export default function AdminBookings() {
         open={!!selectedBooking}
         onClose={() => setSelectedBooking(null)}
         title="Booking Detail"
-        size="md"
+        size="xl"
       >
         {selectedBooking && (
-          <div className="space-y-4">
+          <div className="flex flex-col lg:flex-row gap-5">
+          <div className="flex-1 min-w-0 space-y-4">
             {selectedBookingForm?.needsForm && (
               <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
                 <ClipboardList className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                <div>
+                <div className="flex-1 min-w-0">
                   <p className="text-xs font-semibold text-amber-800">Health form not completed</p>
                   <p className="text-xs text-amber-700 mt-0.5">
                     Customer must complete <span className="font-medium">{selectedBookingForm.formTitle}</span> before this session can take place.
                   </p>
+                  <div className="mt-2 space-y-1.5">
+                    {selectedBookingForm.missingForms.map(f => (
+                      <div key={f.id} className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-amber-800 font-medium">{f.title}:</span>
+                        <button
+                          onClick={() => sendFormReminder(f)}
+                          disabled={!selectedBooking.customer?.email}
+                          title={!selectedBooking.customer?.email ? 'No email on file for this customer' : 'Opens your email app with a pre-filled reminder'}
+                          className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <Mail className="h-3 w-3" /> Send Reminder
+                        </button>
+                        <button
+                          onClick={() => setFillFormTarget(f)}
+                          className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors"
+                        >
+                          <PenTool className="h-3 w-3" /> Fill Out Now
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -408,8 +458,6 @@ export default function AdminBookings() {
               {[
                 { label: 'Reference', value: selectedBooking.id.slice(0, 8).toUpperCase() },
                 { label: 'Status', value: <Badge variant={statusBadgeVariant(selectedBooking.status)} className="capitalize">{selectedBooking.status}</Badge> },
-                { label: 'Customer', value: selectedBooking.customer?.name },
-                { label: 'Email', value: selectedBooking.customer?.email },
                 { label: 'Service', value: selectedBooking.service?.name },
                 { label: 'Staff', value: selectedBooking.staff?.name ?? '—' },
                 { label: 'Date', value: format(parseISO(selectedBooking.starts_at), 'EEE d MMM yyyy') },
@@ -428,6 +476,28 @@ export default function AdminBookings() {
                 <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3">{selectedBooking.notes}</p>
               </div>
             )}
+
+            {/* Staff-only notes for this appointment — never shown to the customer */}
+            <div className="border border-amber-200 bg-amber-50/50 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide flex items-center gap-1.5">
+                <StickyNote className="h-3.5 w-3.5" /> Staff Notes
+              </p>
+              <Textarea
+                value={bookingNotesDraft}
+                onChange={e => setBookingNotesDraft(e.target.value)}
+                placeholder="Only visible to staff — e.g. run-of-show reminders for this appointment…"
+                rows={2}
+                className="bg-white"
+              />
+              {bookingNotesDraft !== (selectedBooking.internal_notes ?? '') && (
+                <div className="flex justify-end">
+                  <Button size="sm" loading={bookingNotesSaving} onClick={handleSaveBookingNotes}>
+                    <Save className="h-3.5 w-3.5" /> Save Note
+                  </Button>
+                </div>
+              )}
+            </div>
+
             {resources.length > 0 && (
               <div>
                 <p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-1">Resource</p>
@@ -603,6 +673,51 @@ export default function AdminBookings() {
               </div>
             )}
           </div>
+
+          {/* ── Client sidebar ── */}
+          <div className="lg:w-64 shrink-0 lg:border-l lg:border-gray-100 lg:pl-5 space-y-4">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="h-8 w-8 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-500 shrink-0">
+                  {selectedBooking.customer?.name?.charAt(0).toUpperCase() ?? '?'}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/admin/clients?edit=${selectedBooking.customer_id}`)}
+                  className="font-semibold text-gray-900 text-sm truncate hover:text-(--color-primary) hover:underline text-left"
+                >
+                  {selectedBooking.customer?.name}
+                </button>
+              </div>
+              <div className="space-y-1">
+                {selectedBooking.customer?.email && (
+                  <p className="flex items-center gap-1.5 text-xs text-gray-500 truncate">
+                    <Mail className="h-3 w-3 shrink-0" />{selectedBooking.customer.email}
+                  </p>
+                )}
+                {selectedBooking.customer?.phone && (
+                  <p className="flex items-center gap-1.5 text-xs text-gray-500">
+                    <PhoneIcon className="h-3 w-3 shrink-0" />{selectedBooking.customer.phone}
+                  </p>
+                )}
+                {selectedBooking.customer?.date_of_birth && (
+                  <p className="flex items-center gap-1.5 text-xs text-gray-500">
+                    <Cake className="h-3 w-3 shrink-0" />{format(parseISO(selectedBooking.customer.date_of_birth), 'd MMMM')}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {selectedBooking.customer?.internal_notes && (
+              <div className="border border-amber-200 bg-amber-50/50 rounded-lg p-2.5">
+                <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide flex items-center gap-1.5 mb-1">
+                  <StickyNote className="h-3 w-3" /> Client Notes
+                </p>
+                <p className="text-xs text-amber-900 whitespace-pre-wrap">{selectedBooking.customer.internal_notes}</p>
+              </div>
+            )}
+          </div>
+          </div>
         )}
       </Modal>
 
@@ -620,6 +735,23 @@ export default function AdminBookings() {
           ))}
         </ul>
       </Modal>
+
+      {fillFormTarget && selectedBooking && (
+        <AdminFormFiller
+          open={!!fillFormTarget}
+          onClose={() => setFillFormTarget(null)}
+          formId={fillFormTarget.id}
+          formTitle={fillFormTarget.title}
+          businessId={BUSINESS_ID}
+          customerId={selectedBooking.customer_id}
+          customerName={selectedBooking.customer?.name ?? 'this customer'}
+          bookingId={selectedBooking.id}
+          onSaved={() => {
+            setFillFormTarget(null)
+            checkBookingForm(selectedBooking.service_id, selectedBooking.customer_id, selectedBooking.id, selectedBooking.created_at).then(setSelectedBookingForm)
+          }}
+        />
+      )}
     </div>
   )
 }

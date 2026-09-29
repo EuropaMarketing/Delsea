@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { Service, ServiceSession, ServiceVariant, ServiceAddon, DepositType, Resource, Staff, CommissionType } from '@/types'
+import type { Service, ServiceSession, ServiceVariant, ServiceVariantOption, ServiceAddon, DepositType, Resource, Staff, CommissionType } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
@@ -36,6 +36,11 @@ export default function AdminServices() {
   const [variantForm, setVariantForm] = useState({ name: '', duration_minutes: 60, price: '' })
   const [addingVariant, setAddingVariant] = useState(false)
   const [savingVariant, setSavingVariant] = useState(false)
+  // People-count (or other) sub-options nested under a duration variant — e.g.
+  // Recovery Lounge's "60 min" variant priced separately for 1 vs 2 people.
+  const [addingOptionFor, setAddingOptionFor] = useState<string | null>(null)
+  const [optionForm, setOptionForm] = useState({ name: '', price: '' })
+  const [savingOption, setSavingOption] = useState(false)
   const [sessionsList, setSessionsList] = useState<ServiceSession[]>([])
   const [sessionForm, setSessionForm] = useState({ day_of_week: 1, start_time: '09:00' })
   const [addingSession, setAddingSession] = useState(false)
@@ -95,13 +100,19 @@ export default function AdminServices() {
     setAddingSession(false)
     setSessionForm({ day_of_week: 1, start_time: '09:00' })
     const [variantsRes, sessionsRes, staffRes, assignRes, addonsRes] = await Promise.all([
-      supabase.from('service_variants').select('*').eq('service_id', service.id).eq('is_active', true).order('sort_order'),
+      supabase.from('service_variants').select('*, options:service_variant_options(*)').eq('service_id', service.id).eq('is_active', true).order('sort_order'),
       supabase.from('service_sessions').select('*').eq('service_id', service.id).eq('is_active', true).order('day_of_week').order('start_time'),
       supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name'),
       supabase.from('staff_services').select('*').eq('service_id', service.id),
       supabase.from('service_addons').select('*').eq('service_id', service.id).eq('is_active', true).order('name'),
     ])
-    setVariantsList((variantsRes.data as ServiceVariant[]) ?? [])
+    const variantRows = ((variantsRes.data as ServiceVariant[]) ?? []).map(v => ({
+      ...v,
+      options: (v.options ?? []).filter(o => o.is_active).sort((a, b) => a.sort_order - b.sort_order),
+    }))
+    setVariantsList(variantRows)
+    setAddingOptionFor(null)
+    setOptionForm({ name: '', price: '' })
     setSessionsList((sessionsRes.data as ServiceSession[]) ?? [])
     setAllStaff((staffRes.data as Staff[]) ?? [])
     const aMap = new Map<string, Assignment>()
@@ -229,6 +240,34 @@ export default function AdminServices() {
   async function handleDeleteVariant(id: string) {
     await supabase.from('service_variants').update({ is_active: false }).eq('id', id)
     setVariantsList((prev) => prev.filter((v) => v.id !== id))
+  }
+
+  async function handleAddVariantOption(variantId: string) {
+    if (!optionForm.name.trim()) return
+    setSavingOption(true)
+    const priceInPence = Math.round(parseFloat(String(optionForm.price)) * 100) || 0
+    const variant = variantsList.find((v) => v.id === variantId)
+    const { data } = await supabase
+      .from('service_variant_options')
+      .insert({
+        variant_id: variantId,
+        name: optionForm.name,
+        price: priceInPence,
+        sort_order: variant?.options?.length ?? 0,
+      })
+      .select().single()
+    if (data) {
+      const option = data as ServiceVariantOption
+      setVariantsList((prev) => prev.map((v) => v.id === variantId ? { ...v, options: [...(v.options ?? []), option] } : v))
+      setOptionForm({ name: '', price: '' })
+      setAddingOptionFor(null)
+    }
+    setSavingOption(false)
+  }
+
+  async function handleDeleteVariantOption(variantId: string, optionId: string) {
+    await supabase.from('service_variant_options').update({ is_active: false }).eq('id', optionId)
+    setVariantsList((prev) => prev.map((v) => v.id === variantId ? { ...v, options: (v.options ?? []).filter((o) => o.id !== optionId) } : v))
   }
 
   async function handleAddSession() {
@@ -561,20 +600,73 @@ export default function AdminServices() {
               </div>
 
               {variantsList.map((v) => (
-                <div key={v.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-2">
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-gray-900">{v.name}</span>
-                    <span className="text-xs text-gray-500 ml-2">
-                      {formatDuration(v.duration_minutes)} · {formatCurrency(v.price)}
-                    </span>
+                <div key={v.id} className="bg-white border border-gray-200 rounded-lg px-3 py-2 space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium text-gray-900">{v.name}</span>
+                      <span className="text-xs text-gray-500 ml-2">
+                        {formatDuration(v.duration_minutes)}{!v.options?.length && <> · {formatCurrency(v.price)}</>}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteVariant(v.id)}
+                      className="text-gray-400 hover:text-red-500 transition-colors"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteVariant(v.id)}
-                    className="text-gray-400 hover:text-red-500 transition-colors"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+
+                  {/* Sub-options (e.g. number of people) — each priced independently */}
+                  <div className="pl-3 border-l-2 border-gray-100 space-y-1.5">
+                    {(v.options ?? []).map((o) => (
+                      <div key={o.id} className="flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <span className="text-xs font-medium text-gray-700">{o.name}</span>
+                          <span className="text-xs text-gray-500 ml-2">{formatCurrency(o.price)}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteVariantOption(v.id, o.id)}
+                          className="text-gray-400 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+
+                    {addingOptionFor === v.id ? (
+                      <div className="flex items-end gap-2 pt-1">
+                        <Input
+                          label="Option name"
+                          value={optionForm.name}
+                          onChange={(e) => setOptionForm((f) => ({ ...f, name: e.target.value }))}
+                          placeholder="e.g. 2 people"
+                          className="flex-1"
+                        />
+                        <Input
+                          label="Price (£)"
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={optionForm.price}
+                          onChange={(e) => setOptionForm((f) => ({ ...f, price: e.target.value }))}
+                          placeholder="0.00"
+                          className="w-24"
+                        />
+                        <Button size="sm" loading={savingOption} onClick={() => handleAddVariantOption(v.id)}>Add</Button>
+                        <Button size="sm" variant="secondary" onClick={() => { setAddingOptionFor(null); setOptionForm({ name: '', price: '' }) }}>Cancel</Button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => { setAddingOptionFor(v.id); setOptionForm({ name: '', price: '' }) }}
+                        className="flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-gray-600 transition-colors pt-0.5"
+                      >
+                        <Plus className="h-3 w-3" /> Add option (e.g. by number of people)
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
 

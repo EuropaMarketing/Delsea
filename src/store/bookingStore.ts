@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { BookingDraft, Service, ServiceVariant, Staff } from '@/types'
+import type { BookingDraft, Service, ServiceVariant, ServiceVariantOption, Staff } from '@/types'
 
 export type AddonSelection = { id: string; name: string; duration_minutes: number; price: number }
 
@@ -28,6 +28,7 @@ interface BookingStore {
   setLinkedService: (selection: LinkedServiceSelection | null) => void
   setService: (serviceId: string) => void
   setVariant: (variant: ServiceVariant | null) => void
+  setVariantOption: (option: ServiceVariantOption | null, variant: ServiceVariant) => void
   setStaff: (staffId: string | null) => void
   setDate: (date: Date) => void
   setTimeSlot: (slot: string) => void
@@ -50,6 +51,8 @@ const emptyDraft: BookingDraft = {
   variantName: null,
   variantDuration: null,
   variantPrice: null,
+  variantOptionId: null,
+  variantOptionName: null,
   staffId: null,
   date: null,
   timeSlot: null,
@@ -77,7 +80,7 @@ export const useBookingStore = create<BookingStore>((set) => ({
   setLinkedService: (selection) => set({ linkedService: selection }),
 
   setService: (serviceId) =>
-    set((s) => ({ draft: { ...s.draft, serviceId, variantId: null, variantName: null, variantDuration: null, variantPrice: null, staffId: null, date: null, timeSlot: null }, selectedAddons: [], eventSessionId: null, linkedService: null, rescheduleBookingId: null, rescheduleOriginalTime: null })),
+    set((s) => ({ draft: { ...s.draft, serviceId, variantId: null, variantName: null, variantDuration: null, variantPrice: null, variantOptionId: null, variantOptionName: null, staffId: null, date: null, timeSlot: null }, selectedAddons: [], eventSessionId: null, linkedService: null, rescheduleBookingId: null, rescheduleOriginalTime: null })),
 
   setVariant: (variant) =>
     set((s) => ({
@@ -87,6 +90,22 @@ export const useBookingStore = create<BookingStore>((set) => ({
         variantName: variant?.name ?? null,
         variantDuration: variant?.duration_minutes ?? null,
         variantPrice: variant?.price ?? null,
+        variantOptionId: null,
+        variantOptionName: null,
+        date: null,
+        timeSlot: null,
+      },
+    })),
+
+  // A duration variant's people-count sub-option — its price overrides the
+  // duration variant's own price; deselecting falls back to the variant's own price.
+  setVariantOption: (option, variant) =>
+    set((s) => ({
+      draft: {
+        ...s.draft,
+        variantOptionId: option?.id ?? null,
+        variantOptionName: option?.name ?? null,
+        variantPrice: option?.price ?? variant.price,
         date: null,
         timeSlot: null,
       },
@@ -128,6 +147,7 @@ export const useBookingStore = create<BookingStore>((set) => ({
         ...s.draft,
         serviceId, staffId, date, timeSlot, spotsBooked,
         variantId: null, variantName: null, variantDuration: null, variantPrice: null,
+        variantOptionId: null, variantOptionName: null,
       },
       selectedAddons: [],
       eventSessionId: sessionId,

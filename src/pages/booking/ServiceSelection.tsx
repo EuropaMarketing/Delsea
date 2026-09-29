@@ -10,13 +10,13 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { Service, ServiceVariant } from '@/types'
+import type { Service, ServiceVariant, ServiceVariantOption } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function ServiceSelection() {
   const navigate = useNavigate()
-  const { draft, setService, setVariant, setStaff, setServices, services } = useBookingStore()
+  const { draft, setService, setVariant, setVariantOption, setStaff, setServices, services } = useBookingStore()
   const { toggle, isFavourite } = useFavourites()
   const previousBookings = usePreviousBookings()
 
@@ -28,12 +28,16 @@ export default function ServiceSelection() {
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>(() =>
     draft.variantId && draft.serviceId ? { [draft.serviceId]: draft.variantId } : {}
   )
+  // tracks the chosen sub-option (e.g. number of people) per service card
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>(() =>
+    draft.variantOptionId && draft.serviceId ? { [draft.serviceId]: draft.variantOptionId } : {}
+  )
 
   useEffect(() => {
     async function load() {
       const { data } = await supabase
         .from('services')
-        .select('*, variants:service_variants(id, name, duration_minutes, price, sort_order, is_active)')
+        .select('*, variants:service_variants(id, name, duration_minutes, price, sort_order, is_active, options:service_variant_options(id, name, price, sort_order, is_active))')
         .eq('business_id', BUSINESS_ID)
         .eq('is_active', true)
         .eq('is_event_only', false)
@@ -58,11 +62,16 @@ export default function ServiceSelection() {
   function handleSelect(service: Service) {
     setSelected(service.id)
     setService(service.id)
-    // Restore previously chosen variant for this service
+    // Restore previously chosen variant (and its sub-option) for this service
     const prevVariantId = selectedVariants[service.id]
     if (prevVariantId) {
       const variant = service.variants?.find((v) => v.id === prevVariantId)
-      if (variant) setVariant(variant)
+      if (variant) {
+        setVariant(variant)
+        const prevOptionId = selectedOptions[service.id]
+        const option = prevOptionId ? variant.options?.find((o) => o.id === prevOptionId) : undefined
+        if (option) setVariantOption(option, variant)
+      }
     }
   }
 
@@ -71,6 +80,13 @@ export default function ServiceSelection() {
     setService(service.id)
     setSelectedVariants((prev) => ({ ...prev, [service.id]: variant.id }))
     setVariant(variant)
+    // Switching duration clears any previously chosen sub-option for this service
+    setSelectedOptions((prev) => { const next = { ...prev }; delete next[service.id]; return next })
+  }
+
+  function handleSelectOption(service: Service, variant: ServiceVariant, option: ServiceVariantOption) {
+    setSelectedOptions((prev) => ({ ...prev, [service.id]: option.id }))
+    setVariantOption(option, variant)
   }
 
   function handleQuickBook(service: Service) {
@@ -257,21 +273,42 @@ export default function ServiceSelection() {
               </div>
               {(() => {
                 const activeVariants = (service.variants ?? []).filter((v) => v.is_active).sort((a, b) => a.sort_order - b.sort_order)
+                const chosenVariant = activeVariants.find((v) => v.id === selectedVariants[service.id])
+                const activeOptions = (chosenVariant?.options ?? []).filter((o) => o.is_active).sort((a, b) => a.sort_order - b.sort_order)
                 return activeVariants.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {activeVariants.map((v) => (
-                      <button
-                        key={v.id}
-                        onClick={(e) => { e.stopPropagation(); handleSelectVariant(service, v) }}
-                        className={`px-2.5 py-1 text-xs font-medium border rounded-full transition-colors ${
-                          selectedVariants[service.id] === v.id
-                            ? 'bg-(--color-primary) text-white border-(--color-primary)'
-                            : 'bg-white text-gray-600 border-gray-200 hover:border-(--color-primary) hover:text-(--color-primary)'
-                        }`}
-                      >
-                        {v.name} · {formatCurrency(v.price)}
-                      </button>
-                    ))}
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {activeVariants.map((v) => (
+                        <button
+                          key={v.id}
+                          onClick={(e) => { e.stopPropagation(); handleSelectVariant(service, v) }}
+                          className={`px-2.5 py-1 text-xs font-medium border rounded-full transition-colors ${
+                            selectedVariants[service.id] === v.id
+                              ? 'bg-(--color-primary) text-white border-(--color-primary)'
+                              : 'bg-white text-gray-600 border-gray-200 hover:border-(--color-primary) hover:text-(--color-primary)'
+                          }`}
+                        >
+                          {v.name}{!activeOptions.length || v.id !== chosenVariant?.id ? <> · {formatCurrency(v.price)}</> : null}
+                        </button>
+                      ))}
+                    </div>
+                    {chosenVariant && activeOptions.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pl-1">
+                        {activeOptions.map((o) => (
+                          <button
+                            key={o.id}
+                            onClick={(e) => { e.stopPropagation(); handleSelectOption(service, chosenVariant, o) }}
+                            className={`px-2.5 py-1 text-xs font-medium border rounded-full transition-colors ${
+                              selectedOptions[service.id] === o.id
+                                ? 'bg-gray-800 text-white border-gray-800'
+                                : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                            }`}
+                          >
+                            {o.name} · {formatCurrency(o.price)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="flex items-center justify-between">
@@ -295,7 +332,11 @@ export default function ServiceSelection() {
             if (!selected) return true
             const svc = services.find((s) => s.id === selected)
             const activeVariants = (svc?.variants ?? []).filter((v) => v.is_active)
-            return activeVariants.length > 0 && !selectedVariants[selected]
+            if (!activeVariants.length) return false
+            if (!selectedVariants[selected]) return true
+            const chosenVariant = activeVariants.find((v) => v.id === selectedVariants[selected])
+            const activeOptions = (chosenVariant?.options ?? []).filter((o) => o.is_active)
+            return activeOptions.length > 0 && !selectedOptions[selected]
           })()}
           onClick={() => {
             const service = services.find(s => s.id === selected)
