@@ -22,14 +22,14 @@ type Section = {
 type FormField = {
   id: string
   section_id: string
-  field_type: 'heading' | 'yes_no' | 'text' | 'textarea' | 'checkbox' | 'emergency_contact' | 'dropdown' | 'multi_select' | 'signature' | 'date' | 'phone'
+  field_type: 'heading' | 'yes_no' | 'text' | 'textarea' | 'checkbox' | 'emergency_contact' | 'dropdown' | 'multi_select' | 'signature' | 'date' | 'phone' | 'personal_details'
   label: string
   required: boolean
   position: number
   options: { follow_up_label?: string; description?: string; choices?: string[] }
 }
 
-type ResponseMap = Record<string, string | boolean | string[] | { ec_name?: string; ec_phone?: string; ec_relationship?: string } | { signature_name?: string; signed_at?: string }>
+type ResponseMap = Record<string, string | boolean | string[] | { ec_name?: string; ec_phone?: string; ec_relationship?: string } | { signature_name?: string; signed_at?: string } | { pd_name?: string; pd_phone?: string; pd_dob?: string; pd_email?: string }>
 
 export default function FormPage() {
   const { formId } = useParams<{ formId: string }>()
@@ -119,6 +119,9 @@ export default function FormPage() {
       } else if (field.field_type === 'emergency_contact') {
         const ec = val as { ec_name?: string; ec_phone?: string } | undefined
         if (!ec?.ec_name?.trim() || !ec?.ec_phone?.trim()) errs.add(field.id)
+      } else if (field.field_type === 'personal_details') {
+        const pd = val as { pd_name?: string; pd_phone?: string; pd_email?: string } | undefined
+        if (!pd?.pd_name?.trim() || !pd?.pd_phone?.trim() || !pd?.pd_email?.trim()) errs.add(field.id)
       } else if (field.field_type === 'multi_select') {
         if (!Array.isArray(val) || val.length === 0) errs.add(field.id)
       } else if (field.field_type === 'signature') {
@@ -335,6 +338,44 @@ export default function FormPage() {
                   </div>
                 </div>
                 {hasError && <p className="text-xs text-red-500">Name and phone number are required</p>}
+              </div>
+            )
+          }
+
+          if (field.field_type === 'personal_details') {
+            const pd = (val as { pd_name?: string; pd_phone?: string; pd_dob?: string; pd_email?: string }) ?? {}
+            const update = (key: 'pd_name' | 'pd_phone' | 'pd_dob' | 'pd_email', v: string) => setResponse(field.id, { ...pd, [key]: v })
+            return (
+              <div key={field.id} className="border-b border-gray-100 pb-5 space-y-3">
+                <p className="text-sm font-medium text-gray-800">
+                  {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Full name</label>
+                    <input type="text" value={pd.pd_name ?? ''} onChange={e => update('pd_name', e.target.value)}
+                      placeholder="Jane Smith"
+                      className={`w-full h-10 px-3 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) ${hasError && !pd.pd_name ? 'border-red-300' : 'border-gray-200'}`} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Mobile number</label>
+                    <input type="tel" value={pd.pd_phone ?? ''} onChange={e => update('pd_phone', e.target.value)}
+                      placeholder="07700 900000"
+                      className={`w-full h-10 px-3 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) ${hasError && !pd.pd_phone ? 'border-red-300' : 'border-gray-200'}`} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Date of birth</label>
+                    <input type="date" value={pd.pd_dob ?? ''} onChange={e => update('pd_dob', e.target.value)}
+                      className="w-full h-10 px-3 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Email</label>
+                    <input type="email" value={pd.pd_email ?? ''} onChange={e => update('pd_email', e.target.value)}
+                      placeholder="name@email.com"
+                      className={`w-full h-10 px-3 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary) ${hasError && !pd.pd_email ? 'border-red-300' : 'border-gray-200'}`} />
+                  </div>
+                </div>
+                {hasError && <p className="text-xs text-red-500">Name, mobile number and email are required</p>}
               </div>
             )
           }

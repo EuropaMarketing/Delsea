@@ -36,11 +36,13 @@ export default function AdminServices() {
   const [variantForm, setVariantForm] = useState({ name: '', duration_minutes: 60, price: '' })
   const [addingVariant, setAddingVariant] = useState(false)
   const [savingVariant, setSavingVariant] = useState(false)
+  const [variantError, setVariantError] = useState('')
   // People-count (or other) sub-options nested under a duration variant — e.g.
   // Recovery Lounge's "60 min" variant priced separately for 1 vs 2 people.
   const [addingOptionFor, setAddingOptionFor] = useState<string | null>(null)
   const [optionForm, setOptionForm] = useState({ name: '', price: '' })
   const [savingOption, setSavingOption] = useState(false)
+  const [optionError, setOptionError] = useState('')
   const [sessionsList, setSessionsList] = useState<ServiceSession[]>([])
   const [sessionForm, setSessionForm] = useState({ day_of_week: 1, start_time: '09:00' })
   const [addingSession, setAddingSession] = useState(false)
@@ -97,6 +99,7 @@ export default function AdminServices() {
     setErrors({})
     setVariantForm({ name: '', duration_minutes: 60, price: '' })
     setAddingVariant(false)
+    setVariantError('')
     setAddingSession(false)
     setSessionForm({ day_of_week: 1, start_time: '09:00' })
     const [variantsRes, sessionsRes, staffRes, assignRes, addonsRes] = await Promise.all([
@@ -113,6 +116,7 @@ export default function AdminServices() {
     setVariantsList(variantRows)
     setAddingOptionFor(null)
     setOptionForm({ name: '', price: '' })
+    setOptionError('')
     setSessionsList((sessionsRes.data as ServiceSession[]) ?? [])
     setAllStaff((staffRes.data as Staff[]) ?? [])
     const aMap = new Map<string, Assignment>()
@@ -218,8 +222,9 @@ export default function AdminServices() {
   async function handleAddVariant() {
     if (!editTarget || !variantForm.name.trim()) return
     setSavingVariant(true)
+    setVariantError('')
     const priceInPence = Math.round(parseFloat(String(variantForm.price)) * 100) || 0
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('service_variants')
       .insert({
         service_id: editTarget.id,
@@ -229,7 +234,9 @@ export default function AdminServices() {
         sort_order: variantsList.length,
       })
       .select().single()
-    if (data) {
+    if (error) {
+      setVariantError(error.message)
+    } else if (data) {
       setVariantsList((prev) => [...prev, data as ServiceVariant])
       setVariantForm({ name: '', duration_minutes: 60, price: '' })
       setAddingVariant(false)
@@ -245,9 +252,10 @@ export default function AdminServices() {
   async function handleAddVariantOption(variantId: string) {
     if (!optionForm.name.trim()) return
     setSavingOption(true)
+    setOptionError('')
     const priceInPence = Math.round(parseFloat(String(optionForm.price)) * 100) || 0
     const variant = variantsList.find((v) => v.id === variantId)
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('service_variant_options')
       .insert({
         variant_id: variantId,
@@ -256,7 +264,9 @@ export default function AdminServices() {
         sort_order: variant?.options?.length ?? 0,
       })
       .select().single()
-    if (data) {
+    if (error) {
+      setOptionError(error.message)
+    } else if (data) {
       const option = data as ServiceVariantOption
       setVariantsList((prev) => prev.map((v) => v.id === variantId ? { ...v, options: [...(v.options ?? []), option] } : v))
       setOptionForm({ name: '', price: '' })
@@ -589,7 +599,7 @@ export default function AdminServices() {
                 {!addingVariant && (
                   <button
                     type="button"
-                    onClick={() => setAddingVariant(true)}
+                    onClick={() => { setAddingVariant(true); setVariantError('') }}
                     className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-full border transition-colors"
                     style={{ borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
                   >
@@ -655,12 +665,13 @@ export default function AdminServices() {
                           className="w-24"
                         />
                         <Button size="sm" loading={savingOption} onClick={() => handleAddVariantOption(v.id)}>Add</Button>
-                        <Button size="sm" variant="secondary" onClick={() => { setAddingOptionFor(null); setOptionForm({ name: '', price: '' }) }}>Cancel</Button>
+                        <Button size="sm" variant="secondary" onClick={() => { setAddingOptionFor(null); setOptionForm({ name: '', price: '' }); setOptionError('') }}>Cancel</Button>
+                        {optionError && <p className="text-xs text-red-600 w-full">{optionError}</p>}
                       </div>
                     ) : (
                       <button
                         type="button"
-                        onClick={() => { setAddingOptionFor(v.id); setOptionForm({ name: '', price: '' }) }}
+                        onClick={() => { setAddingOptionFor(v.id); setOptionForm({ name: '', price: '' }); setOptionError('') }}
                         className="flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-gray-600 transition-colors pt-0.5"
                       >
                         <Plus className="h-3 w-3" /> Add option (e.g. by number of people)
@@ -698,8 +709,9 @@ export default function AdminServices() {
                   </div>
                   <div className="flex gap-2">
                     <Button size="sm" loading={savingVariant} onClick={handleAddVariant}>Add</Button>
-                    <Button size="sm" variant="secondary" onClick={() => setAddingVariant(false)}>Cancel</Button>
+                    <Button size="sm" variant="secondary" onClick={() => { setAddingVariant(false); setVariantError('') }}>Cancel</Button>
                   </div>
+                  {variantError && <p className="text-xs text-red-600">{variantError}</p>}
                 </div>
               )}
             </div>

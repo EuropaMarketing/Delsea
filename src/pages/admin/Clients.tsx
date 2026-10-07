@@ -1043,6 +1043,21 @@ function ResponseValue({ field, responses }: { field: FormField; responses: Resp
     )
   }
 
+  if (field.field_type === 'personal_details') {
+    const pd = (val as { pd_name?: string; pd_phone?: string; pd_dob?: string; pd_email?: string }) ?? {}
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+        <p className="text-sm text-gray-800">
+          {pd.pd_name || '—'}
+          {pd.pd_phone && ` · ${pd.pd_phone}`}
+          {pd.pd_email && ` · ${pd.pd_email}`}
+          {pd.pd_dob && ` · ${format(parseISO(pd.pd_dob), 'd MMM yyyy')}`}
+        </p>
+      </div>
+    )
+  }
+
   if (field.field_type === 'signature') {
     const sig = (val as { signature_name?: string; signed_at?: string }) ?? {}
     return (

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Plus, Pencil, Trash2, ChevronUp, ChevronDown, ClipboardList,
   ToggleRight, Type, AlignLeft, CheckSquare, Phone, Heading1, X, Save, Eye, EyeOff,
-  ChevronRight, ChevronLeft, CheckCircle2, List, ListChecks, PenTool, CalendarDays, Smartphone,
+  ChevronRight, ChevronLeft, CheckCircle2, List, ListChecks, PenTool, CalendarDays, Smartphone, UserCircle2,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/Button'
@@ -32,6 +32,7 @@ const FIELD_TYPES: { type: FormField['field_type']; label: string; icon: typeof 
   { type: 'multi_select',      label: 'Multiple Choice',   icon: ListChecks,  color: 'text-teal-600 bg-teal-50' },
   { type: 'checkbox',          label: 'Acknowledgement',   icon: CheckSquare, color: 'text-green-600 bg-green-50' },
   { type: 'emergency_contact', label: 'Emergency Contact', icon: Phone,       color: 'text-red-600 bg-red-50' },
+  { type: 'personal_details',  label: 'Personal Details',  icon: UserCircle2, color: 'text-lime-600 bg-lime-50' },
   { type: 'signature',         label: 'Signature',         icon: PenTool,     color: 'text-indigo-600 bg-indigo-50' },
 ]
 
@@ -305,6 +306,8 @@ export default function AdminForms() {
       type === 'dropdown' ? 'Select an option' :
       type === 'multi_select' ? 'Select all that apply' :
       type === 'checkbox' ? 'I confirm that I have read and understood the above' :
+      type === 'personal_details' ? 'Personal Details' :
+      type === 'signature' ? 'Signature' :
       'Emergency Contact'
     const defaultOptions = CHOICE_FIELD_TYPES.includes(type) ? { choices: ['Option 1', 'Option 2'] } : {}
     const { data, error } = await supabase
