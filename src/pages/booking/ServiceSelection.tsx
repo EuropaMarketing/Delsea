@@ -276,38 +276,51 @@ export default function ServiceSelection() {
                 const chosenVariant = activeVariants.find((v) => v.id === selectedVariants[service.id])
                 const activeOptions = (chosenVariant?.options ?? []).filter((o) => o.is_active).sort((a, b) => a.sort_order - b.sort_order)
                 return activeVariants.length > 0 ? (
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap gap-1.5">
-                      {activeVariants.map((v) => (
-                        <button
-                          key={v.id}
-                          onClick={(e) => { e.stopPropagation(); handleSelectVariant(service, v) }}
-                          className={`px-2.5 py-1 text-xs font-medium border rounded-full transition-colors ${
-                            selectedVariants[service.id] === v.id
-                              ? 'bg-(--color-primary) text-white border-(--color-primary)'
-                              : 'bg-white text-gray-600 border-gray-200 hover:border-(--color-primary) hover:text-(--color-primary)'
-                          }`}
-                        >
-                          {v.name}{!activeOptions.length || v.id !== chosenVariant?.id ? <> · {formatCurrency(v.price)}</> : null}
-                        </button>
-                      ))}
+                  <div className="space-y-2.5">
+                    <div>
+                      <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1.5">Choose duration</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {activeVariants.map((v) => {
+                          const vOptions = (v.options ?? []).filter((o) => o.is_active)
+                          const fromPrice = vOptions.length ? Math.min(...vOptions.map((o) => o.price)) : v.price
+                          return (
+                            <button
+                              key={v.id}
+                              onClick={(e) => { e.stopPropagation(); handleSelectVariant(service, v) }}
+                              className={`px-2.5 py-1 text-xs font-medium border rounded-full transition-colors ${
+                                selectedVariants[service.id] === v.id
+                                  ? 'bg-(--color-primary) text-white border-(--color-primary)'
+                                  : 'bg-white text-gray-600 border-gray-200 hover:border-(--color-primary) hover:text-(--color-primary)'
+                              }`}
+                            >
+                              {v.name} · {vOptions.length ? 'from ' : ''}{formatCurrency(fromPrice)}
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
                     {chosenVariant && activeOptions.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 pl-1">
-                        {activeOptions.map((o) => (
-                          <button
-                            key={o.id}
-                            onClick={(e) => { e.stopPropagation(); handleSelectOption(service, chosenVariant, o) }}
-                            className={`px-2.5 py-1 text-xs font-medium border rounded-full transition-colors ${
-                              selectedOptions[service.id] === o.id
-                                ? 'bg-gray-800 text-white border-gray-800'
-                                : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
-                            }`}
-                          >
-                            {o.name} · {formatCurrency(o.price)}
-                          </button>
-                        ))}
+                      <div className="pl-2 border-l-2 border-gray-100">
+                        <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1.5">Choose an option</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {activeOptions.map((o) => (
+                            <button
+                              key={o.id}
+                              onClick={(e) => { e.stopPropagation(); handleSelectOption(service, chosenVariant, o) }}
+                              className={`px-2.5 py-1 text-xs font-medium border rounded-full transition-colors ${
+                                selectedOptions[service.id] === o.id
+                                  ? 'bg-gray-800 text-white border-gray-800'
+                                  : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                              }`}
+                            >
+                              {o.name} · {formatCurrency(o.price)}
+                            </button>
+                          ))}
+                        </div>
                       </div>
+                    )}
+                    {chosenVariant && activeOptions.length > 0 && !selectedOptions[service.id] && (
+                      <p className="text-xs text-amber-600">Select an option above to continue.</p>
                     )}
                   </div>
                 ) : (
@@ -325,7 +338,23 @@ export default function ServiceSelection() {
         </div>
       )}
 
-      <div className="mt-6 flex justify-end">
+      {(() => {
+        if (!selected) return null
+        const svc = services.find((s) => s.id === selected)
+        const activeVariants = (svc?.variants ?? []).filter((v) => v.is_active)
+        if (!activeVariants.length) return null
+        if (!selectedVariants[selected]) {
+          return <p className="mt-4 text-sm text-amber-600 text-right">Choose a duration above to continue.</p>
+        }
+        const chosenVariant = activeVariants.find((v) => v.id === selectedVariants[selected])
+        const activeOptions = (chosenVariant?.options ?? []).filter((o) => o.is_active)
+        if (activeOptions.length > 0 && !selectedOptions[selected]) {
+          return <p className="mt-4 text-sm text-amber-600 text-right">Choose an option above to continue.</p>
+        }
+        return null
+      })()}
+
+      <div className="mt-2 flex justify-end">
         <Button
           size="lg"
           disabled={(() => {

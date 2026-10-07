@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
-import { CheckCircle2, UserCircle2, Ticket } from 'lucide-react'
+import { CheckCircle2, UserCircle2, Ticket, Users } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { useBookingStore } from '@/store/bookingStore'
+import { useBookingStore, type GuestDetail } from '@/store/bookingStore'
 import { useAuthStore } from '@/store/authStore'
 import { formatCurrency, formatDuration } from '@/lib/currency'
 import { Input, PasswordInput, Textarea } from '@/components/ui/Input'
@@ -14,7 +14,7 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function CustomerDetails() {
   const navigate = useNavigate()
-  const { draft, setCustomer, services, staff, useToken, setTokenChoice } = useBookingStore()
+  const { draft, setCustomer, services, staff, useToken, setTokenChoice, guestDetails, setGuestDetails } = useBookingStore()
   const { user } = useAuthStore()
 
   const [form, setForm] = useState({
@@ -24,6 +24,12 @@ export default function CustomerDetails() {
     notes: draft.notes || '',
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
+
+  // One guest entry per extra spot beyond the account holder's own
+  const numGuests = Math.max(0, (draft.spotsBooked ?? 1) - 1)
+  const [guests, setGuests] = useState<GuestDetail[]>(() =>
+    Array.from({ length: numGuests }, (_, i) => guestDetails[i] ?? { name: '', phone: '', email: '' })
+  )
   const [tokenInfo, setTokenInfo] = useState<{ membershipId: string; planName: string; tokens: number; serviceCategory: string | null } | null>(null)
 
   // Sign-in flow for returning customers
@@ -105,12 +111,21 @@ export default function CustomerDetails() {
     if (!form.name.trim()) e.name = 'Name is required'
     if (!form.email.trim()) e.email = 'Email is required'
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = 'Invalid email'
+    guests.forEach((g, i) => {
+      if (!g.name.trim()) e[`guest_${i}_name`] = 'Name is required'
+    })
     return e
   }
 
   function handleChange(field: string, value: string) {
     setForm((f) => ({ ...f, [field]: value }))
     if (errors[field]) setErrors((e) => { const n = { ...e }; delete n[field]; return n })
+  }
+
+  function handleGuestChange(index: number, field: keyof GuestDetail, value: string) {
+    setGuests((prev) => prev.map((g, i) => i === index ? { ...g, [field]: value } : g))
+    const key = `guest_${index}_${field}`
+    if (errors[key]) setErrors((e) => { const n = { ...e }; delete n[key]; return n })
   }
 
   function handleNext() {
@@ -122,6 +137,7 @@ export default function CustomerDetails() {
       customerPhone: form.phone,
       notes: form.notes,
     })
+    setGuestDetails(guests)
     navigate('/confirm')
   }
 
@@ -296,6 +312,45 @@ export default function CustomerDetails() {
             onChange={(e) => handleChange('phone', e.target.value)}
             placeholder="+44 7700 900000"
           />
+
+          {numGuests > 0 && (
+            <Card padding="md" className="bg-gray-50">
+              <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+                <Users className="h-4 w-4" /> Who else is attending?
+              </h2>
+              <div className="space-y-4">
+                {guests.map((g, i) => (
+                  <div key={i} className="space-y-2">
+                    <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Guest {i + 1}</p>
+                    <Input
+                      label="Name"
+                      value={g.name}
+                      onChange={(e) => handleGuestChange(i, 'name', e.target.value)}
+                      error={errors[`guest_${i}_name`]}
+                      placeholder="Full name"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        label="Phone (optional)"
+                        type="tel"
+                        value={g.phone}
+                        onChange={(e) => handleGuestChange(i, 'phone', e.target.value)}
+                        placeholder="07700 900000"
+                      />
+                      <Input
+                        label="Email (optional)"
+                        type="email"
+                        value={g.email}
+                        onChange={(e) => handleGuestChange(i, 'email', e.target.value)}
+                        placeholder="name@email.com"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
           <Textarea
             label="Notes (optional)"
             value={form.notes}
@@ -333,11 +388,27 @@ export default function CustomerDetails() {
                 <span style={{ color: 'var(--color-primary)' }}>{draft.timeSlot}</span>
               </dd>
             </div>
+            {(draft.spotsBooked ?? 1) > 1 && (
+              <div>
+                <dt className="text-gray-500 text-xs font-medium uppercase tracking-wide">Spots</dt>
+                <dd className="font-medium text-gray-900 mt-0.5">{draft.spotsBooked}</dd>
+              </div>
+            )}
             <div className="pt-3 border-t border-gray-100">
               <dt className="text-gray-500 text-xs font-medium uppercase tracking-wide">Total</dt>
-              <dd className="font-bold text-xl text-gray-900 mt-0.5">
-                {service ? formatCurrency(draft.variantPrice ?? service.price) : '—'}
-              </dd>
+              {useToken ? (
+                <dd className="mt-0.5">
+                  <span className="font-semibold text-gray-400 line-through mr-2">
+                    {service ? formatCurrency((draft.variantPrice ?? service.price) * (draft.spotsBooked ?? 1)) : '—'}
+                  </span>
+                  <span className="font-bold text-xl" style={{ color: 'var(--color-primary)' }}>Free</span>
+                  <p className="text-xs text-gray-400 mt-0.5">Paid via membership</p>
+                </dd>
+              ) : (
+                <dd className="font-bold text-xl text-gray-900 mt-0.5">
+                  {service ? formatCurrency((draft.variantPrice ?? service.price) * (draft.spotsBooked ?? 1)) : '—'}
+                </dd>
+              )}
             </div>
           </dl>
         </Card>

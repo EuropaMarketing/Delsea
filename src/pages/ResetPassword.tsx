@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { CheckCircle2, KeyRound } from 'lucide-react'
+import { CheckCircle2, KeyRound, AlertTriangle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { PasswordInput } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
@@ -12,6 +12,30 @@ export default function ResetPassword() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
+  // Supabase's recovery link puts an error directly in the URL when the link
+  // itself is invalid/expired (e.g. already used, or opened too long after
+  // sending) — that never reaches handleReset, so it must be checked up front.
+  const [linkInvalid, setLinkInvalid] = useState(false)
+  const [checkingLink, setCheckingLink] = useState(true)
+
+  useEffect(() => {
+    async function checkLink() {
+      const hash = window.location.hash
+      const search = window.location.search
+      if (hash.includes('error=') || search.includes('error=')) {
+        setLinkInvalid(true)
+        setCheckingLink(false)
+        return
+      }
+      // detectSessionInUrl runs as part of client init — getSession() awaits
+      // that same lock, so this reliably reflects whether the recovery link
+      // actually established a session before the user can submit a password.
+      const { data } = await supabase.auth.getSession()
+      if (!data.session) setLinkInvalid(true)
+      setCheckingLink(false)
+    }
+    checkLink()
+  }, [])
 
   async function handleReset() {
     if (password.length < 8) { setError('Password must be at least 8 characters'); return }
@@ -21,6 +45,7 @@ export default function ResetPassword() {
     const { error: err } = await supabase.auth.updateUser({ password })
     if (err) {
       setError('This reset link has expired. Please request a new one from the sign-in page.')
+      setLinkInvalid(true)
     } else {
       setDone(true)
     }
@@ -39,6 +64,19 @@ export default function ResetPassword() {
               <h1 className="text-xl font-bold text-gray-900 mb-2">Password updated</h1>
               <p className="text-sm text-gray-500 mb-6">You're now signed in. Head to My Bookings to see your appointments.</p>
               <Button fullWidth onClick={() => navigate('/my-bookings')}>View My Bookings</Button>
+            </div>
+          ) : checkingLink ? (
+            <div className="text-center py-8">
+              <div className="animate-spin h-6 w-6 border-2 border-gray-300 border-t-gray-600 rounded-full mx-auto" />
+            </div>
+          ) : linkInvalid ? (
+            <div className="text-center">
+              <div className="w-14 h-14 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="h-7 w-7 text-amber-600" />
+              </div>
+              <h1 className="text-xl font-bold text-gray-900 mb-2">Link expired or already used</h1>
+              <p className="text-sm text-gray-500 mb-6">Password reset links only work once and expire after a short time. Request a new one from the sign-in page.</p>
+              <Button fullWidth onClick={() => navigate('/my-bookings')}>Back to Sign In</Button>
             </div>
           ) : (
             <>

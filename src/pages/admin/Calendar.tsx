@@ -32,6 +32,8 @@ const SERVICE_COLORS = [
   '#7C3AED', '#DB2777', '#0891B2', '#059669', '#D97706', '#DC2626',
 ]
 
+type BookingGuest = { id: string; booking_id: string; name: string; phone: string | null; email: string | null }
+
 type RichBooking = Omit<Booking, 'staff' | 'service' | 'customer' | 'price_override'> & {
   discount_amount: number
   payment_status: string
@@ -230,6 +232,7 @@ export default function AdminCalendar() {
   const [selectedBooking, setSelectedBooking] = useState<RichBooking | null>(null)
   const [detailCapacity, setDetailCapacity] = useState<{ taken: number; max: number } | null>(null)
   const [detailAddons, setDetailAddons] = useState<BookingAddon[]>([])
+  const [detailGuests, setDetailGuests] = useState<BookingGuest[]>([])
   const [customerBookings, setCustomerBookings] = useState<CustomerBookingHistory[]>([])
   const [customerForms, setCustomerForms] = useState<CustomerFormHistory[]>([])
   const [customerMemberships, setCustomerMemberships] = useState<CustomerMembershipHistory[]>([])
@@ -652,6 +655,43 @@ export default function AdminCalendar() {
       return isBefore(bufferedNewStart, bEnd) && isAfter(bufferedNewEnd, bStart)
     })
     return bookingConflict || blockConflict
+  }
+
+  // Mirrors create_booking()'s server-side room assignment for the customer
+  // flow — the admin's manual booking create/edit used raw inserts/updates that
+  // never auto-assigned a room or checked for a resource double-booking at all.
+  async function resolveResourceForBooking(
+    serviceId: string,
+    startsAt: Date,
+    endsAt: Date,
+    excludeBookingId?: string,
+  ): Promise<{ resourceId: string | null; conflict: boolean }> {
+    const { data: priorityRows } = await supabase
+      .from('service_resources')
+      .select('resource_id')
+      .eq('service_id', serviceId)
+      .order('priority')
+    const candidateIds = priorityRows?.length
+      ? priorityRows.map(r => r.resource_id as string)
+      : (() => {
+          const svc = services.find(s => s.id === serviceId)
+          return svc?.resource_id ? [svc.resource_id] : []
+        })()
+    if (!candidateIds.length) return { resourceId: null, conflict: false }
+
+    for (const resourceId of candidateIds) {
+      let query = supabase
+        .from('bookings')
+        .select('id')
+        .eq('resource_id', resourceId)
+        .neq('status', 'cancelled')
+        .lt('starts_at', endsAt.toISOString())
+        .gt('ends_at', startsAt.toISOString())
+      if (excludeBookingId) query = query.neq('id', excludeBookingId)
+      const { data: conflicts } = await query.limit(1)
+      if (!conflicts?.length) return { resourceId, conflict: false }
+    }
+    return { resourceId: null, conflict: true }
   }
 
   async function fetchBookingAddons(bookingId: string): Promise<BookingAddon[]> {
@@ -1279,6 +1319,9 @@ export default function AdminCalendar() {
     fetchSlotCapacity(b.service_id, b.starts_at).then(setDetailCapacity)
     setDetailAddons([])
     fetchBookingAddons(b.id).then(setDetailAddons)
+    setDetailGuests([])
+    supabase.from('booking_guests').select('id, booking_id, name, phone, email').eq('booking_id', b.id)
+      .then(({ data }) => setDetailGuests((data as BookingGuest[] | null) ?? []))
     setCustomerBookings([]); setCustomerForms([]); setCustomerMemberships([])
     fetchCustomerSidebar(b.customer_id, b.id)
     setLinkedBookings([])
@@ -1453,9 +1496,28 @@ export default function AdminCalendar() {
         return
       }
     }
+    let resolvedResourceId = editResourceId
+    if (editResourceId) {
+      const { data: resourceConflicts } = await supabase
+        .from('bookings')
+        .select('id')
+        .eq('resource_id', editResourceId)
+        .neq('status', 'cancelled')
+        .neq('id', selectedBooking.id)
+        .lt('starts_at', endsAt.toISOString())
+        .gt('ends_at', startsAt.toISOString())
+        .limit(1)
+      if (resourceConflicts?.length) {
+        setEditError('That resource is already booked at this time. Choose a different resource or time.')
+        return
+      }
+    } else {
+      const { resourceId } = await resolveResourceForBooking(editServiceId, startsAt, endsAt, selectedBooking.id)
+      resolvedResourceId = resourceId
+    }
     setEditSaving(true)
     setEditError('')
-    const matchedResource = resources.find((r) => r.id === editResourceId) ?? null
+    const matchedResource = resources.find((r) => r.id === resolvedResourceId) ?? null
     const matchedEquipment = equipmentResources.find((r) => r.id === editEquipmentResourceId) ?? null
     const matchedStaff = editStaffId ? staff.find(s => s.id === editStaffId) ?? null : null
     const enteredPrice = editPrice.trim() ? Math.round(parseFloat(editPrice) * 100) : newService.price
@@ -1471,7 +1533,7 @@ export default function AdminCalendar() {
         ends_at: endsAt.toISOString(),
         price_override: priceOverride,
         notes: editNotes.trim() || null,
-        resource_id: editResourceId,
+        resource_id: resolvedResourceId,
         equipment_resource_id: editEquipmentResourceId,
         spots_booked: newService.is_group_session ? editSpotsBooked : 1,
       })
@@ -1502,7 +1564,7 @@ export default function AdminCalendar() {
         ends_at: endsAt.toISOString(),
         price_override: priceOverride,
         notes: editNotes.trim() || null,
-        resource_id: editResourceId,
+        resource_id: resolvedResourceId,
         resource: resourceObj,
         equipment_resource_id: editEquipmentResourceId,
         equipment_resource: equipmentObj,
@@ -1749,6 +1811,11 @@ export default function AdminCalendar() {
             continue
           }
         }
+        const { resourceId, conflict: resourceConflict } = await resolveResourceForBooking(nbServiceId, occStart, occEnd)
+        if (resourceConflict) {
+          skipped.push(format(occStart, 'EEE d MMM yyyy, HH:mm'))
+          continue
+        }
         rowsToInsert.push({
           business_id: BUSINESS_ID,
           customer_id: customerId,
@@ -1760,6 +1827,7 @@ export default function AdminCalendar() {
           notes: nbNotes.trim() || null,
           price_override: priceOverride,
           spots_booked: service.is_group_session ? nbSpotsBooked : 1,
+          resource_id: resourceId,
         })
       }
 
@@ -2836,6 +2904,16 @@ export default function AdminCalendar() {
                   <dd className="font-semibold text-gray-900">
                     {selectedBooking.spots_booked ?? 1}
                     {detailCapacity && <span className="text-gray-400 font-normal"> · {detailCapacity.taken} of {detailCapacity.max} booked</span>}
+                  </dd>
+                </div>
+              )}
+              {detailGuests.length > 0 && (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500 shrink-0 flex items-center gap-1"><Users className="h-3.5 w-3.5" /> Guests</dt>
+                  <dd className="text-gray-900 text-right text-xs space-y-0.5">
+                    {detailGuests.map(g => (
+                      <p key={g.id}>{g.name}{g.phone ? ` · ${g.phone}` : ''}{g.email ? ` · ${g.email}` : ''}</p>
+                    ))}
                   </dd>
                 </div>
               )}

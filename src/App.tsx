@@ -24,6 +24,7 @@ import LinkedService from '@/pages/booking/LinkedService'
 import CustomerDetails from '@/pages/booking/CustomerDetails'
 import Confirmation from '@/pages/booking/Confirmation'
 import MyBookings from '@/pages/booking/MyBookings'
+import Account from '@/pages/booking/Account'
 import BookingConfirmed from '@/pages/booking/BookingConfirmed'
 import RescheduleConfirm from '@/pages/booking/RescheduleConfirm'
 import MembershipPlans from '@/pages/booking/MembershipPlans'
@@ -59,7 +60,7 @@ import StaffPortal from '@/pages/staff/StaffPortal'
 import { useAuthStore } from '@/store/authStore'
 
 // Customer-facing paths that a staff-only (non-admin) user should never land on.
-const CUSTOMER_PATHS = ['/', '/book', '/staff', '/addons', '/datetime', '/linked-service', '/details', '/confirm', '/payment', '/my-bookings', '/booking-confirmed', '/events', '/memberships', '/about', '/reschedule-confirm', '/membership-confirmed']
+const CUSTOMER_PATHS = ['/', '/book', '/staff', '/addons', '/datetime', '/linked-service', '/details', '/confirm', '/payment', '/my-bookings', '/account', '/booking-confirmed', '/events', '/memberships', '/about', '/reschedule-confirm', '/membership-confirmed']
 
 function StaffRedirectGuard() {
   const { isStaff, isAdmin, initialized } = useAuthStore()
@@ -145,6 +146,14 @@ function AppRoutes() {
         element={
           <BookingLayout>
             <MyBookings />
+          </BookingLayout>
+        }
+      />
+      <Route
+        path="/account"
+        element={
+          <BookingLayout>
+            <Account />
           </BookingLayout>
         }
       />

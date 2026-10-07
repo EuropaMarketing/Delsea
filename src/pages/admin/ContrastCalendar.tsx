@@ -149,8 +149,17 @@ type SessionRow = {
 type Attendee = {
   id: string
   spots_booked: number
+  status: string
+  checked_in_at: string | null
+  payment_status: string | null
+  price_override: number | null
+  service_id: string
+  customer_id: string
+  created_at: string
   customer: { name: string; email: string } | null
 }
+
+type BookingGuest = { id: string; booking_id: string; name: string; phone: string | null; email: string | null }
 
 type CustomerBookingHistory = {
   id: string
@@ -195,6 +204,11 @@ export default function AdminContrastCalendar() {
   const [selectedSession, setSelectedSession] = useState<SessionRow | null>(null)
   const [sessionAttendees, setSessionAttendees] = useState<Attendee[]>([])
   const [sessionAttendeesLoading, setSessionAttendeesLoading] = useState(false)
+  const [sessionFormAlerts, setSessionFormAlerts] = useState<Set<string>>(new Set())
+  const [sessionTokenPaid, setSessionTokenPaid] = useState<Set<string>>(new Set())
+  const [sessionGuestsByBooking, setSessionGuestsByBooking] = useState<Map<string, BookingGuest[]>>(new Map())
+  const [attendeeActionLoading, setAttendeeActionLoading] = useState<string | null>(null)
+  const [detailGuests, setDetailGuests] = useState<BookingGuest[]>([])
   const [sessionCancelOpen, setSessionCancelOpen] = useState(false)
   const [sessionCanceling, setSessionCanceling] = useState(false)
   const [sessionCancelScope, setSessionCancelScope] = useState<'one' | 'all'>('one')
@@ -628,6 +642,43 @@ export default function AdminContrastCalendar() {
     return { taken, max: service.max_capacity ?? 8 }
   }
 
+  // Mirrors create_booking()'s server-side room assignment for the customer
+  // flow — the admin's manual booking create/edit used raw inserts/updates that
+  // never auto-assigned a room or checked for a resource double-booking at all.
+  async function resolveResourceForBooking(
+    serviceId: string,
+    startsAt: Date,
+    endsAt: Date,
+    excludeBookingId?: string,
+  ): Promise<{ resourceId: string | null; conflict: boolean }> {
+    const { data: priorityRows } = await supabase
+      .from('service_resources')
+      .select('resource_id')
+      .eq('service_id', serviceId)
+      .order('priority')
+    const candidateIds = priorityRows?.length
+      ? priorityRows.map(r => r.resource_id as string)
+      : (() => {
+          const svc = services.find(s => s.id === serviceId)
+          return svc?.resource_id ? [svc.resource_id] : []
+        })()
+    if (!candidateIds.length) return { resourceId: null, conflict: false }
+
+    for (const resourceId of candidateIds) {
+      let query = supabase
+        .from('bookings')
+        .select('id')
+        .eq('resource_id', resourceId)
+        .neq('status', 'cancelled')
+        .lt('starts_at', endsAt.toISOString())
+        .gt('ends_at', startsAt.toISOString())
+      if (excludeBookingId) query = query.neq('id', excludeBookingId)
+      const { data: conflicts } = await query.limit(1)
+      if (!conflicts?.length) return { resourceId, conflict: false }
+    }
+    return { resourceId: null, conflict: true }
+  }
+
   async function fetchBookingAddons(bookingId: string): Promise<BookingAddon[]> {
     const { data } = await supabase
       .from('booking_addons')
@@ -700,14 +751,40 @@ export default function AdminContrastCalendar() {
     setSelectedSession(session)
     setSessionCancelOpen(false)
     setSessionAttendeesLoading(true)
+    setSessionFormAlerts(new Set())
+    setSessionTokenPaid(new Set())
+    setSessionGuestsByBooking(new Map())
     const { data } = await supabase
       .from('bookings')
-      .select('id, spots_booked, customer:customers(name,email)')
+      .select('id, spots_booked, status, checked_in_at, payment_status, price_override, service_id, customer_id, created_at, customer:customers(name,email)')
       .eq('service_id', session.service_id)
       .eq('starts_at', sessionStartsAt(session))
       .neq('status', 'cancelled')
-    setSessionAttendees((data as unknown as Attendee[]) ?? [])
+    const attendees = (data as unknown as Attendee[]) ?? []
+    setSessionAttendees(attendees)
     setSessionAttendeesLoading(false)
+    if (attendees.length) {
+      loadFormAlertSet(BUSINESS_ID, attendees).then(setSessionFormAlerts)
+      supabase
+        .from('membership_transactions')
+        .select('booking_id')
+        .in('booking_id', attendees.map(a => a.id))
+        .eq('type', 'redeem')
+        .then(({ data: redemptions }) => setSessionTokenPaid(new Set((redemptions ?? []).map(r => r.booking_id as string))))
+      supabase
+        .from('booking_guests')
+        .select('id, booking_id, name, phone, email')
+        .in('booking_id', attendees.map(a => a.id))
+        .then(({ data: guests }) => {
+          const map = new Map<string, BookingGuest[]>()
+          for (const g of (guests as BookingGuest[] | null) ?? []) {
+            const arr = map.get(g.booking_id) ?? []
+            arr.push(g)
+            map.set(g.booking_id, arr)
+          }
+          setSessionGuestsByBooking(map)
+        })
+    }
   }
 
   function openAddAttendee(session: SessionRow) {
@@ -1073,6 +1150,31 @@ export default function AdminContrastCalendar() {
     setActionLoading(false)
   }
 
+  // Check-in / no-show acted on directly from the session's attendee list —
+  // keeps sessionAttendees in sync without needing to open each booking.
+  async function handleAttendeeCheckIn(attendeeId: string) {
+    setAttendeeActionLoading(attendeeId)
+    const checkedInAt = new Date().toISOString()
+    await supabase.from('bookings').update({ checked_in_at: checkedInAt }).eq('id', attendeeId)
+    setSessionAttendees(prev => prev.map(a => a.id === attendeeId ? { ...a, checked_in_at: checkedInAt } : a))
+    setAttendeeActionLoading(null)
+  }
+
+  async function handleAttendeeUndoCheckIn(attendeeId: string) {
+    setAttendeeActionLoading(attendeeId)
+    await supabase.from('bookings').update({ checked_in_at: null }).eq('id', attendeeId)
+    setSessionAttendees(prev => prev.map(a => a.id === attendeeId ? { ...a, checked_in_at: null } : a))
+    setAttendeeActionLoading(null)
+  }
+
+  async function handleAttendeeNoShow(attendeeId: string) {
+    if (!confirm('Mark this attendee as a no-show? This cancels their booking.')) return
+    setAttendeeActionLoading(attendeeId)
+    await supabase.from('bookings').update({ status: 'cancelled', cancellation_reason: 'No show' }).eq('id', attendeeId)
+    setSessionAttendees(prev => prev.filter(a => a.id !== attendeeId))
+    setAttendeeActionLoading(null)
+  }
+
 
   async function refreshEditTokenInfo(email: string | undefined, category: string | undefined, bookingId: string, checkExistingRedemption: boolean) {
     setEditTokenInfo(null)
@@ -1238,6 +1340,9 @@ export default function AdminContrastCalendar() {
     fetchSlotCapacity(b.service_id, b.starts_at).then(setDetailCapacity)
     setDetailAddons([])
     fetchBookingAddons(b.id).then(setDetailAddons)
+    setDetailGuests([])
+    supabase.from('booking_guests').select('id, booking_id, name, phone, email').eq('booking_id', b.id)
+      .then(({ data }) => setDetailGuests((data as BookingGuest[] | null) ?? []))
     setCustomerBookings([]); setCustomerForms([]); setCustomerMemberships([])
     fetchCustomerSidebar(b.customer_id, b.id)
     setLinkedBookings([])
@@ -1393,23 +1498,41 @@ export default function AdminContrastCalendar() {
     const newService = services.find(s => s.id === editServiceId)
     if (!newService) { setEditError('Select a service.'); return }
     if (!editDate || !editTime) { setEditError('Date and time are required.'); return }
+    const startsAt = new Date(`${editDate}T${editTime}:00`)
+    const selectedAddons = availableAddons.filter(a => editAddonIds.has(a.id))
+    const addonExtraDuration = selectedAddons.reduce((sum, a) => sum + a.duration_minutes, 0)
+    const endsAt = addMinutes(startsAt, newService.duration_minutes + addonExtraDuration)
     if (newService.is_group_session) {
-      const startsAtISO = new Date(`${editDate}T${editTime}:00`).toISOString()
-      const cap = await fetchSlotCapacity(editServiceId, startsAtISO, selectedBooking.id)
+      const cap = await fetchSlotCapacity(editServiceId, startsAt.toISOString(), selectedBooking.id)
       if (cap && cap.taken + editSpotsBooked > cap.max) {
         setEditError(`Not enough spots available. Only ${Math.max(cap.max - cap.taken, 0)} spot(s) remaining.`)
         return
       }
     }
+    let resolvedResourceId = editResourceId
+    if (editResourceId) {
+      const { data: resourceConflicts } = await supabase
+        .from('bookings')
+        .select('id')
+        .eq('resource_id', editResourceId)
+        .neq('status', 'cancelled')
+        .neq('id', selectedBooking.id)
+        .lt('starts_at', endsAt.toISOString())
+        .gt('ends_at', startsAt.toISOString())
+        .limit(1)
+      if (resourceConflicts?.length) {
+        setEditError('That resource is already booked at this time. Choose a different resource or time.')
+        return
+      }
+    } else {
+      const { resourceId } = await resolveResourceForBooking(editServiceId, startsAt, endsAt, selectedBooking.id)
+      resolvedResourceId = resourceId
+    }
     setEditSaving(true)
     setEditError('')
-    const matchedResource = resources.find((r) => r.id === editResourceId) ?? null
+    const matchedResource = resources.find((r) => r.id === resolvedResourceId) ?? null
     const matchedEquipment = equipmentResources.find((r) => r.id === editEquipmentResourceId) ?? null
     const matchedStaff = editStaffId ? staff.find(s => s.id === editStaffId) ?? null : null
-    const selectedAddons = availableAddons.filter(a => editAddonIds.has(a.id))
-    const addonExtraDuration = selectedAddons.reduce((sum, a) => sum + a.duration_minutes, 0)
-    const startsAt = new Date(`${editDate}T${editTime}:00`)
-    const endsAt = addMinutes(startsAt, newService.duration_minutes + addonExtraDuration)
     const enteredPrice = editPrice.trim() ? Math.round(parseFloat(editPrice) * 100) : newService.price
     const priceOverride = Number.isFinite(enteredPrice) && enteredPrice !== newService.price ? enteredPrice : null
 
@@ -1420,7 +1543,7 @@ export default function AdminContrastCalendar() {
       service_id: editServiceId,
       staff_id: editStaffId,
       price_override: priceOverride,
-      resource_id: editResourceId,
+      resource_id: resolvedResourceId,
       equipment_resource_id: editEquipmentResourceId,
       spots_booked: newService.is_group_session ? editSpotsBooked : 1,
     }
@@ -1484,7 +1607,7 @@ export default function AdminContrastCalendar() {
       staff_id: editStaffId,
       staff: staffObj,
       price_override: priceOverride,
-      resource_id: editResourceId,
+      resource_id: resolvedResourceId,
       resource: resourceObj,
       equipment_resource_id: editEquipmentResourceId,
       equipment_resource: equipmentObj,
@@ -1734,6 +1857,11 @@ export default function AdminContrastCalendar() {
             continue
           }
         }
+        const { resourceId, conflict: resourceConflict } = await resolveResourceForBooking(nbServiceId, occStart, occEnd)
+        if (resourceConflict) {
+          skipped.push(format(occStart, 'EEE d MMM yyyy, HH:mm'))
+          continue
+        }
         rowsToInsert.push({
           business_id: BUSINESS_ID,
           customer_id: customerId,
@@ -1745,6 +1873,7 @@ export default function AdminContrastCalendar() {
           notes: nbNotes.trim() || null,
           price_override: priceOverride,
           spots_booked: service.is_group_session ? nbSpotsBooked : 1,
+          resource_id: resourceId,
         })
       }
 
@@ -2451,6 +2580,16 @@ export default function AdminContrastCalendar() {
                   <dd className="font-semibold text-gray-900">
                     {selectedBooking.spots_booked ?? 1}
                     {detailCapacity && <span className="text-gray-400 font-normal"> · {detailCapacity.taken} of {detailCapacity.max} booked</span>}
+                  </dd>
+                </div>
+              )}
+              {detailGuests.length > 0 && (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500 shrink-0 flex items-center gap-1"><Users className="h-3.5 w-3.5" /> Guests</dt>
+                  <dd className="text-gray-900 text-right text-xs space-y-0.5">
+                    {detailGuests.map(g => (
+                      <p key={g.id}>{g.name}{g.phone ? ` · ${g.phone}` : ''}{g.email ? ` · ${g.email}` : ''}</p>
+                    ))}
                   </dd>
                 </div>
               )}
@@ -3281,17 +3420,74 @@ export default function AdminContrastCalendar() {
                 <p className="text-sm text-gray-400">No bookings yet — this session is still open online.</p>
               ) : (
                 <ul className="space-y-1.5">
-                  {sessionAttendees.map(a => (
-                    <li key={a.id}>
-                      <button
-                        onClick={() => openAttendeeBooking(a.id)}
-                        className="w-full flex justify-between text-sm bg-gray-50 hover:bg-gray-100 rounded-lg px-3 py-1.5 transition-colors text-left"
-                      >
-                        <span className="text-gray-800">{a.customer?.name ?? 'Unknown'}</span>
-                        <span className="text-gray-500">{a.spots_booked} spot{a.spots_booked !== 1 ? 's' : ''}</span>
-                      </button>
-                    </li>
-                  ))}
+                  {sessionAttendees.map(a => {
+                    const basePrice = services.find(s => s.id === a.service_id)?.price ?? 0
+                    const paidViaToken = sessionTokenPaid.has(a.id)
+                    const needsForm = sessionFormAlerts.has(a.id)
+                    const busy = attendeeActionLoading === a.id
+                    const guests = sessionGuestsByBooking.get(a.id) ?? []
+                    return (
+                      <li key={a.id} className="bg-gray-50 rounded-lg px-3 py-2 space-y-1.5">
+                        <button
+                          onClick={() => openAttendeeBooking(a.id)}
+                          className="w-full flex justify-between text-sm text-left hover:underline"
+                        >
+                          <span className="text-gray-800 font-medium">{a.customer?.name ?? 'Unknown'}</span>
+                          <span className="text-gray-500">{a.spots_booked} spot{a.spots_booked !== 1 ? 's' : ''}</span>
+                        </button>
+                        {guests.length > 0 && (
+                          <div className="pl-2 border-l-2 border-gray-200 space-y-0.5">
+                            {guests.map(g => (
+                              <p key={g.id} className="text-xs text-gray-600">
+                                + {g.name}{g.phone ? ` · ${g.phone}` : ''}{g.email ? ` · ${g.email}` : ''}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 flex-wrap text-xs">
+                          {paidViaToken ? (
+                            <span className="flex items-center gap-1 text-gray-600"><Ticket className="h-3 w-3" /> Membership</span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-gray-600">
+                              <CreditCard className="h-3 w-3" />
+                              {formatCurrency(a.price_override ?? basePrice)} · {(a.payment_status ?? 'unpaid').replaceAll('_', ' ')}
+                            </span>
+                          )}
+                          {needsForm ? (
+                            <span className="flex items-center gap-1 text-amber-600"><ClipboardList className="h-3 w-3" /> Form not completed</span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-green-600"><CheckCircle2 className="h-3 w-3" /> Form OK</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {a.checked_in_at ? (
+                            <button
+                              onClick={() => handleAttendeeUndoCheckIn(a.id)}
+                              disabled={busy}
+                              className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-green-50 border border-green-200 text-green-700 hover:bg-green-100 transition-colors disabled:opacity-50"
+                            >
+                              <UserCheck className="h-3 w-3" /> Checked in {format(parseISO(a.checked_in_at), 'HH:mm')} · Undo
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleAttendeeCheckIn(a.id)}
+                              disabled={busy}
+                              className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50"
+                            >
+                              <UserCheck className="h-3 w-3" /> Check In
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleAttendeeNoShow(a.id)}
+                            disabled={busy}
+                            className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-white border border-gray-200 text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50"
+                          >
+                            <XCircle className="h-3 w-3" /> No Show
+                          </button>
+                        </div>
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </div>

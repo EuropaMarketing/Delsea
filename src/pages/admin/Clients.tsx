@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { format, parseISO, isBefore, isPast } from 'date-fns'
-import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle, Pencil, X, Ban, Trash2, ShieldOff, Cake, Plus, StickyNote, Save } from 'lucide-react'
+import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle, Pencil, X, Ban, Trash2, ShieldOff, Cake, Plus, StickyNote, Save, UserCheck } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
@@ -113,6 +113,10 @@ export default function AdminClients() {
   // Staff-only notes — never shown to the customer
   const [staffNotesDraft, setStaffNotesDraft] = useState('')
   const [staffNotesSaving, setStaffNotesSaving] = useState(false)
+  // Online account invite (sets them up to sign in / set a password themselves)
+  const [accountInviteSending, setAccountInviteSending] = useState(false)
+  const [accountInviteStatus, setAccountInviteStatus] = useState<'idle' | 'sent' | 'error'>('idle')
+  const [accountInviteError, setAccountInviteError] = useState('')
   // Read-only appointment / completed-form viewers
   const [viewingBooking, setViewingBooking] = useState<Booking | null>(null)
   const [viewingFormResponse, setViewingFormResponse] = useState<ClientFormResponse | null>(null)
@@ -197,9 +201,13 @@ export default function AdminClients() {
       setDeleteError('')
       setMembershipActionTarget(null)
       setStaffNotesDraft('')
+      setAccountInviteStatus('idle')
+      setAccountInviteError('')
       return
     }
     setStaffNotesDraft(selected.internal_notes ?? '')
+    setAccountInviteStatus('idle')
+    setAccountInviteError('')
     setMembershipsLoading(true)
     loadMemberships(selected.id).then(() => setMembershipsLoading(false))
   }, [selected?.id])
@@ -314,9 +322,35 @@ export default function AdminClients() {
       return
     }
     const rows = await loadClients()
-    setSelected(rows.find(r => r.id === data.id) ?? null)
+    const created = rows.find(r => r.id === data.id) ?? null
+    setSelected(created)
     setNewClientOpen(false)
     setNewClientSaving(false)
+    if (created) handleSendAccountInvite(created)
+  }
+
+  async function handleSendAccountInvite(client: ClientRow) {
+    setAccountInviteSending(true)
+    setAccountInviteStatus('idle')
+    setAccountInviteError('')
+    const { data, error } = await supabase.functions.invoke('invite-customer', {
+      body: {
+        customer_id: client.id,
+        email: client.email,
+        redirect_to: `${window.location.origin}/reset-password`,
+      },
+    })
+    if (error || !data?.success) {
+      setAccountInviteStatus('error')
+      setAccountInviteError((data as { error?: string } | null)?.error ?? error?.message ?? 'Failed to send invite')
+    } else {
+      setAccountInviteStatus('sent')
+      if (data.user_id) {
+        setClients(prev => prev.map(c => c.id === client.id ? { ...c, user_id: data.user_id } : c))
+        setSelected(prev => prev && prev.id === client.id ? { ...prev, user_id: data.user_id } : prev)
+      }
+    }
+    setAccountInviteSending(false)
   }
 
   function openEditClient() {
@@ -689,6 +723,25 @@ export default function AdminClients() {
                   <p className="font-bold text-gray-900">{stat.value}</p>
                 </div>
               ))}
+            </div>
+
+            {/* Online account — lets the client sign in to My Bookings themselves */}
+            <div className="border border-gray-200 rounded-xl p-3 space-y-2">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+                <UserCheck className="h-3.5 w-3.5" /> Online Account
+              </p>
+              {selected.user_id ? (
+                <p className="text-sm text-green-700 flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 shrink-0" /> Has an online account</p>
+              ) : (
+                <p className="text-sm text-gray-500">No online account yet — they can't sign in to view bookings themselves.</p>
+              )}
+              <div className="flex items-center gap-3">
+                <Button size="sm" variant="secondary" loading={accountInviteSending} onClick={() => handleSendAccountInvite(selected)}>
+                  <Mail className="h-3.5 w-3.5" /> {selected.user_id ? 'Resend Setup Email' : 'Send Account Invite'}
+                </Button>
+                {accountInviteStatus === 'sent' && <span className="text-xs text-green-600">Email sent</span>}
+                {accountInviteStatus === 'error' && <span className="text-xs text-red-600">{accountInviteError}</span>}
+              </div>
             </div>
 
             {/* Staff-only notes — never shown to the customer */}

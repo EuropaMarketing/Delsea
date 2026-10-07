@@ -14,7 +14,7 @@ const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 
 export default function Confirmation() {
   const navigate = useNavigate()
-  const { draft, services, staff, selectedAddons, reset, useToken, tokenMembershipId, tokenPlanName, eventSessionId, linkedService } = useBookingStore()
+  const { draft, services, staff, selectedAddons, reset, useToken, tokenMembershipId, tokenPlanName, eventSessionId, linkedService, guestDetails } = useBookingStore()
   const { user } = useAuthStore()
   const { config: brandConfig } = useBrandStore()
 
@@ -137,6 +137,7 @@ export default function Confirmation() {
           p_spots_booked: draft.spotsBooked ?? 1,
           p_session_id: eventSessionId,
           p_variant_option_id: draft.variantOptionId ?? null,
+          p_guests: guestDetails.length ? guestDetails.filter(g => g.name.trim()) : null,
         })
 
       if (bErr) throw bErr
@@ -318,6 +319,14 @@ export default function Confirmation() {
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Spots</dt>
                   <dd className="font-semibold text-gray-900">{draft.spotsBooked}</dd>
+                </div>
+              )}
+              {guestDetails.filter(g => g.name.trim()).length > 0 && (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500 shrink-0">Guests</dt>
+                  <dd className="text-gray-700 text-right text-xs space-y-0.5">
+                    {guestDetails.filter(g => g.name.trim()).map((g, i) => <p key={i}>{g.name}</p>)}
+                  </dd>
                 </div>
               )}
               <div className="flex justify-between">

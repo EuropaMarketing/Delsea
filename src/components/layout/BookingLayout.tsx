@@ -58,6 +58,9 @@ export function BookingLayout({ children }: { children: React.ReactNode }) {
                     <span>Admin</span>
                   </Link>
                 )}
+                <Link to="/account" className="text-xs text-gray-400 hover:text-gray-600 transition-colors whitespace-nowrap">
+                  Account
+                </Link>
                 <button
                   onClick={() => supabase.auth.signOut()}
                   className="text-xs text-gray-400 hover:text-gray-600 transition-colors whitespace-nowrap"
