@@ -231,6 +231,8 @@ export default function AdminContrastCalendar() {
   const [nbBookingMode, setNbBookingMode] = useState<'customer' | 'open'>('customer')
   const [nbStaffId, setNbStaffId] = useState<string | null>(null)
   const [nbServiceId, setNbServiceId] = useState('')
+  const [nbVariantId, setNbVariantId] = useState('')
+  const [nbVariantOptionId, setNbVariantOptionId] = useState('')
   const [nbDate, setNbDate] = useState('')
   const [nbTime, setNbTime] = useState('')
   const [nbName, setNbName] = useState('')
@@ -322,6 +324,8 @@ export default function AdminContrastCalendar() {
   const [editCustomerSuggestions, setEditCustomerSuggestions] = useState<Customer[]>([])
   const [editCustomerShowSuggestions, setEditCustomerShowSuggestions] = useState(false)
   const [editServiceId, setEditServiceId] = useState('')
+  const [editVariantId, setEditVariantId] = useState('')
+  const [editVariantOptionId, setEditVariantOptionId] = useState('')
   const [editStaffId, setEditStaffId] = useState<string | null>(null)
   const [editDate, setEditDate] = useState('')
   const [editTime, setEditTime] = useState('')
@@ -448,7 +452,7 @@ export default function AdminContrastCalendar() {
           .gte('starts_at', dayStart)
           .lte('starts_at', dayEnd)
           .neq('status', 'cancelled'),
-        supabase.from('services').select('*').in('id', contrastServiceIds).order('name'),
+        supabase.from('services').select('*, variants:service_variants(id, name, duration_minutes, price, sort_order, is_active, options:service_variant_options(id, name, price, sort_order, is_active))').in('id', contrastServiceIds).order('name'),
         supabase
           .from('blocked_times')
           .select('id, staff_id, starts_at, ends_at, reason, is_shift_adjustment')
@@ -791,6 +795,7 @@ export default function AdminContrastCalendar() {
     const svc = services.find(s => s.id === session.service_id)
     setNbBookingMode('customer')
     setNbServiceId(session.service_id)
+    setNbVariantId(''); setNbVariantOptionId('')
     setNbDate(session.event_date)
     setNbTime(session.start_time.slice(0, 5))
     setNbStaffId(session.staff_id ?? null)
@@ -1050,6 +1055,7 @@ export default function AdminContrastCalendar() {
     setNbDate(format(cellPopover.date, 'yyyy-MM-dd'))
     setNbTime(cellPopover.time)
     setNbServiceId(services[0]?.id ?? '')
+    setNbVariantId(''); setNbVariantOptionId('')
     setNbName(''); setNbEmail(''); setNbPhone(''); setNbDob(''); setNbNotes('')
     setNbPrice(services[0] ? (services[0].price / 100).toFixed(2) : '')
     setNbPriceTouched(false)
@@ -1224,6 +1230,8 @@ export default function AdminContrastCalendar() {
     setEditCustomerPhone(selectedBooking.customer?.phone ?? '')
     setEditCustomerSuggestions([]); setEditCustomerShowSuggestions(false)
     setEditServiceId(selectedBooking.service_id)
+    setEditVariantId(selectedBooking.variant_id ?? '')
+    setEditVariantOptionId(selectedBooking.variant_option_id ?? '')
     setEditStaffId(selectedBooking.staff_id)
     setEditDate(format(parseISO(selectedBooking.starts_at), 'yyyy-MM-dd'))
     setEditTime(format(parseISO(selectedBooking.starts_at), 'HH:mm'))
@@ -1501,7 +1509,8 @@ export default function AdminContrastCalendar() {
     const startsAt = new Date(`${editDate}T${editTime}:00`)
     const selectedAddons = availableAddons.filter(a => editAddonIds.has(a.id))
     const addonExtraDuration = selectedAddons.reduce((sum, a) => sum + a.duration_minutes, 0)
-    const endsAt = addMinutes(startsAt, newService.duration_minutes + addonExtraDuration)
+    const editDuration = editSelectedVariant?.duration_minutes ?? newService.duration_minutes
+    const endsAt = addMinutes(startsAt, editDuration + addonExtraDuration)
     if (newService.is_group_session) {
       const cap = await fetchSlotCapacity(editServiceId, startsAt.toISOString(), selectedBooking.id)
       if (cap && cap.taken + editSpotsBooked > cap.max) {
@@ -1546,6 +1555,8 @@ export default function AdminContrastCalendar() {
       resource_id: resolvedResourceId,
       equipment_resource_id: editEquipmentResourceId,
       spots_booked: newService.is_group_session ? editSpotsBooked : 1,
+      variant_id: editVariantId || null,
+      variant_option_id: editVariantOptionId || null,
     }
 
     const { error } = await supabase
@@ -1612,6 +1623,8 @@ export default function AdminContrastCalendar() {
       equipment_resource_id: editEquipmentResourceId,
       equipment_resource: equipmentObj,
       spots_booked: newService.is_group_session ? editSpotsBooked : 1,
+      variant_id: editVariantId || null,
+      variant_option_id: editVariantOptionId || null,
     }
     setBookings(prev => prev.map(b => {
       if (b.id === selectedBooking.id) {
@@ -1804,6 +1817,7 @@ export default function AdminContrastCalendar() {
     }
     const service = services.find(s => s.id === nbServiceId)
     if (!service || !nbDate || !nbTime) return
+    const nbDuration = nbEffectiveDuration ?? service.duration_minutes
     const baseStartsAt = new Date(`${nbDate}T${nbTime}:00`)
     const enteredPrice = nbPrice.trim() ? Math.round(parseFloat(nbPrice) * 100) : service.price
     const priceOverride = Number.isFinite(enteredPrice) && enteredPrice !== service.price ? enteredPrice : null
@@ -1849,7 +1863,7 @@ export default function AdminContrastCalendar() {
       const rowsToInsert: Record<string, unknown>[] = []
       const skipped: string[] = []
       for (const occStart of occurrenceDates) {
-        const occEnd = addMinutes(occStart, service.duration_minutes)
+        const occEnd = addMinutes(occStart, nbDuration)
         if (service.is_group_session) {
           const cap = await fetchSlotCapacity(nbServiceId, occStart.toISOString())
           if (cap && cap.taken + nbSpotsBooked > cap.max) {
@@ -1874,6 +1888,8 @@ export default function AdminContrastCalendar() {
           price_override: priceOverride,
           spots_booked: service.is_group_session ? nbSpotsBooked : 1,
           resource_id: resourceId,
+          variant_id: nbVariantId || null,
+          variant_option_id: nbVariantOptionId || null,
         })
       }
 
@@ -1915,11 +1931,18 @@ export default function AdminContrastCalendar() {
   }
 
   const selectedService = services.find(s => s.id === nbServiceId)
+  const nbActiveVariants = (selectedService?.variants ?? []).filter(v => v.is_active).sort((a, b) => a.sort_order - b.sort_order)
+  const nbSelectedVariant = nbActiveVariants.find(v => v.id === nbVariantId)
+  const nbActiveOptions = (nbSelectedVariant?.options ?? []).filter(o => o.is_active).sort((a, b) => a.sort_order - b.sort_order)
+  const nbEffectiveDuration = nbSelectedVariant?.duration_minutes ?? selectedService?.duration_minutes
   const nbEndTime =
-    selectedService && nbDate && nbTime
-      ? format(addMinutes(new Date(`${nbDate}T${nbTime}:00`), selectedService.duration_minutes), 'HH:mm')
+    selectedService && nbDate && nbTime && nbEffectiveDuration != null
+      ? format(addMinutes(new Date(`${nbDate}T${nbTime}:00`), nbEffectiveDuration), 'HH:mm')
       : null
   const editService = services.find(s => s.id === editServiceId)
+  const editActiveVariants = (editService?.variants ?? []).filter(v => v.is_active).sort((a, b) => a.sort_order - b.sort_order)
+  const editSelectedVariant = editActiveVariants.find(v => v.id === editVariantId)
+  const editActiveOptions = (editSelectedVariant?.options ?? []).filter(o => o.is_active).sort((a, b) => a.sort_order - b.sort_order)
 
   if (loading) return <FullPageSpinner />
 
@@ -2208,6 +2231,8 @@ export default function AdminContrastCalendar() {
               onChange={e => {
                 const id = e.target.value
                 setNbServiceId(id)
+                setNbVariantId('')
+                setNbVariantOptionId('')
                 const svc = services.find(s => s.id === id)
                 if (!svc?.is_group_session) setNbBookingMode('customer')
                 if (!nbPriceTouched && svc) setNbPrice((svc.price / 100).toFixed(2))
@@ -2226,6 +2251,53 @@ export default function AdminContrastCalendar() {
               <button type="button" onClick={() => setNbBookingMode('open')} className={cn('flex-1 py-2 font-medium transition-colors', nbBookingMode === 'open' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50')}>
                 Leave spots open
               </button>
+            </div>
+          )}
+
+          {nbActiveVariants.length > 0 && (
+            <div className="space-y-2.5 border border-gray-100 rounded-lg p-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide block mb-1.5">Duration</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {nbActiveVariants.map(v => {
+                    const vOptions = (v.options ?? []).filter(o => o.is_active)
+                    const fromPrice = vOptions.length ? Math.min(...vOptions.map(o => o.price)) : v.price
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => {
+                          setNbVariantId(v.id)
+                          setNbVariantOptionId('')
+                          if (!nbPriceTouched) setNbPrice((v.price / 100).toFixed(2))
+                        }}
+                        className={cn('px-2.5 py-1 text-xs font-medium border rounded-full transition-colors',
+                          nbVariantId === v.id ? 'bg-(--color-primary) text-white border-(--color-primary)' : 'bg-white text-gray-600 border-gray-200 hover:border-(--color-primary)')}
+                      >
+                        {v.name} · {vOptions.length ? 'from ' : ''}{formatCurrency(fromPrice)}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+              {nbSelectedVariant && nbActiveOptions.length > 0 && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide block mb-1.5">Option</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {nbActiveOptions.map(o => (
+                      <button
+                        key={o.id}
+                        type="button"
+                        onClick={() => { setNbVariantOptionId(o.id); if (!nbPriceTouched) setNbPrice((o.price / 100).toFixed(2)) }}
+                        className={cn('px-2.5 py-1 text-xs font-medium border rounded-full transition-colors',
+                          nbVariantOptionId === o.id ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400')}
+                      >
+                        {o.name} · {formatCurrency(o.price)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -2545,6 +2617,18 @@ export default function AdminContrastCalendar() {
                 <dt className="text-gray-500">Service</dt>
                 <dd className="font-medium text-gray-900">{selectedBooking.service?.name}</dd>
               </div>
+              {selectedBooking.variant_id && (() => {
+                const svc = services.find(s => s.id === selectedBooking.service_id)
+                const variant = svc?.variants?.find(v => v.id === selectedBooking.variant_id)
+                const option = variant?.options?.find(o => o.id === selectedBooking.variant_option_id)
+                if (!variant) return null
+                return (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-500">Variant</dt>
+                    <dd className="text-gray-700">{variant.name}{option && ` · ${option.name}`}</dd>
+                  </div>
+                )
+              })()}
               {selectedBooking.recurrence_id && (
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Recurring</dt>
@@ -3066,6 +3150,8 @@ export default function AdminContrastCalendar() {
                   onChange={e => {
                     const id = e.target.value
                     setEditServiceId(id)
+                    setEditVariantId('')
+                    setEditVariantOptionId('')
                     if (!editPriceTouched) {
                       const svc = services.find(s => s.id === id)
                       if (svc) setEditPrice((svc.price / 100).toFixed(2))
@@ -3088,6 +3174,53 @@ export default function AdminContrastCalendar() {
                 </select>
               </div>
             </div>
+
+            {editActiveVariants.length > 0 && (
+              <div className="space-y-2.5 border border-gray-100 rounded-lg p-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide block mb-1.5">Duration</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {editActiveVariants.map(v => {
+                      const vOptions = (v.options ?? []).filter(o => o.is_active)
+                      const fromPrice = vOptions.length ? Math.min(...vOptions.map(o => o.price)) : v.price
+                      return (
+                        <button
+                          key={v.id}
+                          type="button"
+                          onClick={() => {
+                            setEditVariantId(v.id)
+                            setEditVariantOptionId('')
+                            if (!editPriceTouched) setEditPrice((v.price / 100).toFixed(2))
+                          }}
+                          className={cn('px-2.5 py-1 text-xs font-medium border rounded-full transition-colors',
+                            editVariantId === v.id ? 'bg-(--color-primary) text-white border-(--color-primary)' : 'bg-white text-gray-600 border-gray-200 hover:border-(--color-primary)')}
+                        >
+                          {v.name} · {vOptions.length ? 'from ' : ''}{formatCurrency(fromPrice)}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                {editSelectedVariant && editActiveOptions.length > 0 && (
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 uppercase tracking-wide block mb-1.5">Option</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {editActiveOptions.map(o => (
+                        <button
+                          key={o.id}
+                          type="button"
+                          onClick={() => { setEditVariantOptionId(o.id); if (!editPriceTouched) setEditPrice((o.price / 100).toFixed(2)) }}
+                          className={cn('px-2.5 py-1 text-xs font-medium border rounded-full transition-colors',
+                            editVariantOptionId === o.id ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400')}
+                        >
+                          {o.name} · {formatCurrency(o.price)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Date / Time / Price */}
             <div className="grid grid-cols-3 gap-3">
