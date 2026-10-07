@@ -12,7 +12,7 @@ import {
 import { supabase } from '@/lib/supabase'
 import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
 import { generateTimeSlots } from '@/lib/slots'
-import { AdminFormFiller } from '@/components/FormFiller'
+import { AdminFormFiller, ViewFormResponseModal, type ResponseMap } from '@/components/FormFiller'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { MonthCalendar } from '@/components/ui/MonthCalendar'
 import { Modal } from '@/components/ui/Modal'
@@ -170,8 +170,10 @@ type CustomerBookingHistory = {
 
 type CustomerFormHistory = {
   id: string
+  form_id: string
   completed_at: string
   expires_at: string
+  responses: ResponseMap
   form: { title: string } | null
 }
 
@@ -280,6 +282,7 @@ export default function AdminContrastCalendar() {
   const [customerForms, setCustomerForms] = useState<CustomerFormHistory[]>([])
   const [customerMemberships, setCustomerMemberships] = useState<CustomerMembershipHistory[]>([])
   const [customerSidebarLoading, setCustomerSidebarLoading] = useState(false)
+  const [viewingFormResponse, setViewingFormResponse] = useState<CustomerFormHistory | null>(null)
 
   // Linked follow-on service booking (e.g. pressotherapy before/after)
   const [linkedBookings, setLinkedBookings] = useState<Array<{ id: string; starts_at: string; ends_at: string; service: { name: string } | null }>>([])
@@ -824,6 +827,17 @@ export default function AdminContrastCalendar() {
     }
   }
 
+  // Jumps from one booking's "Previous Bookings" sidebar entry straight into
+  // that other booking's own full detail view — same fetch as openAttendeeBooking.
+  async function openCustomerPastBooking(bookingId: string) {
+    const { data } = await supabase
+      .from('bookings')
+      .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token,date_of_birth,internal_notes), resource:resources!resource_id(name)')
+      .eq('id', bookingId)
+      .single()
+    if (data) openBookingDetail(data as RichBooking)
+  }
+
   // Looks up every other future session for this service that falls at the same
   // time of day and day of week (e.g. every Tuesday 16:00), so cancelling or editing
   // can optionally apply to the whole recurring pattern rather than just this slot.
@@ -1300,7 +1314,7 @@ export default function AdminContrastCalendar() {
         .limit(8),
       supabase
         .from('form_responses')
-        .select('id, completed_at, expires_at, form:service_forms(title)')
+        .select('id, form_id, completed_at, expires_at, responses, form:service_forms(title)')
         .eq('customer_id', customerId)
         .order('completed_at', { ascending: false })
         .limit(8),
@@ -3070,13 +3084,18 @@ export default function AdminContrastCalendar() {
                   ) : (
                     <div className="space-y-2">
                       {customerBookings.map(cb => (
-                        <div key={cb.id} className="flex items-center justify-between gap-2">
+                        <button
+                          key={cb.id}
+                          type="button"
+                          onClick={() => openCustomerPastBooking(cb.id)}
+                          className="w-full flex items-center justify-between gap-2 hover:bg-gray-50 rounded-lg px-1.5 py-1 -mx-1.5 transition-colors text-left"
+                        >
                           <div className="min-w-0">
                             <p className="text-xs text-gray-800 truncate">{cb.service?.name ?? 'Booking'}</p>
                             <p className="text-xs text-gray-400">{format(parseISO(cb.starts_at), 'd MMM yyyy')}</p>
                           </div>
                           <Badge variant={statusBadgeVariant(cb.status)} className="capitalize shrink-0">{cb.status}</Badge>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   )}
@@ -3093,12 +3112,17 @@ export default function AdminContrastCalendar() {
                       {customerForms.map(fr => {
                         const valid = !isPast(parseISO(fr.expires_at))
                         return (
-                          <div key={fr.id} className="flex items-center justify-between gap-2">
+                          <button
+                            key={fr.id}
+                            type="button"
+                            onClick={() => setViewingFormResponse(fr)}
+                            className="w-full flex items-center justify-between gap-2 hover:bg-gray-50 rounded-lg px-1.5 py-1 -mx-1.5 transition-colors text-left"
+                          >
                             <p className="text-xs text-gray-800 truncate">{fr.form?.title ?? 'Form'}</p>
                             <span className={cn('text-xs font-medium shrink-0', valid ? 'text-green-600' : 'text-amber-600')}>
                               {valid ? 'Valid' : 'Expired'}
                             </span>
-                          </div>
+                          </button>
                         )
                       })}
                     </div>
@@ -3779,6 +3803,17 @@ export default function AdminContrastCalendar() {
             setFillFormTarget(null)
             checkBookingForm(selectedBooking.service_id, selectedBooking.customer_id, selectedBooking.id, selectedBooking.created_at).then(setSelectedBookingForm)
           }}
+        />
+      )}
+
+      {viewingFormResponse && (
+        <ViewFormResponseModal
+          open={!!viewingFormResponse}
+          onClose={() => setViewingFormResponse(null)}
+          formId={viewingFormResponse.form_id}
+          formTitle={viewingFormResponse.form?.title ?? 'Completed Form'}
+          completedAt={viewingFormResponse.completed_at}
+          responses={viewingFormResponse.responses}
         />
       )}
     </div>

@@ -11,7 +11,7 @@ import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import type { Customer, MembershipExpiryType } from '@/types'
-import type { FormField, Section, ResponseMap } from '@/components/FormFiller'
+import { ViewFormResponseModal, type ResponseMap } from '@/components/FormFiller'
 
 type ClientFormResponse = {
   id: string
@@ -120,9 +120,6 @@ export default function AdminClients() {
   // Read-only appointment / completed-form viewers
   const [viewingBooking, setViewingBooking] = useState<Booking | null>(null)
   const [viewingFormResponse, setViewingFormResponse] = useState<ClientFormResponse | null>(null)
-  const [viewFormSections, setViewFormSections] = useState<Section[]>([])
-  const [viewFormFields, setViewFormFields] = useState<FormField[]>([])
-  const [viewFormLoading, setViewFormLoading] = useState(false)
 
   async function loadClients(): Promise<ClientRow[]> {
     const [custRes, bkRes, blockedRes] = await Promise.all([
@@ -392,18 +389,6 @@ export default function AdminClients() {
     setStaffNotesSaving(false)
   }
 
-  async function openFormResponseView(fr: ClientFormResponse) {
-    setViewingFormResponse(fr)
-    setViewFormLoading(true)
-    const [secRes, fieldRes] = await Promise.all([
-      supabase.from('form_sections').select('*').eq('form_id', fr.form_id).order('position'),
-      supabase.from('form_fields').select('*').eq('form_id', fr.form_id).order('position'),
-    ])
-    setViewFormSections((secRes.data ?? []) as Section[])
-    setViewFormFields((fieldRes.data ?? []) as FormField[])
-    setViewFormLoading(false)
-  }
-
   async function handleBlockClient() {
     if (!selected) return
     setBlocking(true)
@@ -642,7 +627,7 @@ export default function AdminClients() {
                       <button
                         key={fr.id}
                         type="button"
-                        onClick={() => openFormResponseView(fr)}
+                        onClick={() => setViewingFormResponse(fr)}
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50 text-left transition-colors"
                       >
                         {valid
@@ -996,123 +981,16 @@ export default function AdminClients() {
       </Modal>
 
       {/* Read-only completed-form viewer */}
-      <Modal open={!!viewingFormResponse} onClose={() => setViewingFormResponse(null)} title={viewingFormResponse?.form?.title ?? 'Completed Form'} size="md">
-        {viewingFormResponse && (
-          viewFormLoading ? (
-            <p className="text-sm text-gray-400 text-center py-8">Loading…</p>
-          ) : (
-            <div className="space-y-4">
-              <p className="text-xs text-gray-400">
-                Completed {format(parseISO(viewingFormResponse.completed_at), "d MMM yyyy 'at' HH:mm")}
-              </p>
-              {[...viewFormSections].sort((a, b) => a.position - b.position).map(section => {
-                const sectionFields = viewFormFields.filter(f => f.section_id === section.id).sort((a, b) => a.position - b.position)
-                if (!sectionFields.length) return null
-                return (
-                  <div key={section.id} className="space-y-3">
-                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 pb-1.5">{section.title}</h3>
-                    {sectionFields.map(field => (
-                      <ResponseValue key={field.id} field={field} responses={viewingFormResponse.responses} />
-                    ))}
-                  </div>
-                )
-              })}
-            </div>
-          )
-        )}
-      </Modal>
-    </div>
-  )
-}
-
-function ResponseValue({ field, responses }: { field: FormField; responses: ResponseMap }) {
-  if (field.field_type === 'heading') {
-    return <h4 className="font-semibold text-gray-800 text-sm pt-1">{field.label}</h4>
-  }
-  const val = responses[field.id]
-
-  if (field.field_type === 'emergency_contact') {
-    const ec = (val as { ec_name?: string; ec_phone?: string; ec_relationship?: string }) ?? {}
-    return (
-      <div>
-        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
-        <p className="text-sm text-gray-800">
-          {ec.ec_name || '—'} {ec.ec_phone && `· ${ec.ec_phone}`} {ec.ec_relationship && `· ${ec.ec_relationship}`}
-        </p>
-      </div>
-    )
-  }
-
-  if (field.field_type === 'personal_details') {
-    const pd = (val as { pd_name?: string; pd_phone?: string; pd_dob?: string; pd_email?: string }) ?? {}
-    return (
-      <div>
-        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
-        <p className="text-sm text-gray-800">
-          {pd.pd_name || '—'}
-          {pd.pd_phone && ` · ${pd.pd_phone}`}
-          {pd.pd_email && ` · ${pd.pd_email}`}
-          {pd.pd_dob && ` · ${format(parseISO(pd.pd_dob), 'd MMM yyyy')}`}
-        </p>
-      </div>
-    )
-  }
-
-  if (field.field_type === 'signature') {
-    const sig = (val as { signature_name?: string; signed_at?: string }) ?? {}
-    return (
-      <div>
-        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
-        <p className="text-lg text-gray-800" style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive" }}>{sig.signature_name || '—'}</p>
-        {sig.signed_at && <p className="text-xs text-gray-400">Signed {format(parseISO(sig.signed_at), "d MMM yyyy 'at' HH:mm")}</p>}
-      </div>
-    )
-  }
-
-  if (field.field_type === 'multi_select') {
-    const selected = Array.isArray(val) ? val : []
-    return (
-      <div>
-        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
-        <p className="text-sm text-gray-800">{selected.length ? selected.join(', ') : '—'}</p>
-      </div>
-    )
-  }
-
-  if (field.field_type === 'checkbox') {
-    return (
-      <div>
-        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
-        <p className="text-sm text-gray-800">{val ? 'Confirmed' : 'Not confirmed'}</p>
-      </div>
-    )
-  }
-
-  if (field.field_type === 'yes_no') {
-    const followUp = responses[`${field.id}_followup`] as string | undefined
-    return (
-      <div>
-        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
-        <p className="text-sm text-gray-800 capitalize">{(val as string) || '—'}</p>
-        {followUp && <p className="text-xs text-gray-500 mt-0.5">{followUp}</p>}
-      </div>
-    )
-  }
-
-  if (field.field_type === 'date') {
-    const raw = val as string | undefined
-    return (
-      <div>
-        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
-        <p className="text-sm text-gray-800">{raw ? format(parseISO(raw), 'd MMM yyyy') : '—'}</p>
-      </div>
-    )
-  }
-
-  return (
-    <div>
-      <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
-      <p className="text-sm text-gray-800 whitespace-pre-wrap">{(val as string) || '—'}</p>
+      {viewingFormResponse && (
+        <ViewFormResponseModal
+          open={!!viewingFormResponse}
+          onClose={() => setViewingFormResponse(null)}
+          formId={viewingFormResponse.form_id}
+          formTitle={viewingFormResponse.form?.title ?? 'Completed Form'}
+          completedAt={viewingFormResponse.completed_at}
+          responses={viewingFormResponse.responses}
+        />
+      )}
     </div>
   )
 }

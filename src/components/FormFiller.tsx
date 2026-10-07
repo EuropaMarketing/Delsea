@@ -332,6 +332,162 @@ export function validateFormFields(fields: FormField[], responses: ResponseMap):
   return errs
 }
 
+// ─── Read-only display of one already-submitted field's value — used anywhere
+// a completed form's answers are viewed rather than filled in ─────────────────
+export function ReadOnlyFieldValue({ field, responses }: { field: FormField; responses: ResponseMap }) {
+  if (field.field_type === 'heading') {
+    return <h4 className="font-semibold text-gray-800 text-sm pt-1">{field.label}</h4>
+  }
+  const val = responses[field.id]
+
+  if (field.field_type === 'emergency_contact') {
+    const ec = (val as { ec_name?: string; ec_phone?: string; ec_relationship?: string }) ?? {}
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+        <p className="text-sm text-gray-800">
+          {ec.ec_name || '—'} {ec.ec_phone && `· ${ec.ec_phone}`} {ec.ec_relationship && `· ${ec.ec_relationship}`}
+        </p>
+      </div>
+    )
+  }
+
+  if (field.field_type === 'personal_details') {
+    const pd = (val as { pd_name?: string; pd_phone?: string; pd_dob?: string; pd_email?: string }) ?? {}
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+        <p className="text-sm text-gray-800">
+          {pd.pd_name || '—'}
+          {pd.pd_phone && ` · ${pd.pd_phone}`}
+          {pd.pd_email && ` · ${pd.pd_email}`}
+          {pd.pd_dob && ` · ${format(parseISO(pd.pd_dob), 'd MMM yyyy')}`}
+        </p>
+      </div>
+    )
+  }
+
+  if (field.field_type === 'signature') {
+    const sig = (val as { signature_name?: string; signed_at?: string }) ?? {}
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+        <p className="text-lg text-gray-800" style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive" }}>{sig.signature_name || '—'}</p>
+        {sig.signed_at && <p className="text-xs text-gray-400">Signed {format(parseISO(sig.signed_at), "d MMM yyyy 'at' HH:mm")}</p>}
+      </div>
+    )
+  }
+
+  if (field.field_type === 'multi_select') {
+    const selected = Array.isArray(val) ? val : []
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+        <p className="text-sm text-gray-800">{selected.length ? selected.join(', ') : '—'}</p>
+      </div>
+    )
+  }
+
+  if (field.field_type === 'checkbox') {
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+        <p className="text-sm text-gray-800">{val ? 'Confirmed' : 'Not confirmed'}</p>
+      </div>
+    )
+  }
+
+  if (field.field_type === 'yes_no') {
+    const followUp = responses[`${field.id}_followup`] as string | undefined
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+        <p className="text-sm text-gray-800 capitalize">{(val as string) || '—'}</p>
+        {followUp && <p className="text-xs text-gray-500 mt-0.5">{followUp}</p>}
+      </div>
+    )
+  }
+
+  if (field.field_type === 'date') {
+    const raw = val as string | undefined
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+        <p className="text-sm text-gray-800">{raw ? format(parseISO(raw), 'd MMM yyyy') : '—'}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <p className="text-xs font-medium text-gray-500 mb-1">{field.label}</p>
+      <p className="text-sm text-gray-800 whitespace-pre-wrap">{(val as string) || '—'}</p>
+    </div>
+  )
+}
+
+// ─── Modal that fetches a form's sections/fields and renders one already-
+// submitted response read-only — reused anywhere a completed form is viewed
+// (Client record, booking detail sidebars) ─────────────────────────────────
+export function ViewFormResponseModal({
+  open,
+  onClose,
+  formId,
+  formTitle,
+  completedAt,
+  responses,
+}: {
+  open: boolean
+  onClose: () => void
+  formId: string
+  formTitle: string
+  completedAt: string
+  responses: ResponseMap
+}) {
+  const [sections, setSections] = useState<Section[]>([])
+  const [fields, setFields] = useState<FormField[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!open) return
+    setLoading(true)
+    Promise.all([
+      supabase.from('form_sections').select('*').eq('form_id', formId).order('position'),
+      supabase.from('form_fields').select('*').eq('form_id', formId).order('position'),
+    ]).then(([secRes, fieldRes]) => {
+      setSections((secRes.data ?? []) as Section[])
+      setFields((fieldRes.data ?? []) as FormField[])
+      setLoading(false)
+    })
+  }, [open, formId])
+
+  const sortedSections = [...sections].sort((a, b) => a.position - b.position)
+
+  return (
+    <Modal open={open} onClose={onClose} title={formTitle} size="md">
+      {loading ? (
+        <p className="text-sm text-gray-400 text-center py-8">Loading…</p>
+      ) : (
+        <div className="space-y-4">
+          <p className="text-xs text-gray-400">Completed {format(parseISO(completedAt), "d MMM yyyy 'at' HH:mm")}</p>
+          {sortedSections.map(section => {
+            const sectionFields = fields.filter(f => f.section_id === section.id).sort((a, b) => a.position - b.position)
+            if (!sectionFields.length) return null
+            return (
+              <div key={section.id} className="space-y-3">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 pb-1.5">{section.title}</h3>
+                {sectionFields.map(f => (
+                  <ReadOnlyFieldValue key={f.id} field={f} responses={responses} />
+                ))}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 // ─── Admin "fill this form on the customer's behalf" modal ─────────────────
 // Saves a real form_responses row tied to this booking, exactly as if the
 // customer had submitted it themselves — clears the same "form required" alert.
