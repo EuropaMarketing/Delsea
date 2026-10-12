@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
-import { format, addMonths, parseISO } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import { CheckCircle2, ClipboardList, ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { Button } from '@/components/ui/Button'
+import { computeFormExpiry, computeResponsesFlagged } from '@/components/FormFiller'
 
 type ServiceForm = {
   id: string
   title: string
   description: string | null
   validity_months: number
+  form_type: 'new_client' | 'returning_client'
 }
 
 type Section = {
@@ -26,7 +28,7 @@ type FormField = {
   label: string
   required: boolean
   position: number
-  options: { follow_up_label?: string; description?: string; choices?: string[] }
+  options: { follow_up_label?: string; description?: string; choices?: string[]; flag_values?: string[] }
 }
 
 type ResponseMap = Record<string, string | boolean | string[] | { ec_name?: string; ec_phone?: string; ec_relationship?: string } | { signature_name?: string; signed_at?: string } | { pd_name?: string; pd_phone?: string; pd_dob?: string; pd_email?: string }>
@@ -56,7 +58,7 @@ export default function FormPage() {
     const userId = user.id
     async function load() {
       const [formRes, sectionsRes, fieldsRes, customerRes] = await Promise.all([
-        supabase.from('service_forms').select('id, title, description, validity_months').eq('id', formId).single(),
+        supabase.from('service_forms').select('id, title, description, validity_months, form_type').eq('id', formId).single(),
         supabase.from('form_sections').select('*').eq('form_id', formId).order('position'),
         supabase.from('form_fields').select('*').eq('form_id', formId).order('position'),
         supabase.from('customers').select('id, business_id').eq('user_id', userId).single(),
@@ -153,7 +155,7 @@ export default function FormPage() {
     if (!validateCurrentSection()) return
     setSubmitting(true)
     const completedAt = new Date()
-    const expiresAt = addMonths(completedAt, form.validity_months)
+    const expiresAt = computeFormExpiry(completedAt, form.form_type, form.validity_months)
     await supabase.from('form_responses').insert({
       business_id: businessId,
       customer_id: customerId,
@@ -162,6 +164,7 @@ export default function FormPage() {
       responses,
       completed_at: completedAt.toISOString(),
       expires_at: expiresAt.toISOString(),
+      flagged: computeResponsesFlagged(fields, responses),
     })
     setSubmitted(true)
     setSubmitting(false)
@@ -190,7 +193,7 @@ export default function FormPage() {
   }
 
   if (submitted || alreadyValid) {
-    const expiry = submitted ? addMonths(new Date(), form.validity_months) : parseISO(alreadyValid!)
+    const expiry = submitted ? computeFormExpiry(new Date(), form.form_type, form.validity_months) : parseISO(alreadyValid!)
     return (
       <div className="max-w-lg mx-auto px-4 py-16 text-center">
         <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-5">
@@ -202,7 +205,9 @@ export default function FormPage() {
         <p className="text-sm text-gray-500 mb-1">
           {submitted ? 'Thank you for completing your health questionnaire.' : 'Your health questionnaire is on file.'}
         </p>
-        <p className="text-xs text-gray-400 mb-8">Valid until {format(expiry, 'd MMMM yyyy')}</p>
+        <p className="text-xs text-gray-400 mb-8">
+          {form.form_type === 'returning_client' ? 'This form does not expire.' : `Valid until ${format(expiry, 'd MMMM yyyy')}`}
+        </p>
         <Button onClick={() => navigate('/my-bookings')}>
           <ArrowLeft className="h-4 w-4" /> Back to My Bookings
         </Button>

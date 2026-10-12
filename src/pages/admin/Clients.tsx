@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { format, parseISO, isBefore, isPast } from 'date-fns'
-import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle, Pencil, X, Ban, Trash2, ShieldOff, Cake, Plus, StickyNote, Save, UserCheck } from 'lucide-react'
+import { Search, CalendarClock, User, Mail, Phone, TrendingUp, Ticket, ClipboardList, CheckCircle2, AlertCircle, AlertTriangle, Pencil, X, Ban, Trash2, ShieldOff, Cake, Plus, StickyNote, Save, UserCheck } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/currency'
 import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
@@ -11,7 +11,7 @@ import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import type { Customer, MembershipExpiryType } from '@/types'
-import { ViewFormResponseModal, type ResponseMap } from '@/components/FormFiller'
+import { ViewFormResponseModal, formNeverExpires, type ResponseMap } from '@/components/FormFiller'
 
 type ClientFormResponse = {
   id: string
@@ -19,6 +19,7 @@ type ClientFormResponse = {
   completed_at: string
   expires_at: string
   responses: ResponseMap
+  flagged: boolean
   form: { title: string } | null
 }
 
@@ -277,7 +278,7 @@ export default function AdminClients() {
     setFormsLoading(true)
     supabase
       .from('form_responses')
-      .select('id, form_id, completed_at, expires_at, responses, form:service_forms(title)')
+      .select('id, form_id, completed_at, expires_at, responses, flagged, form:service_forms(title)')
       .eq('customer_id', selected.id)
       .order('completed_at', { ascending: false })
       .then(({ data }) => {
@@ -623,6 +624,7 @@ export default function AdminClients() {
                 <div className="space-y-2">
                   {clientForms.map(fr => {
                     const valid = !isPast(parseISO(fr.expires_at))
+                    const neverExpires = formNeverExpires(fr.completed_at, fr.expires_at)
                     return (
                       <button
                         key={fr.id}
@@ -630,11 +632,16 @@ export default function AdminClients() {
                         onClick={() => setViewingFormResponse(fr)}
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50 text-left transition-colors"
                       >
-                        {valid
-                          ? <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-                          : <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />}
+                        {fr.flagged
+                          ? <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />
+                          : valid
+                            ? <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                            : <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />}
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">{fr.form?.title ?? '—'}</p>
+                          <p className="text-sm font-medium text-gray-900 truncate flex items-center gap-1.5">
+                            {fr.form?.title ?? '—'}
+                            {fr.flagged && <span className="text-xs font-semibold text-red-600">Flagged for attention</span>}
+                          </p>
                           <p className="text-xs text-gray-500">
                             Completed {format(parseISO(fr.completed_at), 'd MMM yyyy')}
                           </p>
@@ -644,7 +651,7 @@ export default function AdminClients() {
                             {valid ? 'Valid' : 'Expired'}
                           </p>
                           <p className="text-xs text-gray-400">
-                            {valid ? 'until' : 'was'} {format(parseISO(fr.expires_at), 'd MMM yyyy')}
+                            {neverExpires ? 'never expires' : `${valid ? 'until' : 'was'} ${format(parseISO(fr.expires_at), 'd MMM yyyy')}`}
                           </p>
                         </div>
                       </button>

@@ -9,7 +9,7 @@ import { Card } from '@/components/ui/Card'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { FullPageSpinner } from '@/components/ui/Spinner'
-import type { MembershipPlan, CustomerMembership, MembershipExpiryType } from '@/types'
+import type { MembershipPlan, CustomerMembership, MembershipExpiryType, Customer } from '@/types'
 
 const EXPIRY_OPTIONS: { value: MembershipExpiryType; label: string }[] = [
   { value: 'none',            label: 'No expiry' },
@@ -55,7 +55,10 @@ export default function AdminMemberships() {
   const [membersLoading, setMembersLoading] = useState(false)
   const [memberSearch, setMemberSearch] = useState('')
   const [assignModal, setAssignModal] = useState(false)
-  const [assignEmail, setAssignEmail] = useState('')
+  const [assignSearch, setAssignSearch] = useState('')
+  const [assignCustomerId, setAssignCustomerId] = useState<string | null>(null)
+  const [assignSuggestions, setAssignSuggestions] = useState<Customer[]>([])
+  const [assignShowSuggestions, setAssignShowSuggestions] = useState(false)
   const [assignPlanId, setAssignPlanId] = useState('')
   const [assignError, setAssignError] = useState('')
   const [assigning, setAssigning] = useState(false)
@@ -163,30 +166,46 @@ export default function AdminMemberships() {
   }
 
   // Assign membership to customer
+  async function searchAssignCustomers(query: string) {
+    if (query.length < 2) { setAssignSuggestions([]); setAssignShowSuggestions(false); return }
+    const { data } = await supabase
+      .from('customers')
+      .select('id, name, email, phone, date_of_birth, business_id, user_id, created_at')
+      .eq('business_id', BUSINESS_ID)
+      .ilike('name', `%${query}%`)
+      .order('name')
+      .limit(8)
+    if (data) { setAssignSuggestions(data as Customer[]); setAssignShowSuggestions(true) }
+  }
+
   async function handleAssign() {
-    if (!assignEmail.trim()) { setAssignError('Enter a customer email'); return }
+    if (!assignSearch.trim()) { setAssignError('Enter a customer name or email'); return }
     if (!assignPlanId) { setAssignError('Select a membership plan'); return }
     setAssigning(true)
     setAssignError('')
 
-    const { data: customer } = await supabase
-      .from('customers')
-      .select('id')
-      .eq('email', assignEmail.trim().toLowerCase())
-      .eq('business_id', BUSINESS_ID)
-      .maybeSingle()
-
-    if (!customer) {
-      setAssignError('No customer found with that email. They need to have made a booking first.')
-      setAssigning(false)
-      return
+    let customerId = assignCustomerId
+    if (!customerId) {
+      // No suggestion picked — fall back to an exact email match (old behaviour).
+      const { data: customer } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('email', assignSearch.trim().toLowerCase())
+        .eq('business_id', BUSINESS_ID)
+        .maybeSingle()
+      if (!customer) {
+        setAssignError('No matching client found. Pick one from the suggestions, or enter their exact email.')
+        setAssigning(false)
+        return
+      }
+      customerId = customer.id
     }
 
     const plan = plans.find((p) => p.id === assignPlanId)!
     const { data: membership, error } = await supabase
       .from('customer_memberships')
       .insert({
-        customer_id: customer.id,
+        customer_id: customerId,
         plan_id: assignPlanId,
         tokens_remaining: plan.token_count,
         expires_at: computeExpiresAt(plan.expiry_type),
@@ -205,7 +224,9 @@ export default function AdminMemberships() {
 
     setMemberships((prev) => [membership as CustomerMembership, ...prev])
     setAssignModal(false)
-    setAssignEmail('')
+    setAssignSearch('')
+    setAssignCustomerId(null)
+    setAssignSuggestions([])
     setAssignPlanId('')
     setAssigning(false)
   }
@@ -352,7 +373,7 @@ export default function AdminMemberships() {
                 className="w-full h-10 pl-9 pr-3 text-sm border border-gray-200 bg-white rounded-(--border-radius-sm) outline-none focus:ring-2 focus:ring-(--color-primary)"
               />
             </div>
-            <Button size="sm" onClick={() => { setAssignModal(true); setAssignEmail(''); setAssignPlanId(''); setAssignError('') }}>
+            <Button size="sm" onClick={() => { setAssignModal(true); setAssignSearch(''); setAssignCustomerId(null); setAssignSuggestions([]); setAssignPlanId(''); setAssignError('') }}>
               <Plus className="h-4 w-4" />
               Assign
             </Button>
@@ -481,9 +502,34 @@ export default function AdminMemberships() {
       {/* Assign membership modal */}
       <Modal open={assignModal} onClose={() => setAssignModal(false)} title="Assign Membership" size="md">
         <div className="space-y-4">
-          <Input label="Customer Email" type="email" value={assignEmail}
-            onChange={(e) => { setAssignEmail(e.target.value); setAssignError('') }}
-            placeholder="customer@example.com" />
+          <div className="relative">
+            <Input label="Client" value={assignSearch}
+              onChange={(e) => {
+                setAssignSearch(e.target.value)
+                setAssignCustomerId(null)
+                setAssignError('')
+                searchAssignCustomers(e.target.value)
+              }}
+              onFocus={() => assignSearch.length >= 2 && setAssignShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setAssignShowSuggestions(false), 150)}
+              placeholder="Start typing a name…"
+              autoComplete="off"
+            />
+            {assignShowSuggestions && assignSuggestions.length > 0 && (
+              <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                {assignSuggestions.map(c => (
+                  <button key={c.id} type="button" className="w-full px-3 py-2.5 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                    onMouseDown={() => { setAssignSearch(c.name); setAssignCustomerId(c.id); setAssignShowSuggestions(false) }}>
+                    <p className="text-sm font-medium text-gray-900">{c.name}</p>
+                    <p className="text-xs text-gray-500">{c.email}{c.phone ? ` · ${c.phone}` : ''}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+            {!assignCustomerId && assignSearch.trim() && (
+              <p className="text-xs text-gray-400 mt-1">Select a client from the list, or enter their exact email.</p>
+            )}
+          </div>
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700">Membership Plan</label>
             <select

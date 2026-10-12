@@ -24,7 +24,7 @@ const empty: Omit<Service, 'id' | 'business_id'> = {
 export default function AdminServices() {
   const [services, setServices] = useState<Service[]>([])
   const [resources, setResources] = useState<Resource[]>([])
-  const [availableForms, setAvailableForms] = useState<{ id: string; title: string }[]>([])
+  const [availableForms, setAvailableForms] = useState<{ id: string; title: string; form_type: 'new_client' | 'returning_client' }[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
@@ -78,11 +78,11 @@ export default function AdminServices() {
         .eq('business_id', BUSINESS_ID)
         .order('category').order('name'),
       supabase.from('resources').select('*').eq('business_id', BUSINESS_ID).eq('is_active', true).order('name'),
-      supabase.from('service_forms').select('id, title').eq('business_id', BUSINESS_ID).eq('is_active', true).order('title'),
+      supabase.from('service_forms').select('id, title, form_type').eq('business_id', BUSINESS_ID).eq('is_active', true).order('title'),
     ])
     if (svcRes.data) setServices(svcRes.data as Service[])
     if (resRes.data) setResources(resRes.data as Resource[])
-    if (formsRes.data) setAvailableForms(formsRes.data as { id: string; title: string }[])
+    if (formsRes.data) setAvailableForms(formsRes.data as { id: string; title: string; form_type: 'new_client' | 'returning_client' }[])
     setLoading(false)
   }
 
@@ -987,7 +987,7 @@ export default function AdminServices() {
                 className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
               >
                 <option value="">No form required</option>
-                {availableForms.map(f => <option key={f.id} value={f.id}>{f.title}</option>)}
+                {availableForms.filter(f => f.form_type === 'new_client').map(f => <option key={f.id} value={f.id}>{f.title}</option>)}
               </select>
               <p className="text-xs text-gray-400 mt-1">Required before a booking for this service can take place, unless a valid response is already on file.</p>
             </div>
@@ -999,7 +999,7 @@ export default function AdminServices() {
                 className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
               >
                 <option value="">None</option>
-                {availableForms.map(f => <option key={f.id} value={f.id}>{f.title}</option>)}
+                {availableForms.filter(f => f.form_type === 'returning_client').map(f => <option key={f.id} value={f.id}>{f.title}</option>)}
               </select>
               <p className="text-xs text-gray-400 mt-1">
                 Shown instead of the New Client Form once a customer already has a valid response to it on file.

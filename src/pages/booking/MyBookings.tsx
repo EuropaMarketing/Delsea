@@ -13,6 +13,7 @@ import { Card } from '@/components/ui/Card'
 import { Input, PasswordInput } from '@/components/ui/Input'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { Modal } from '@/components/ui/Modal'
+import { ViewFormResponseModal, type ResponseMap } from '@/components/FormFiller'
 import type { Service, GiftVoucher } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
@@ -23,6 +24,14 @@ type MyMembership = {
   purchased_at: string
   expires_at: string | null
   plan: { name: string; description: string | null; token_count: number } | null
+}
+
+type CompletedFormForBooking = {
+  id: string
+  form_id: string
+  completed_at: string
+  responses: ResponseMap
+  form: { title: string } | null
 }
 
 type ActivityLogEntry = {
@@ -71,10 +80,14 @@ function SignInPrompt() {
     if (!email) { setError('Enter your email address above first'); return }
     setLoading(true)
     setError('')
-    await supabase.auth.resetPasswordForEmail(email, {
+    const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     })
-    setResetSent(true)
+    if (err) {
+      setError(err.message)
+    } else {
+      setResetSent(true)
+    }
     setLoading(false)
   }
 
@@ -173,6 +186,9 @@ export default function MyBookings() {
   const [logsLoading, setLogsLoading] = useState<Set<string>>(new Set())
   // formRequired[bookingId] = outstanding form IDs (from the service and/or attached directly to the booking)
   const [formRequired, setFormRequired] = useState<Record<string, string[]>>({})
+  // completedForms[bookingId] = forms already submitted specifically for that appointment
+  const [completedForms, setCompletedForms] = useState<Record<string, CompletedFormForBooking[]>>({})
+  const [viewingFormResponse, setViewingFormResponse] = useState<CompletedFormForBooking | null>(null)
 
   useEffect(() => {
     if (!user) { setLoading(false); return }
@@ -225,6 +241,22 @@ export default function MyBookings() {
         // Check which past bookings have already been reviewed
         const ids = mapped.map((b) => b.id)
         if (ids.length) {
+          // Forms completed specifically for one of these appointments — shown as a
+          // "view completed form" link rather than the "still needs doing" prompt.
+          const { data: completedForBooking } = await supabase
+            .from('form_responses')
+            .select('id, booking_id, form_id, completed_at, responses, form:service_forms(title)')
+            .in('booking_id', ids)
+          if (completedForBooking) {
+            const map: Record<string, CompletedFormForBooking[]> = {}
+            for (const row of completedForBooking as unknown as (CompletedFormForBooking & { booking_id: string })[]) {
+              const arr = map[row.booking_id] ?? []
+              arr.push(row)
+              map[row.booking_id] = arr
+            }
+            setCompletedForms(map)
+          }
+
           const { data: reviewed } = await supabase
             .from('staff_reviews')
             .select('booking_id')
@@ -516,6 +548,22 @@ export default function MyBookings() {
               Complete →
             </a>
           </div>
+        ))}
+
+        {/* Completed form(s) for this specific appointment */}
+        {(completedForms[booking.id] ?? []).map(fr => (
+          <button
+            key={fr.id}
+            type="button"
+            onClick={() => setViewingFormResponse(fr)}
+            className="flex items-center justify-between gap-2 text-left bg-green-50 border border-green-200 rounded-lg px-3 py-2 hover:bg-green-100 transition-colors"
+          >
+            <span className="flex items-center gap-2 text-xs text-green-800">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              {fr.form?.title ?? 'Form'} completed
+            </span>
+            <span className="text-xs font-medium text-green-700 underline underline-offset-2 shrink-0">View →</span>
+          </button>
         ))}
 
         {/* Activity history */}
@@ -915,6 +963,17 @@ export default function MyBookings() {
           </div>
         </div>
       </Modal>
+
+      {viewingFormResponse && (
+        <ViewFormResponseModal
+          open={!!viewingFormResponse}
+          onClose={() => setViewingFormResponse(null)}
+          formId={viewingFormResponse.form_id}
+          formTitle={viewingFormResponse.form?.title ?? 'Completed Form'}
+          completedAt={viewingFormResponse.completed_at}
+          responses={viewingFormResponse.responses}
+        />
+      )}
     </div>
   )
 }

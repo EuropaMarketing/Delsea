@@ -1,8 +1,41 @@
 import { useEffect, useState } from 'react'
-import { format, parseISO, addMonths } from 'date-fns'
+import { format, parseISO, addMonths, addYears, differenceInYears } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+
+// Returning-customer forms never expire. Rather than making expires_at
+// nullable (which every .gt('expires_at', now) validity check across the
+// app would need to special-case), we stamp it far enough in the future
+// that it's effectively permanent.
+export function computeFormExpiry(completedAt: Date, formType: 'new_client' | 'returning_client', validityMonths: number): Date {
+  return formType === 'returning_client' ? addYears(completedAt, 100) : addMonths(completedAt, validityMonths)
+}
+
+// Detects the sentinel far-future expiry stamped by computeFormExpiry above,
+// so UI that only has completed_at/expires_at (not the form's own form_type)
+// can still show "Never expires" instead of a literal date a century away.
+export function formNeverExpires(completedAt: string, expiresAt: string): boolean {
+  return differenceInYears(parseISO(expiresAt), parseISO(completedAt)) >= 50
+}
+
+// A single field's answer trips its flag condition if it matches one of the
+// field's configured flag_values (only yes_no, dropdown and multi_select
+// fields support flagging — others always return false).
+export function fieldResponseIsFlagged(field: { field_type: string; options: { flag_values?: string[] } }, value: unknown): boolean {
+  const flagValues = field.options?.flag_values
+  if (!flagValues?.length) return false
+  if (field.field_type === 'yes_no') return typeof value === 'string' && flagValues.includes(value)
+  if (field.field_type === 'dropdown') return typeof value === 'string' && flagValues.includes(value)
+  if (field.field_type === 'multi_select') return Array.isArray(value) && value.some(v => flagValues.includes(v))
+  return false
+}
+
+// Whether ANY field in a completed form tripped its flag condition —
+// computed once at submission time and stored on form_responses.flagged.
+export function computeResponsesFlagged(fields: { id: string; field_type: string; options: { flag_values?: string[] } }[], responses: Record<string, unknown>): boolean {
+  return fields.some(f => fieldResponseIsFlagged(f, responses[f.id]))
+}
 
 export type FormField = {
   id: string
@@ -12,7 +45,10 @@ export type FormField = {
   label: string
   required: boolean
   position: number
-  options: { follow_up_label?: string; description?: string; choices?: string[] }
+  // flag_values marks the specific answer(s) that should raise this field for
+  // staff attention: for yes_no, 'yes' and/or 'no'; for dropdown/multi_select,
+  // the flagged choice strings.
+  options: { follow_up_label?: string; description?: string; choices?: string[]; flag_values?: string[] }
 }
 
 export type Section = {
@@ -339,6 +375,21 @@ export function ReadOnlyFieldValue({ field, responses }: { field: FormField; res
     return <h4 className="font-semibold text-gray-800 text-sm pt-1">{field.label}</h4>
   }
   const val = responses[field.id]
+  const flagged = fieldResponseIsFlagged(field, val)
+  if (flagged) {
+    return (
+      <div className="border border-red-200 bg-red-50 rounded-lg p-2 -m-2">
+        <p className="text-xs font-semibold text-red-600 flex items-center gap-1 mb-1">
+          <span>⚠</span> Flagged for staff attention
+        </p>
+        <ReadOnlyFieldValueInner field={field} val={val} responses={responses} />
+      </div>
+    )
+  }
+  return <ReadOnlyFieldValueInner field={field} val={val} responses={responses} />
+}
+
+function ReadOnlyFieldValueInner({ field, val, responses }: { field: FormField; val: ResponseMap[string]; responses: ResponseMap }) {
 
   if (field.field_type === 'emergency_contact') {
     const ec = (val as { ec_name?: string; ec_phone?: string; ec_relationship?: string }) ?? {}
@@ -515,6 +566,7 @@ export function AdminFormFiller({
   const [sections, setSections] = useState<Section[]>([])
   const [fields, setFields] = useState<FormField[]>([])
   const [validityMonths, setValidityMonths] = useState(6)
+  const [formType, setFormType] = useState<'new_client' | 'returning_client'>('new_client')
   const [loading, setLoading] = useState(true)
   const [responses, setResponses] = useState<ResponseMap>({})
   const [errors, setErrors] = useState<Set<string>>(new Set())
@@ -529,11 +581,14 @@ export function AdminFormFiller({
     setError('')
     async function load() {
       const [formRes, secRes, fieldRes] = await Promise.all([
-        supabase.from('service_forms').select('validity_months').eq('id', formId).single(),
+        supabase.from('service_forms').select('validity_months, form_type').eq('id', formId).single(),
         supabase.from('form_sections').select('*').eq('form_id', formId).order('position'),
         supabase.from('form_fields').select('*').eq('form_id', formId).order('position'),
       ])
-      if (formRes.data) setValidityMonths(formRes.data.validity_months)
+      if (formRes.data) {
+        setValidityMonths(formRes.data.validity_months)
+        setFormType(formRes.data.form_type)
+      }
       setSections((secRes.data ?? []) as Section[])
       setFields((fieldRes.data ?? []) as FormField[])
       setLoading(false)
@@ -559,7 +614,7 @@ export function AdminFormFiller({
     setSaving(true)
     setError('')
     const completedAt = new Date()
-    const expiresAt = addMonths(completedAt, validityMonths)
+    const expiresAt = computeFormExpiry(completedAt, formType, validityMonths)
     const { error: insertError } = await supabase.from('form_responses').insert({
       business_id: businessId,
       customer_id: customerId,
@@ -568,6 +623,7 @@ export function AdminFormFiller({
       responses,
       completed_at: completedAt.toISOString(),
       expires_at: expiresAt.toISOString(),
+      flagged: computeResponsesFlagged(fields, responses),
     })
     setSaving(false)
     if (insertError) { setError(insertError.message); return }

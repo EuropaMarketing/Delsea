@@ -91,6 +91,9 @@ export default function CustomerDetails() {
     if (data && data.length > 0) {
       const row = data[0] as { membership_id: string; plan_name: string; tokens_remaining: number; service_category: string | null }
       setTokenInfo({ membershipId: row.membership_id, planName: row.plan_name, tokens: row.tokens_remaining, serviceCategory: row.service_category })
+      // Auto-apply the token so customers with an eligible membership don't
+      // have to remember to tick the box — they can still untick it to pay instead.
+      setTokenChoice(true, row.membership_id, row.plan_name)
     } else {
       setTokenInfo(null)
       if (useToken) setTokenChoice(false, null, null)
@@ -154,10 +157,14 @@ export default function CustomerDetails() {
     if (!signInEmail.trim()) { setSignInError('Enter your email address first'); return }
     setSignInLoading(true)
     setSignInError('')
-    await supabase.auth.resetPasswordForEmail(signInEmail, {
+    const { error } = await supabase.auth.resetPasswordForEmail(signInEmail, {
       redirectTo: `${window.location.origin}/reset-password`,
     })
-    setResetSent(true)
+    if (error) {
+      setSignInError(error.message)
+    } else {
+      setResetSent(true)
+    }
     setSignInLoading(false)
   }
 

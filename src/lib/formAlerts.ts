@@ -204,3 +204,26 @@ export async function loadFormAlertSet(
   }
   return alerts
 }
+
+/** Batch check for list views — returns booking IDs whose customer has a
+ *  currently-valid completed form that tripped one of its flag conditions
+ *  (e.g. answered Yes to a heart-issues question), so staff can be warned
+ *  with an exclamation icon directly on the booking. */
+export async function loadFlaggedFormAlertSet(
+  bookings: Array<{ id: string; customer_id: string }>,
+): Promise<Set<string>> {
+  if (!bookings.length) return new Set()
+  const customerIds = [...new Set(bookings.map(b => b.customer_id))]
+  const { data } = await supabase
+    .from('form_responses')
+    .select('customer_id')
+    .in('customer_id', customerIds)
+    .eq('flagged', true)
+    .gt('expires_at', new Date().toISOString())
+  const flaggedCustomerIds = new Set((data ?? []).map(r => r.customer_id))
+  const alerts = new Set<string>()
+  for (const b of bookings) {
+    if (flaggedCustomerIds.has(b.customer_id)) alerts.add(b.id)
+  }
+  return alerts
+}

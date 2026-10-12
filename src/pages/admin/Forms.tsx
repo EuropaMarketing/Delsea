@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Plus, Pencil, Trash2, ChevronUp, ChevronDown, ClipboardList,
   ToggleRight, Type, AlignLeft, CheckSquare, Phone, Heading1, X, Save, Eye, EyeOff,
-  ChevronRight, ChevronLeft, CheckCircle2, List, ListChecks, PenTool, CalendarDays, Smartphone, UserCircle2,
+  ChevronRight, ChevronLeft, CheckCircle2, List, ListChecks, PenTool, CalendarDays, Smartphone, UserCircle2, AlertTriangle,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/Button'
@@ -19,6 +19,7 @@ type ServiceForm = {
   description: string | null
   is_active: boolean
   validity_months: number
+  form_type: 'new_client' | 'returning_client'
 }
 
 const FIELD_TYPES: { type: FormField['field_type']; label: string; icon: typeof Type; color: string }[] = [
@@ -37,6 +38,7 @@ const FIELD_TYPES: { type: FormField['field_type']; label: string; icon: typeof 
 ]
 
 const CHOICE_FIELD_TYPES: FormField['field_type'][] = ['dropdown', 'multi_select']
+const FLAGGABLE_FIELD_TYPES: FormField['field_type'][] = ['yes_no', 'dropdown', 'multi_select']
 
 function fieldMeta(type: FormField['field_type']) {
   return FIELD_TYPES.find(f => f.type === type) ?? FIELD_TYPES[0]
@@ -147,6 +149,7 @@ export default function AdminForms() {
   const [editTitle, setEditTitle] = useState('')
   const [editDesc, setEditDesc] = useState('')
   const [editValidity, setEditValidity] = useState(6)
+  const [editFormType, setEditFormType] = useState<'new_client' | 'returning_client'>('new_client')
 
   // Field inline editor
   const [fieldLabel, setFieldLabel] = useState('')
@@ -155,10 +158,12 @@ export default function AdminForms() {
   const [fieldFollowUpLabel, setFieldFollowUpLabel] = useState('Please provide further details')
   const [fieldDescription, setFieldDescription] = useState('')
   const [fieldChoices, setFieldChoices] = useState<string[]>([])
+  const [fieldFlagValues, setFieldFlagValues] = useState<string[]>([])
 
   // New form
   const [newFormOpen, setNewFormOpen] = useState(false)
   const [newTitle, setNewTitle] = useState('Health Questionnaire')
+  const [newFormType, setNewFormType] = useState<'new_client' | 'returning_client'>('new_client')
   const [creating, setCreating] = useState(false)
 
   // Which services (by name) currently have each form assigned — assignment now happens
@@ -197,6 +202,7 @@ export default function AdminForms() {
     setEditTitle(form.title)
     setEditDesc(form.description ?? '')
     setEditValidity(form.validity_months)
+    setEditFormType(form.form_type)
     setEditingField(null)
     setAddingToSection(null)
     setRenamingSection(null)
@@ -214,13 +220,14 @@ export default function AdminForms() {
     setCreating(true)
     const { data } = await supabase
       .from('service_forms')
-      .insert({ business_id: BUSINESS_ID, title: newTitle.trim(), validity_months: 6 })
+      .insert({ business_id: BUSINESS_ID, title: newTitle.trim(), validity_months: 6, form_type: newFormType })
       .select('*').single()
     if (data) {
       const form = data as ServiceForm
       setForms(p => [...p, form])
       setNewFormOpen(false)
       setNewTitle('Health Questionnaire')
+      setNewFormType('new_client')
       await openForm(form)
     }
     setCreating(false)
@@ -229,7 +236,13 @@ export default function AdminForms() {
   async function saveFormHeader() {
     if (!selectedForm) return
     setSaving(true)
-    const u = { title: editTitle.trim(), description: editDesc.trim() || null, validity_months: editValidity, updated_at: new Date().toISOString() }
+    const u = {
+      title: editTitle.trim(),
+      description: editDesc.trim() || null,
+      validity_months: editFormType === 'returning_client' ? selectedForm.validity_months : editValidity,
+      form_type: editFormType,
+      updated_at: new Date().toISOString(),
+    }
     await supabase.from('service_forms').update(u).eq('id', selectedForm.id)
     const updated = { ...selectedForm, ...u }
     setSelectedForm(updated)
@@ -332,6 +345,7 @@ export default function AdminForms() {
     setFieldFollowUpLabel(field.options?.follow_up_label ?? 'Please provide further details')
     setFieldDescription(field.options?.description ?? '')
     setFieldChoices(field.options?.choices?.length ? field.options.choices : ['Option 1', 'Option 2'])
+    setFieldFlagValues(field.options?.flag_values ?? [])
   }
 
   async function saveField(id: string) {
@@ -342,6 +356,7 @@ export default function AdminForms() {
     if (field.field_type === 'yes_no' && fieldFollowUp) options.follow_up_label = fieldFollowUpLabel
     if (field.field_type === 'checkbox' && fieldDescription) options.description = fieldDescription
     if (CHOICE_FIELD_TYPES.includes(field.field_type)) options.choices = fieldChoices.map(c => c.trim()).filter(Boolean)
+    if (FLAGGABLE_FIELD_TYPES.includes(field.field_type) && fieldFlagValues.length) options.flag_values = fieldFlagValues
     const u = { label: fieldLabel.trim() || field.label, required: fieldRequired, options }
     const { error } = await supabase.from('form_fields').update(u).eq('id', id)
     if (error) { setFormError(`Couldn't save field: ${error.message}`); return }
@@ -448,12 +463,29 @@ export default function AdminForms() {
                 <div className="space-y-3">
                   <Input label="Form title" value={editTitle} onChange={e => setEditTitle(e.target.value)} />
                   <Textarea label="Intro text (optional)" value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={2} />
-                  <div className="flex items-center gap-3">
-                    <label className="text-sm font-medium text-gray-700 shrink-0">Valid for</label>
-                    <input type="number" min={1} max={24} value={editValidity} onChange={e => setEditValidity(Number(e.target.value))}
-                      className="w-16 h-9 px-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)" />
-                    <span className="text-sm text-gray-500">months</span>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">Form type</label>
+                    <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+                      <button type="button" onClick={() => setEditFormType('new_client')}
+                        className={`flex-1 py-1.5 font-medium transition-colors ${editFormType === 'new_client' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50'}`}>
+                        New customer
+                      </button>
+                      <button type="button" onClick={() => setEditFormType('returning_client')}
+                        className={`flex-1 py-1.5 font-medium transition-colors ${editFormType === 'returning_client' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50'}`}>
+                        Returning customer
+                      </button>
+                    </div>
                   </div>
+                  {editFormType === 'new_client' ? (
+                    <div className="flex items-center gap-3">
+                      <label className="text-sm font-medium text-gray-700 shrink-0">Valid for</label>
+                      <input type="number" min={1} max={24} value={editValidity} onChange={e => setEditValidity(Number(e.target.value))}
+                        className="w-16 h-9 px-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)" />
+                      <span className="text-sm text-gray-500">months</span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500">Returning customer forms never expire once completed.</p>
+                  )}
                   <Button size="sm" loading={saving} onClick={saveFormHeader}>
                     <Save className="h-3.5 w-3.5" /> Save settings
                   </Button>
@@ -564,6 +596,25 @@ export default function AdminForms() {
                                       {fieldFollowUp && (
                                         <Input label="Follow-up prompt" value={fieldFollowUpLabel} onChange={e => setFieldFollowUpLabel(e.target.value)} />
                                       )}
+                                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 space-y-1.5">
+                                        <p className="text-xs font-medium text-amber-800 flex items-center gap-1.5">
+                                          <AlertTriangle className="h-3.5 w-3.5" /> Flag for staff attention if answered…
+                                        </p>
+                                        <div className="flex gap-4">
+                                          <label className="flex items-center gap-1.5 cursor-pointer text-xs text-amber-800">
+                                            <input type="checkbox" checked={fieldFlagValues.includes('yes')}
+                                              onChange={e => setFieldFlagValues(v => e.target.checked ? [...v, 'yes'] : v.filter(x => x !== 'yes'))}
+                                              className="rounded" />
+                                            Yes
+                                          </label>
+                                          <label className="flex items-center gap-1.5 cursor-pointer text-xs text-amber-800">
+                                            <input type="checkbox" checked={fieldFlagValues.includes('no')}
+                                              onChange={e => setFieldFlagValues(v => e.target.checked ? [...v, 'no'] : v.filter(x => x !== 'no'))}
+                                              className="rounded" />
+                                            No
+                                          </label>
+                                        </div>
+                                      </div>
                                     </div>
                                   )}
                                   {field.field_type === 'checkbox' && (
@@ -581,6 +632,14 @@ export default function AdminForms() {
                                               placeholder={`Option ${i + 1}`}
                                               className="flex-1 h-9 px-3 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-(--color-primary)"
                                             />
+                                            <label title="Flag for staff attention if this option is selected"
+                                              className="flex items-center gap-1 cursor-pointer shrink-0 px-1.5 py-1 rounded hover:bg-amber-50">
+                                              <input type="checkbox" checked={fieldFlagValues.includes(choice)}
+                                                onChange={e => setFieldFlagValues(v => e.target.checked ? [...v, choice] : v.filter(x => x !== choice))}
+                                                disabled={!choice.trim()}
+                                                className="rounded" />
+                                              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                                            </label>
                                             <button type="button" onClick={() => setFieldChoices(cs => cs.filter((_, idx) => idx !== i))}
                                               disabled={fieldChoices.length <= 1}
                                               className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-30 shrink-0">
@@ -643,6 +702,22 @@ export default function AdminForms() {
       <Modal open={newFormOpen} onClose={() => setNewFormOpen(false)} title="New Health Form" size="sm">
         <div className="space-y-4">
           <Input label="Form title" value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="Health Questionnaire" />
+          <div>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">Form type</label>
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+              <button type="button" onClick={() => setNewFormType('new_client')}
+                className={`flex-1 py-1.5 font-medium transition-colors ${newFormType === 'new_client' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50'}`}>
+                New customer
+              </button>
+              <button type="button" onClick={() => setNewFormType('returning_client')}
+                className={`flex-1 py-1.5 font-medium transition-colors ${newFormType === 'returning_client' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50'}`}>
+                Returning customer
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              {newFormType === 'new_client' ? 'Expires after a set number of months.' : 'Never expires once completed.'}
+            </p>
+          </div>
           <p className="text-xs text-gray-400">
             Assign this form to one or more services afterwards from the Services page.
           </p>

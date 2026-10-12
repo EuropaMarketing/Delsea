@@ -62,17 +62,22 @@ export default function Confirmation() {
     ? Math.min(voucherInfo.remaining_value, Math.max(0, effectivePrice - (discountInfo?.amount ?? 0)))
     : 0
   const discountedPrice = effectivePrice - (discountInfo?.amount ?? 0) - voucherAmount
+  // A membership token covers exactly one spot's price — on a multi-spot group
+  // booking the remaining spots (and any add-ons) still need paying for.
+  const tokenCoveredAmount = useToken ? Math.min(effectiveUnitPrice, discountedPrice) : 0
+  const payableAfterToken = Math.max(0, discountedPrice - tokenCoveredAmount)
+  const tokenFullyCovers = useToken && payableAfterToken <= 0
   const postBuffer = service?.post_buffer_minutes ?? 0
   const endsAt = addMinutes(startsAt, effectiveDuration + postBuffer)
   const clientEndsAt = addMinutes(startsAt, effectiveDuration)
 
   const depositAmount = service ? (
     service.deposit_type === 'fixed' ? service.deposit_value :
-    service.deposit_type === 'percentage' ? Math.round(discountedPrice * service.deposit_value / 100) :
+    service.deposit_type === 'percentage' ? Math.round(payableAfterToken * service.deposit_value / 100) :
     0
   ) : 0
   const hasDeposit = depositAmount > 0
-  const balanceDue = discountedPrice - depositAmount
+  const balanceDue = payableAfterToken - depositAmount
 
   async function handleApplyDiscount() {
     if (!discountCode.trim()) return
@@ -221,21 +226,21 @@ export default function Confirmation() {
         customerEmail: draft.customerEmail,
         isNewUser: wasGuest,
         depositAmount,
-        paymentMethod: useToken ? 'membership' : !acceptsCard ? 'manual' : paymentMethod,
+        paymentMethod: tokenFullyCovers ? 'membership' : !acceptsCard ? 'manual' : paymentMethod,
         linkedServiceFailed,
       }
 
-      // Membership covers cost, or this business has no payment provider connected —
-      // no payment page needed, payment (if any) is arranged directly with the business.
-      if (useToken || !acceptsCard) {
+      // Membership token covers the whole amount, or this business has no payment
+      // provider connected — no payment page needed either way.
+      if (tokenFullyCovers || !acceptsCard) {
         confirmed.current = true
         reset()
         navigate('/booking-confirmed', { replace: true, state: confirmedState })
         return
       }
 
-      // Fully covered by discount/voucher — confirm immediately.
-      const amountDueNow = hasDeposit ? depositAmount : discountedPrice
+      // Fully covered by token/discount/voucher — confirm immediately.
+      const amountDueNow = hasDeposit ? depositAmount : payableAfterToken
       if (paymentMethod === 'card' && amountDueNow <= 0) {
         confirmed.current = true
         reset()
@@ -251,7 +256,7 @@ export default function Confirmation() {
           serviceName: service?.name ?? '',
           startsAt: startsAt.toISOString(),
           staffName: staffMember?.name ?? null,
-          amountDue: hasDeposit ? depositAmount : discountedPrice,
+          amountDue: hasDeposit ? depositAmount : payableAfterToken,
           isDeposit: hasDeposit,
           balanceDue: hasDeposit ? balanceDue : 0,
           confirmedState,
@@ -392,85 +397,90 @@ export default function Confirmation() {
           <Card padding="md" className="border-2 lg:sticky lg:top-24" style={{ borderColor: 'var(--color-primary)' }}>
             <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-4">Payment Summary</h2>
 
-            {useToken ? (
-              <div className="space-y-3 mb-4">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Total</span>
-                  <span className="font-semibold text-gray-900 line-through">{formatCurrency(effectivePrice)}</span>
-                </div>
+            <div className="space-y-2 text-sm mb-4">
+              {useToken && (
                 <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2.5">
                   <Ticket className="h-4 w-4 text-green-600 shrink-0" />
                   <div>
-                    <p className="text-sm font-semibold text-green-800">Paid via membership</p>
+                    <p className="text-sm font-semibold text-green-800">
+                      {(draft.spotsBooked ?? 1) > 1 ? '1 spot paid via membership' : 'Paid via membership'}
+                    </p>
                     <p className="text-xs text-green-600">{tokenPlanName} · 1 session redeemed</p>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div className="space-y-2 text-sm mb-4">
-                {(draft.spotsBooked ?? 1) > 1 && (
-                  <div className="flex justify-between text-xs text-gray-400">
-                    <span>{formatCurrency(effectiveUnitPrice)} × {draft.spotsBooked} spots</span>
-                  </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Service</span>
-                  <span className="text-gray-700">{formatCurrency(effectiveUnitPrice * (draft.spotsBooked ?? 1))}</span>
+              )}
+              {(draft.spotsBooked ?? 1) > 1 && (
+                <div className="flex justify-between text-xs text-gray-400">
+                  <span>{formatCurrency(effectiveUnitPrice)} × {draft.spotsBooked} spots</span>
                 </div>
-                {selectedAddons.map((a) => (
-                  <div key={a.id} className="flex justify-between text-sm">
-                    <span className="text-gray-500">{a.name}</span>
-                    <span className="text-gray-700">+{formatCurrency(a.price)}</span>
-                  </div>
-                ))}
-                <div className="flex justify-between border-t border-gray-100 pt-2 mt-1">
-                  <span className="text-gray-500 font-medium">Total</span>
-                  <span className="font-semibold text-gray-900">{formatCurrency(effectivePrice)}</span>
-                </div>
-                {discountInfo && (
-                  <div className="flex justify-between text-sm text-green-700">
-                    <span className="flex items-center gap-1"><Tag className="h-3.5 w-3.5" />{discountInfo.code}</span>
-                    <span className="font-semibold">−{formatCurrency(discountInfo.amount)}</span>
-                  </div>
-                )}
-                {voucherInfo && voucherAmount > 0 && (
-                  <div className="flex justify-between text-sm text-green-700">
-                    <span className="flex items-center gap-1"><Gift className="h-3.5 w-3.5" />{voucherInfo.code}</span>
-                    <span className="font-semibold">−{formatCurrency(voucherAmount)}</span>
-                  </div>
-                )}
-                {(discountInfo || (voucherInfo && voucherAmount > 0)) && (
-                  <div className="flex justify-between font-bold text-gray-900 border-t border-gray-100 pt-2 mt-1">
-                    <span>Total after savings</span>
-                    <span>{formatCurrency(discountedPrice)}</span>
-                  </div>
-                )}
-                {hasDeposit ? (
-                  <div className="border-t border-gray-100 pt-2 mt-2 space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Deposit due today</span>
-                      <span className="font-bold text-lg" style={{ color: 'var(--color-primary)' }}>
-                        {formatCurrency(depositAmount)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-400">Balance at appointment</span>
-                      <span className="text-gray-500">{formatCurrency(balanceDue)}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="border-t border-gray-100 pt-2 mt-2">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-400">Due at appointment</span>
-                      <span className="text-gray-500">{formatCurrency(discountedPrice)}</span>
-                    </div>
-                  </div>
-                )}
+              )}
+              <div className="flex justify-between">
+                <span className="text-gray-500">Service</span>
+                <span className="text-gray-700">{formatCurrency(effectiveUnitPrice * (draft.spotsBooked ?? 1))}</span>
               </div>
-            )}
+              {selectedAddons.map((a) => (
+                <div key={a.id} className="flex justify-between text-sm">
+                  <span className="text-gray-500">{a.name}</span>
+                  <span className="text-gray-700">+{formatCurrency(a.price)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between border-t border-gray-100 pt-2 mt-1">
+                <span className="text-gray-500 font-medium">Total</span>
+                <span className="font-semibold text-gray-900">{formatCurrency(effectivePrice)}</span>
+              </div>
+              {discountInfo && (
+                <div className="flex justify-between text-sm text-green-700">
+                  <span className="flex items-center gap-1"><Tag className="h-3.5 w-3.5" />{discountInfo.code}</span>
+                  <span className="font-semibold">−{formatCurrency(discountInfo.amount)}</span>
+                </div>
+              )}
+              {voucherInfo && voucherAmount > 0 && (
+                <div className="flex justify-between text-sm text-green-700">
+                  <span className="flex items-center gap-1"><Gift className="h-3.5 w-3.5" />{voucherInfo.code}</span>
+                  <span className="font-semibold">−{formatCurrency(voucherAmount)}</span>
+                </div>
+              )}
+              {useToken && tokenCoveredAmount > 0 && (
+                <div className="flex justify-between text-sm text-green-700">
+                  <span className="flex items-center gap-1"><Ticket className="h-3.5 w-3.5" />Membership</span>
+                  <span className="font-semibold">−{formatCurrency(tokenCoveredAmount)}</span>
+                </div>
+              )}
+              {(discountInfo || (voucherInfo && voucherAmount > 0) || useToken) && (
+                <div className="flex justify-between font-bold text-gray-900 border-t border-gray-100 pt-2 mt-1">
+                  <span>Total after savings</span>
+                  <span>{formatCurrency(payableAfterToken)}</span>
+                </div>
+              )}
+              {tokenFullyCovers ? (
+                <p className="text-xs text-green-700 font-medium border-t border-gray-100 pt-2 mt-2">
+                  Fully covered by membership — nothing more to pay.
+                </p>
+              ) : hasDeposit ? (
+                <div className="border-t border-gray-100 pt-2 mt-2 space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Deposit due today</span>
+                    <span className="font-bold text-lg" style={{ color: 'var(--color-primary)' }}>
+                      {formatCurrency(depositAmount)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-400">Balance at appointment</span>
+                    <span className="text-gray-500">{formatCurrency(balanceDue)}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="border-t border-gray-100 pt-2 mt-2">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-400">Due at appointment</span>
+                    <span className="text-gray-500">{formatCurrency(payableAfterToken)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Discount + voucher inputs */}
-            {!useToken && (
+            {!tokenFullyCovers && (
               <>
                 <div className="border-t border-gray-100 pt-3 mb-3">
                   {discountInfo ? (
@@ -533,7 +543,7 @@ export default function Confirmation() {
             )}
 
             {/* Payment method selector */}
-            {!useToken && acceptsCard && (
+            {!tokenFullyCovers && acceptsCard && (
               <div className="grid grid-cols-2 gap-2 mb-3">
                 {(['card', 'venue'] as const).map((m) => (
                   <button
@@ -553,7 +563,7 @@ export default function Confirmation() {
               </div>
             )}
 
-            {!useToken && !acceptsCard && discountedPrice > 0 && (
+            {!tokenFullyCovers && !acceptsCard && payableAfterToken > 0 && (
               <div className="flex items-start gap-2 mb-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
                 <Info className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
                 <p className="text-xs text-gray-500">Online payment isn't available for this business yet — payment will be arranged directly with us.</p>
@@ -581,20 +591,20 @@ export default function Confirmation() {
             )}
 
             <Button fullWidth size="lg" loading={loading} onClick={handleConfirm}>
-              {useToken || !acceptsCard
+              {tokenFullyCovers || !acceptsCard
                 ? 'Confirm Booking'
                 : paymentMethod === 'venue'
                 ? 'Continue to Card Verification →'
                 : hasDeposit
                 ? `Continue to Payment · ${formatCurrency(depositAmount)} →`
-                : discountedPrice > 0
-                ? `Continue to Payment · ${formatCurrency(discountedPrice)} →`
+                : payableAfterToken > 0
+                ? `Continue to Payment · ${formatCurrency(payableAfterToken)} →`
                 : 'Confirm Booking'}
             </Button>
 
             <div className="flex items-center justify-center gap-1.5 mt-3 text-xs text-gray-400">
               <ShieldCheck className="h-3.5 w-3.5" />
-              <span>{useToken ? 'Membership session · no payment needed' : 'Secure payment powered by SumUp'}</span>
+              <span>{tokenFullyCovers ? 'Membership session · no payment needed' : 'Secure payment powered by SumUp'}</span>
             </div>
           </Card>
         </div>

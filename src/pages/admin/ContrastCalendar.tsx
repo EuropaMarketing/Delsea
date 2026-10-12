@@ -2,15 +2,15 @@ import { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   format, addDays, addWeeks, subWeeks, addMonths, subMonths, startOfDay, startOfWeek, endOfWeek,
-  startOfMonth, endOfMonth, parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday, isSameDay, isPast, getDay,
+  startOfMonth, endOfMonth, parseISO, differenceInMinutes, setHours, setMinutes, addMinutes, isToday, isSameDay, isPast, isAfter, getDay,
 } from 'date-fns'
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   Users, CheckCircle2, XCircle, Lock, Pencil, Ticket, Tag, Gift, X, CalendarPlus, CreditCard, History, UserCheck, ClipboardList,
-  Sparkles, Mail, Phone as PhoneIcon, CalendarClock, UserPlus, Cake, PenTool, StickyNote, Save,
+  Sparkles, Mail, Phone as PhoneIcon, CalendarClock, UserPlus, Cake, PenTool, StickyNote, Save, AlertTriangle,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { loadFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
+import { loadFormAlertSet, loadFlaggedFormAlertSet, checkBookingForm, type BookingFormStatus } from '@/lib/formAlerts'
 import { generateTimeSlots } from '@/lib/slots'
 import { AdminFormFiller, ViewFormResponseModal, type ResponseMap } from '@/components/FormFiller'
 import { FullPageSpinner } from '@/components/ui/Spinner'
@@ -174,6 +174,7 @@ type CustomerFormHistory = {
   completed_at: string
   expires_at: string
   responses: ResponseMap
+  flagged: boolean
   form: { title: string } | null
 }
 
@@ -207,6 +208,7 @@ export default function AdminContrastCalendar() {
   const [sessionAttendees, setSessionAttendees] = useState<Attendee[]>([])
   const [sessionAttendeesLoading, setSessionAttendeesLoading] = useState(false)
   const [sessionFormAlerts, setSessionFormAlerts] = useState<Set<string>>(new Set())
+  const [sessionFlaggedAlerts, setSessionFlaggedAlerts] = useState<Set<string>>(new Set())
   const [sessionTokenPaid, setSessionTokenPaid] = useState<Set<string>>(new Set())
   const [sessionGuestsByBooking, setSessionGuestsByBooking] = useState<Map<string, BookingGuest[]>>(new Map())
   const [attendeeActionLoading, setAttendeeActionLoading] = useState<string | null>(null)
@@ -262,6 +264,9 @@ export default function AdminContrastCalendar() {
   const [nbDailyRepeatIntervalHours, setNbDailyRepeatIntervalHours] = useState(1)
   const [nbDailyRepeatUntilTime, setNbDailyRepeatUntilTime] = useState('')
   const [nbSkippedDates, setNbSkippedDates] = useState<string[]>([])
+  // Membership token assignment
+  const [nbTokenInfo, setNbTokenInfo] = useState<{ membershipId: string; planName: string; tokens: number } | null>(null)
+  const [nbUseToken, setNbUseToken] = useState(false)
 
   // Block Time modal
   const [btOpen, setBtOpen] = useState(false)
@@ -311,6 +316,7 @@ export default function AdminContrastCalendar() {
   const [activityLogOpen, setActivityLogOpen] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const [formAlerts, setFormAlerts] = useState<Set<string>>(new Set())
+  const [flaggedAlerts, setFlaggedAlerts] = useState<Set<string>>(new Set())
   const [selectedBookingForm, setSelectedBookingForm] = useState<BookingFormStatus | null>(null)
   const [fillFormTarget, setFillFormTarget] = useState<{ id: string; title: string } | null>(null)
   // Staff-only notes — separate from the customer's own booking notes, never shown to the customer
@@ -478,6 +484,7 @@ export default function AdminContrastCalendar() {
         const bks = bookRes.data as RichBooking[]
         setBookings(bks)
         loadFormAlertSet(BUSINESS_ID, bks as Array<{ id: string; service_id: string; customer_id: string; created_at: string }>).then(setFormAlerts)
+        loadFlaggedFormAlertSet(bks as Array<{ id: string; customer_id: string }>).then(setFlaggedAlerts)
       }
       if (svcRes.data) setServices(svcRes.data as Service[])
       if (blockRes.data) setBlockedTimes(blockRes.data as BlockedTime[])
@@ -539,6 +546,32 @@ export default function AdminContrastCalendar() {
     fetchSlotCapacity(nbServiceId, startsAt).then(cap => { if (!cancelled) setNbSlotCapacity(cap) })
     return () => { cancelled = true }
   }, [nbModalOpen, nbServiceId, nbDate, nbTime])
+
+  // Check the customer's membership token balance in the New Booking modal,
+  // so the admin can assign a token up front rather than only after saving.
+  useEffect(() => {
+    if (!nbModalOpen || nbBookingMode !== 'customer' || !nbEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nbEmail)) {
+      setNbTokenInfo(null); setNbUseToken(false)
+      return
+    }
+    const category = services.find(s => s.id === nbServiceId)?.category ?? null
+    let cancelled = false
+    supabase.rpc('get_customer_token_balance', {
+      p_email: nbEmail.trim().toLowerCase(),
+      p_business_id: BUSINESS_ID,
+      p_category: category,
+    }).then(({ data }) => {
+      if (cancelled) return
+      if (data && data.length > 0) {
+        const row = data[0] as { membership_id: string; plan_name: string; tokens_remaining: number }
+        setNbTokenInfo({ membershipId: row.membership_id, planName: row.plan_name, tokens: row.tokens_remaining })
+        setNbUseToken(true)
+      } else {
+        setNbTokenInfo(null); setNbUseToken(false)
+      }
+    })
+    return () => { cancelled = true }
+  }, [nbModalOpen, nbBookingMode, nbEmail, nbServiceId, services])
 
   // Live capacity readout in the edit form, for group-session services (excluding this booking's own spots).
   useEffect(() => {
@@ -759,6 +792,7 @@ export default function AdminContrastCalendar() {
     setSessionCancelOpen(false)
     setSessionAttendeesLoading(true)
     setSessionFormAlerts(new Set())
+    setSessionFlaggedAlerts(new Set())
     setSessionTokenPaid(new Set())
     setSessionGuestsByBooking(new Map())
     const { data } = await supabase
@@ -772,6 +806,7 @@ export default function AdminContrastCalendar() {
     setSessionAttendeesLoading(false)
     if (attendees.length) {
       loadFormAlertSet(BUSINESS_ID, attendees).then(setSessionFormAlerts)
+      loadFlaggedFormAlertSet(attendees).then(setSessionFlaggedAlerts)
       supabase
         .from('membership_transactions')
         .select('booking_id')
@@ -811,6 +846,7 @@ export default function AdminContrastCalendar() {
     setNbDailyRepeatEnabled(false); setNbDailyRepeatIntervalHours(1); setNbDailyRepeatUntilTime('')
     setNbSkippedDates([])
     setNbError(''); setNbSuggestions([]); setNbShowSuggestions(false); setNbSelectedCustomerId(null)
+    setNbTokenInfo(null); setNbUseToken(false)
     setSelectedSession(null)
     setNbModalOpen(true)
   }
@@ -1079,6 +1115,7 @@ export default function AdminContrastCalendar() {
     setNbDailyRepeatEnabled(false); setNbDailyRepeatIntervalHours(1); setNbDailyRepeatUntilTime('')
     setNbSkippedDates([])
     setNbError(''); setNbSuggestions([]); setNbShowSuggestions(false); setNbSelectedCustomerId(null)
+    setNbTokenInfo(null); setNbUseToken(false)
     setNbModalOpen(true)
     setCellPopover(null)
   }
@@ -1314,7 +1351,7 @@ export default function AdminContrastCalendar() {
         .limit(8),
       supabase
         .from('form_responses')
-        .select('id, form_id, completed_at, expires_at, responses, form:service_forms(title)')
+        .select('id, form_id, completed_at, expires_at, responses, flagged, form:service_forms(title)')
         .eq('customer_id', customerId)
         .order('completed_at', { ascending: false })
         .limit(8),
@@ -1923,6 +1960,13 @@ export default function AdminContrastCalendar() {
           .select('*, service:services(name,category,price), staff:staff(name), customer:customers(name,email,phone,sumup_card_token,date_of_birth,internal_notes)')
         if (bookErr) throw bookErr
 
+        if (nbUseToken && nbTokenInfo && created.length > 0) {
+          await supabase.rpc('redeem_token', {
+            p_booking_id: (created as RichBooking[])[0].id,
+            p_membership_id: nbTokenInfo.membershipId,
+          })
+        }
+
         const rangeStart = viewMode === 'month' ? startOfMonth(selectedDay) : startOfWeek(selectedDay, { weekStartsOn: 1 })
         const rangeEnd = viewMode === 'month' ? endOfMonth(selectedDay) : endOfWeek(selectedDay, { weekStartsOn: 1 })
         const inView = (created as RichBooking[]).filter(b => {
@@ -1957,6 +2001,8 @@ export default function AdminContrastCalendar() {
   const editActiveVariants = (editService?.variants ?? []).filter(v => v.is_active).sort((a, b) => a.sort_order - b.sort_order)
   const editSelectedVariant = editActiveVariants.find(v => v.id === editVariantId)
   const editActiveOptions = (editSelectedVariant?.options ?? []).filter(o => o.is_active).sort((a, b) => a.sort_order - b.sort_order)
+  const customerUpcoming = customerBookings.filter(cb => cb.status !== 'cancelled' && isAfter(parseISO(cb.starts_at), new Date()))
+  const customerPast = customerBookings.filter(cb => cb.status === 'cancelled' || !isAfter(parseISO(cb.starts_at), new Date()))
 
   if (loading) return <FullPageSpinner />
 
@@ -2158,6 +2204,7 @@ export default function AdminContrastCalendar() {
                         style={{ top, height, left: `calc(${widthPct * booking.col}% + 2px)`, width: `calc(${widthPct}% - 4px)`, backgroundColor: `${color}22`, borderLeft: `3px solid ${color}` }}
                       >
                         <p className="text-xs font-semibold truncate leading-tight flex items-center gap-1" style={{ color }}>
+                          {flaggedAlerts.has(booking.id) && <AlertTriangle className="h-3 w-3 shrink-0 text-red-600" />}
                           {formAlerts.has(booking.id) && <ClipboardList className="h-3 w-3 shrink-0 text-amber-500" />}
                           {format(parseISO(booking.starts_at), 'HH:mm')} {booking.service?.name}
                         </p>
@@ -2250,6 +2297,7 @@ export default function AdminContrastCalendar() {
                 const svc = services.find(s => s.id === id)
                 if (!svc?.is_group_session) setNbBookingMode('customer')
                 if (!nbPriceTouched && svc) setNbPrice((svc.price / 100).toFixed(2))
+                if (nbBookingMode === 'open') setNbSpotsBooked(svc?.max_capacity ?? 8)
               }}
               className="w-full h-10 px-3 text-sm border border-gray-200 bg-white rounded outline-none focus:ring-2 focus:ring-(--color-primary)"
             >
@@ -2259,10 +2307,10 @@ export default function AdminContrastCalendar() {
 
           {selectedService?.is_group_session && (
             <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
-              <button type="button" onClick={() => setNbBookingMode('customer')} className={cn('flex-1 py-2 font-medium transition-colors', nbBookingMode === 'customer' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50')}>
+              <button type="button" onClick={() => { setNbBookingMode('customer'); setNbSpotsBooked(1) }} className={cn('flex-1 py-2 font-medium transition-colors', nbBookingMode === 'customer' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50')}>
                 Assign to a customer
               </button>
-              <button type="button" onClick={() => setNbBookingMode('open')} className={cn('flex-1 py-2 font-medium transition-colors', nbBookingMode === 'open' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50')}>
+              <button type="button" onClick={() => { setNbBookingMode('open'); setNbSpotsBooked(selectedService?.max_capacity ?? 8) }} className={cn('flex-1 py-2 font-medium transition-colors', nbBookingMode === 'open' ? 'bg-(--color-primary) text-white' : 'text-gray-600 hover:bg-gray-50')}>
                 Leave spots open
               </button>
             </div>
@@ -2517,6 +2565,27 @@ export default function AdminContrastCalendar() {
               <Input label="Email" type="email" value={nbEmail} onChange={e => setNbEmail(e.target.value)} required placeholder="jane@example.com" />
               <Input label="Phone" type="tel" value={nbPhone} onChange={e => setNbPhone(e.target.value)} placeholder="+44 7700 900000" />
               <Input label="Date of birth (optional)" type="date" value={nbDob} onChange={e => setNbDob(e.target.value)} />
+              {nbTokenInfo && (
+                <div className="border-2 rounded-lg p-3" style={{ borderColor: nbUseToken ? 'var(--color-primary)' : '#e5e7eb' }}>
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={nbUseToken}
+                      onChange={e => setNbUseToken(e.target.checked)}
+                      className="mt-0.5 accent-(--color-primary)"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <Ticket className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }} />
+                        <p className="text-sm font-semibold text-gray-900">Assign a membership token</p>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {nbTokenInfo.planName} · {nbTokenInfo.tokens} session{nbTokenInfo.tokens !== 1 ? 's' : ''} remaining
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              )}
               <Textarea label="Notes" value={nbNotes} onChange={e => setNbNotes(e.target.value)} placeholder="Optional notes…" />
             </>
           )}
@@ -3077,13 +3146,36 @@ export default function AdminContrastCalendar() {
 
                 <div>
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                    <CalendarClock className="h-3 w-3" /> Upcoming
+                  </p>
+                  {customerUpcoming.length === 0 ? (
+                    <p className="text-xs text-gray-400 mb-3">No upcoming bookings.</p>
+                  ) : (
+                    <div className="space-y-2 mb-3">
+                      {customerUpcoming.map(cb => (
+                        <button
+                          key={cb.id}
+                          type="button"
+                          onClick={() => openCustomerPastBooking(cb.id)}
+                          className="w-full flex items-center justify-between gap-2 hover:bg-gray-50 rounded-lg px-1.5 py-1 -mx-1.5 transition-colors text-left"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-xs text-gray-800 truncate">{cb.service?.name ?? 'Booking'}</p>
+                            <p className="text-xs text-gray-400">{format(parseISO(cb.starts_at), 'd MMM yyyy')}</p>
+                          </div>
+                          <Badge variant={statusBadgeVariant(cb.status)} className="capitalize shrink-0">{cb.status}</Badge>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
                     <CalendarClock className="h-3 w-3" /> Previous Bookings
                   </p>
-                  {customerBookings.length === 0 ? (
+                  {customerPast.length === 0 ? (
                     <p className="text-xs text-gray-400">No previous bookings.</p>
                   ) : (
                     <div className="space-y-2">
-                      {customerBookings.map(cb => (
+                      {customerPast.map(cb => (
                         <button
                           key={cb.id}
                           type="button"
@@ -3118,9 +3210,12 @@ export default function AdminContrastCalendar() {
                             onClick={() => setViewingFormResponse(fr)}
                             className="w-full flex items-center justify-between gap-2 hover:bg-gray-50 rounded-lg px-1.5 py-1 -mx-1.5 transition-colors text-left"
                           >
-                            <p className="text-xs text-gray-800 truncate">{fr.form?.title ?? 'Form'}</p>
-                            <span className={cn('text-xs font-medium shrink-0', valid ? 'text-green-600' : 'text-amber-600')}>
-                              {valid ? 'Valid' : 'Expired'}
+                            <p className="text-xs text-gray-800 truncate flex items-center gap-1">
+                              {fr.flagged && <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />}
+                              {fr.form?.title ?? 'Form'}
+                            </p>
+                            <span className={cn('text-xs font-medium shrink-0', fr.flagged ? 'text-red-600' : valid ? 'text-green-600' : 'text-amber-600')}>
+                              {fr.flagged ? 'Flagged' : valid ? 'Valid' : 'Expired'}
                             </span>
                           </button>
                         )
@@ -3581,6 +3676,7 @@ export default function AdminContrastCalendar() {
                     const basePrice = services.find(s => s.id === a.service_id)?.price ?? 0
                     const paidViaToken = sessionTokenPaid.has(a.id)
                     const needsForm = sessionFormAlerts.has(a.id)
+                    const isFlagged = sessionFlaggedAlerts.has(a.id)
                     const busy = attendeeActionLoading === a.id
                     const guests = sessionGuestsByBooking.get(a.id) ?? []
                     return (
@@ -3614,6 +3710,9 @@ export default function AdminContrastCalendar() {
                             <span className="flex items-center gap-1 text-amber-600"><ClipboardList className="h-3 w-3" /> Form not completed</span>
                           ) : (
                             <span className="flex items-center gap-1 text-green-600"><CheckCircle2 className="h-3 w-3" /> Form OK</span>
+                          )}
+                          {isFlagged && (
+                            <span className="flex items-center gap-1 text-red-600 font-medium"><AlertTriangle className="h-3 w-3" /> Flagged for attention</span>
                           )}
                         </div>
                         <div className="flex items-center gap-2">
