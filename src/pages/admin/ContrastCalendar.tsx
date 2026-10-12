@@ -1382,7 +1382,9 @@ export default function AdminContrastCalendar() {
     setSelectedBooking(b)
     setSelectedBookingForm(null)
     setBookingNotesDraft(b.internal_notes ?? '')
-    const remaining = bookingPrice(b) - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0) - (b.deposit_charged ?? 0)
+    const unitPrice = bookingPrice(b)
+    const total = unitPrice * (b.spots_booked ?? 1)
+    const remaining = total - (b.discount_amount ?? 0) - (b.gift_voucher_amount ?? 0) - (b.deposit_charged ?? 0)
     setChargeAmount(remaining > 0 ? (remaining / 100).toFixed(2) : '')
     setChargeType('balance')
     setChargeError('')
@@ -1419,7 +1421,14 @@ export default function AdminContrastCalendar() {
       .eq('booking_id', b.id)
       .eq('type', 'redeem')
       .maybeSingle()
-      .then(({ data }) => setViewTokenApplied(!!data))
+      .then(({ data }) => {
+        const applied = !!data
+        setViewTokenApplied(applied)
+        if (applied) {
+          const afterToken = remaining - unitPrice
+          setChargeAmount(afterToken > 0 ? (afterToken / 100).toFixed(2) : '')
+        }
+      })
   }
 
   function openAddLinkedService() {
@@ -2003,6 +2012,19 @@ export default function AdminContrastCalendar() {
   const editActiveOptions = (editSelectedVariant?.options ?? []).filter(o => o.is_active).sort((a, b) => a.sort_order - b.sort_order)
   const customerUpcoming = customerBookings.filter(cb => cb.status !== 'cancelled' && isAfter(parseISO(cb.starts_at), new Date()))
   const customerPast = customerBookings.filter(cb => cb.status === 'cancelled' || !isAfter(parseISO(cb.starts_at), new Date()))
+
+  // A membership token always covers exactly one spot — on a multi-spot group
+  // booking the other spots still need paying for, so "Paid (membership token)"
+  // must only show once the token + discounts/voucher/deposit actually cover
+  // the full total, not just because a token was redeemed at all.
+  const detailSpots = selectedBooking?.spots_booked ?? 1
+  const detailUnitPrice = selectedBooking ? bookingPrice(selectedBooking) : 0
+  const detailTotalPrice = detailUnitPrice * detailSpots
+  const detailTokenCoveredAmount = viewTokenApplied ? Math.min(detailUnitPrice, detailTotalPrice) : 0
+  const detailRemainingAfterToken = selectedBooking
+    ? detailTotalPrice - detailTokenCoveredAmount - (selectedBooking.discount_amount ?? 0) - (selectedBooking.gift_voucher_amount ?? 0) - (selectedBooking.deposit_charged ?? 0)
+    : 0
+  const detailTokenFullyCovers = viewTokenApplied && detailRemainingAfterToken <= 0
 
   if (loading) return <FullPageSpinner />
 
@@ -2721,7 +2743,8 @@ export default function AdminContrastCalendar() {
               <div className="flex justify-between items-center">
                 <dt className="text-gray-500">Price</dt>
                 <dd className="font-medium text-gray-900 flex items-center gap-1.5">
-                  {formatCurrency(bookingPrice(selectedBooking))}
+                  {detailSpots > 1 && <span className="text-xs font-normal text-gray-400">{formatCurrency(detailUnitPrice)} × {detailSpots}</span>}
+                  {formatCurrency(detailTotalPrice)}
                   {selectedBooking.price_override != null && (
                     <span className="text-xs font-normal text-(--color-primary) bg-(--color-primary)/10 px-1.5 py-0.5 rounded">custom</span>
                   )}
@@ -2958,16 +2981,25 @@ export default function AdminContrastCalendar() {
               </p>
               <p className="text-xs text-gray-500 capitalize">
                 Status: <span className="font-medium text-gray-700">
-                  {viewTokenApplied ? 'Paid (membership token)' : (selectedBooking.payment_status ?? 'unpaid').replaceAll('_', ' ')}
+                  {detailTokenFullyCovers ? 'Paid (membership token)' : viewTokenApplied ? 'Partially paid (membership token)' : (selectedBooking.payment_status ?? 'unpaid').replaceAll('_', ' ')}
                 </span>
               </p>
-              {viewTokenApplied ? (
-                <p className="text-xs text-green-700 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Covered by a membership token</p>
-              ) : selectedBooking.customer?.sumup_card_token ? (
-                selectedBooking.payment_status === 'paid_in_full' ? (
+              {viewTokenApplied && (
+                <p className="text-xs text-green-700 flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  {detailSpots > 1
+                    ? `1 of ${detailSpots} spots covered by membership token (${formatCurrency(detailTokenCoveredAmount)})`
+                    : 'Covered by a membership token'}
+                </p>
+              )}
+              {detailTokenFullyCovers ? null : selectedBooking.customer?.sumup_card_token ? (
+                selectedBooking.payment_status === 'paid_in_full' && !viewTokenApplied ? (
                   <p className="text-xs text-green-700 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Paid in full</p>
                 ) : (
                   <div className="space-y-2">
+                    {viewTokenApplied && (
+                      <p className="text-xs text-gray-500">{formatCurrency(detailRemainingAfterToken)} still due for the remaining spot{detailSpots - 1 !== 1 ? 's' : ''}.</p>
+                    )}
                     <div className="flex gap-2">
                       <select
                         value={chargeType}
@@ -3875,7 +3907,7 @@ export default function AdminContrastCalendar() {
             {hoverBooking.staff?.name && <p className="text-xs text-gray-500 mt-1">with {hoverBooking.staff.name}</p>}
             <div className="flex items-center justify-between mt-2">
               <span className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
-                {formatCurrency(bookingPrice(hoverBooking))}
+                {formatCurrency(bookingPrice(hoverBooking) * (hoverBooking.spots_booked ?? 1))}
                 {hoverBooking.price_override != null && (
                   <span className="text-xs font-normal text-(--color-primary) bg-(--color-primary)/10 px-1.5 py-0.5 rounded">custom</span>
                 )}
