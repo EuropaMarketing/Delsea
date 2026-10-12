@@ -21,7 +21,7 @@ import { Badge, statusBadgeVariant } from '@/components/ui/Badge'
 import { Input, Textarea } from '@/components/ui/Input'
 import { cn } from '@/lib/cn'
 import { formatCurrency, formatDuration } from '@/lib/currency'
-import type { Booking, Staff, Service, Customer, Resource, Availability } from '@/types'
+import type { Booking, Staff, Service, Customer, Resource, Availability, StaffShiftOverride } from '@/types'
 
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 const HOUR_HEIGHT = 60
@@ -168,6 +168,7 @@ export default function AdminCalendar() {
   const [loading, setLoading] = useState(true)
   const [ratings, setRatings] = useState<Record<string, { avg: number; count: number }>>({})
   const [availability, setAvailability] = useState<Availability[]>([])
+  const [shiftOverrides, setShiftOverrides] = useState<StaffShiftOverride[]>([])
   const authStaffId = useAuthStore(s => s.staffId)
 
   // Staff view filter + roster panel. "scheduled" is the default — only staff on
@@ -419,7 +420,7 @@ export default function AdminCalendar() {
       const dayStart = rangeStart.toISOString()
       const dayEnd = rangeEnd.toISOString()
 
-      const [staffRes, bookRes, svcRes, blockRes, resRes, equipRes, sessRes, hiddenRes] = await Promise.all([
+      const [staffRes, bookRes, svcRes, blockRes, resRes, equipRes, sessRes, hiddenRes, shiftOverrideRes] = await Promise.all([
         supabase.from('staff').select('*').eq('business_id', BUSINESS_ID).order('name'),
         supabase
           .from('bookings')
@@ -446,6 +447,11 @@ export default function AdminCalendar() {
           .lte('event_date', format(rangeEnd, 'yyyy-MM-dd')),
         // Group-session services live only on the Contrast Calendar, never here
         supabase.from('services').select('id').eq('business_id', BUSINESS_ID).eq('is_group_session', true),
+        supabase
+          .from('staff_shift_overrides')
+          .select('id, staff_id, date, start_time, end_time, reason')
+          .gte('date', format(rangeStart, 'yyyy-MM-dd'))
+          .lte('date', format(rangeEnd, 'yyyy-MM-dd')),
       ])
       const hiddenIds = new Set((hiddenRes.data ?? []).map(r => r.id))
       if (staffRes.data) setStaff(staffRes.data as Staff[])
@@ -460,6 +466,7 @@ export default function AdminCalendar() {
       if (resRes.data) setResources(resRes.data as Resource[])
       if (equipRes.data) setEquipmentResources(equipRes.data as Resource[])
       if (sessRes.data) setSessions((sessRes.data as unknown as SessionRow[]).filter(s => !hiddenIds.has(s.service_id)))
+      if (shiftOverrideRes.data) setShiftOverrides(shiftOverrideRes.data as StaffShiftOverride[])
       setLoading(false)
     }
     load()
@@ -857,6 +864,10 @@ export default function AdminCalendar() {
   // A staff member's effective working window for a given day: their normal weekly
   // availability, narrowed by any is_shift_adjustment blocks (e.g. an early finish)
   // for that specific day — without ever touching the underlying availability row.
+  // A staff_shift_overrides row, if present, takes over as the authoritative
+  // displayed hours for that date — it can widen past the normal window (e.g. a
+  // late-running private booking) since it's admin-display-only and never feeds
+  // into the public booking page's slot generation.
   function getStaffDayStatus(member: Staff, day: Date):
     | { kind: 'holiday' }
     | { kind: 'not_scheduled' }
@@ -872,6 +883,13 @@ export default function AdminCalendar() {
     let end = originalEnd
     let adjusted = false
     const dayStr = format(day, 'yyyy-MM-dd')
+    const override = shiftOverrides.find(o => o.staff_id === member.id && o.date === dayStr)
+    if (override) {
+      const oStart = override.start_time.slice(0, 5)
+      const oEnd = override.end_time.slice(0, 5)
+      if (oStart >= oEnd) return { kind: 'day_off', originalStart, originalEnd }
+      return { kind: 'scheduled', start: oStart, end: oEnd, adjusted: true }
+    }
     for (const bt of blockedTimes) {
       if (bt.staff_id !== member.id || !bt.is_shift_adjustment) continue
       if (format(parseISO(bt.starts_at), 'yyyy-MM-dd') !== dayStr) continue
@@ -929,10 +947,6 @@ export default function AdminCalendar() {
     const originalStart = avail.start_time.slice(0, 5)
     const originalEnd = avail.end_time.slice(0, 5)
     if (shiftStart >= shiftEnd) { setShiftError('Start must be before finish.'); return }
-    if (shiftStart < originalStart || shiftEnd > originalEnd) {
-      setShiftError(`Adjusted hours must fall within their normal shift (${originalStart}–${originalEnd}).`)
-      return
-    }
     setShiftSaving(true)
     setShiftError('')
     const dayStr = format(selectedDay, 'yyyy-MM-dd')
@@ -945,19 +959,24 @@ export default function AdminCalendar() {
       await supabase.from('blocked_times').delete().in('id', existing.map(bt => bt.id))
     }
 
+    // Narrowing within the normal shift still blocks the public booking page the
+    // old way (via blocked_times), unchanged — clamped so a widened start/end
+    // doesn't accidentally try to "narrow" into hours outside the normal window.
+    const clampedStart = shiftStart < originalStart ? originalStart : shiftStart > originalEnd ? originalEnd : shiftStart
+    const clampedEnd = shiftEnd < originalStart ? originalStart : shiftEnd > originalEnd ? originalEnd : shiftEnd
     const rows: Array<{ staff_id: string; starts_at: string; ends_at: string; reason: string | null; is_shift_adjustment: boolean }> = []
-    if (shiftStart > originalStart) {
+    if (clampedStart > originalStart) {
       rows.push({
         staff_id: shiftAdjustFor.id,
         starts_at: new Date(`${dayStr}T${originalStart}:00`).toISOString(),
-        ends_at: new Date(`${dayStr}T${shiftStart}:00`).toISOString(),
+        ends_at: new Date(`${dayStr}T${clampedStart}:00`).toISOString(),
         reason: shiftReason.trim() || 'Shift adjusted', is_shift_adjustment: true,
       })
     }
-    if (shiftEnd < originalEnd) {
+    if (clampedEnd < originalEnd) {
       rows.push({
         staff_id: shiftAdjustFor.id,
-        starts_at: new Date(`${dayStr}T${shiftEnd}:00`).toISOString(),
+        starts_at: new Date(`${dayStr}T${clampedEnd}:00`).toISOString(),
         ends_at: new Date(`${dayStr}T${originalEnd}:00`).toISOString(),
         reason: shiftReason.trim() || 'Shift adjusted', is_shift_adjustment: true,
       })
@@ -974,6 +993,28 @@ export default function AdminCalendar() {
     }
     const existingIds = new Set(existing.map(bt => bt.id))
     setBlockedTimes(prev => [...prev.filter(bt => !existingIds.has(bt.id)), ...inserted])
+
+    // The admin-display override — authoritative for the staff-hours badge, and
+    // the only thing that can show hours past the normal shift window. Only
+    // needed when the chosen hours actually differ from the normal shift;
+    // otherwise clear any prior override so the badge reverts to "not adjusted".
+    const existingOverride = shiftOverrides.find(o => o.staff_id === shiftAdjustFor.id && o.date === dayStr)
+    if (shiftStart === originalStart && shiftEnd === originalEnd) {
+      if (existingOverride) {
+        await supabase.from('staff_shift_overrides').delete().eq('id', existingOverride.id)
+        setShiftOverrides(prev => prev.filter(o => o.id !== existingOverride.id))
+      }
+    } else {
+      const payload = { staff_id: shiftAdjustFor.id, date: dayStr, start_time: shiftStart, end_time: shiftEnd, reason: shiftReason.trim() || null }
+      const { data, error } = await supabase
+        .from('staff_shift_overrides')
+        .upsert(payload, { onConflict: 'staff_id,date' })
+        .select('id, staff_id, date, start_time, end_time, reason')
+        .single()
+      if (error) { setShiftError(error.message); setShiftSaving(false); return }
+      setShiftOverrides(prev => [...prev.filter(o => o.id !== data.id), data as StaffShiftOverride])
+    }
+
     setShiftAdjustFor(null)
     setShiftSaving(false)
   }
@@ -992,6 +1033,11 @@ export default function AdminCalendar() {
     const existing = existingAdjustmentBlocks(shiftAdjustFor.id, selectedDay)
     if (existing.length) {
       await supabase.from('blocked_times').delete().in('id', existing.map(bt => bt.id))
+    }
+    const existingOverride = shiftOverrides.find(o => o.staff_id === shiftAdjustFor.id && o.date === dayStr)
+    if (existingOverride) {
+      await supabase.from('staff_shift_overrides').delete().eq('id', existingOverride.id)
+      setShiftOverrides(prev => prev.filter(o => o.id !== existingOverride.id))
     }
 
     const { data, error } = await supabase

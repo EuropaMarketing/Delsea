@@ -103,6 +103,17 @@ export interface Availability {
   end_time: string
 }
 
+// Per-date override of a staff member's displayed/tracked hours — admin-only,
+// unbounded by the normal weekly availability row (see migration 071).
+export interface StaffShiftOverride {
+  id: string
+  staff_id: string
+  date: string
+  start_time: string
+  end_time: string
+  reason: string | null
+}
+
 export interface Booking {
   id: string
   business_id: string
