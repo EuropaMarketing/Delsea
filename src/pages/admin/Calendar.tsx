@@ -711,6 +711,7 @@ export default function AdminCalendar() {
     startsAt: Date,
     endsAt: Date,
     excludeBookingId?: string,
+    isGroupSession = false,
   ): Promise<{ resourceId: string | null; conflict: boolean }> {
     const { data: priorityRows } = await supabase
       .from('service_resources')
@@ -724,6 +725,12 @@ export default function AdminCalendar() {
           return svc?.resource_id ? [svc.resource_id] : []
         })()
     if (!candidateIds.length) return { resourceId: null, conflict: false }
+
+    // A group session's whole point is multiple bookings sharing the same room
+    // concurrently (up to its capacity, already checked separately) — so the
+    // exclusive "is this resource free" check below doesn't apply here, it
+    // would just flag every attendee after the first as a false conflict.
+    if (isGroupSession) return { resourceId: candidateIds[0], conflict: false }
 
     for (const resourceId of candidateIds) {
       let query = supabase
@@ -1607,7 +1614,7 @@ export default function AdminCalendar() {
       }
     }
     let resolvedResourceId = editResourceId
-    if (editResourceId) {
+    if (editResourceId && !newService.is_group_session) {
       const { data: resourceConflicts } = await supabase
         .from('bookings')
         .select('id')
@@ -1621,8 +1628,8 @@ export default function AdminCalendar() {
         setEditError('That resource is already booked at this time. Choose a different resource or time.')
         return
       }
-    } else {
-      const { resourceId } = await resolveResourceForBooking(editServiceId, startsAt, endsAt, selectedBooking.id)
+    } else if (!editResourceId) {
+      const { resourceId } = await resolveResourceForBooking(editServiceId, startsAt, endsAt, selectedBooking.id, newService.is_group_session)
       resolvedResourceId = resourceId
     }
     setEditSaving(true)
@@ -1926,7 +1933,7 @@ export default function AdminCalendar() {
             continue
           }
         }
-        const { resourceId, conflict: resourceConflict } = await resolveResourceForBooking(nbServiceId, occStart, occEnd)
+        const { resourceId, conflict: resourceConflict } = await resolveResourceForBooking(nbServiceId, occStart, occEnd, undefined, service.is_group_session)
         if (resourceConflict) {
           skipped.push(format(occStart, 'EEE d MMM yyyy, HH:mm'))
           continue
