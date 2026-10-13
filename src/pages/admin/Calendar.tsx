@@ -26,7 +26,7 @@ import type { Booking, Staff, Service, Customer, Resource, Availability, StaffSh
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 const HOUR_HEIGHT = 60
 const START_HOUR = 7
-const END_HOUR = 21
+const DEFAULT_END_HOUR = 21
 
 const SERVICE_COLORS = [
   '#7C3AED', '#DB2777', '#0891B2', '#059669', '#D97706', '#DC2626',
@@ -170,6 +170,25 @@ export default function AdminCalendar() {
   const [availability, setAvailability] = useState<Availability[]>([])
   const [shiftOverrides, setShiftOverrides] = useState<StaffShiftOverride[]>([])
   const authStaffId = useAuthStore(s => s.staffId)
+
+  // The grid normally only shows DEFAULT_END_HOUR (21:00), but a staff_shift_overrides
+  // row can now push a staff member's hours later than that (see migration 071) — so
+  // the grid has to grow to fit, or any booking actually scheduled that late renders
+  // broken (a negative-height sliver) instead of just being invisible.
+  const effectiveEndHour = useMemo(() => {
+    let maxHour = DEFAULT_END_HOUR
+    for (const b of bookings) {
+      const end = parseISO(b.ends_at)
+      const h = end.getHours() + (end.getMinutes() > 0 ? 1 : 0)
+      if (h > maxHour) maxHour = h
+    }
+    for (const o of shiftOverrides) {
+      const [h, m] = o.end_time.split(':').map(Number)
+      const rounded = h + (m > 0 ? 1 : 0)
+      if (rounded > maxHour) maxHour = rounded
+    }
+    return Math.min(maxHour, 24)
+  }, [bookings, shiftOverrides])
 
   // Staff view filter + roster panel. "scheduled" is the default — only staff on
   // shift the selected day get a column, so columns change as you flick between days.
@@ -484,7 +503,7 @@ export default function AdminCalendar() {
         const booking = bookings.find(b => b.id === prev.bookingId)
         const startBase = booking ? parseISO(booking.starts_at) : originalEnd
         const minEnd = addMinutes(startBase, 15)
-        const maxEnd = setMinutes(setHours(startBase, END_HOUR), 0)
+        const maxEnd = setMinutes(setHours(startBase, effectiveEndHour), 0)
         let newEnd = addMinutes(originalEnd, deltaMinutes)
         if (newEnd < minEnd) newEnd = minEnd
         if (newEnd > maxEnd) newEnd = maxEnd
@@ -611,10 +630,10 @@ export default function AdminCalendar() {
 
   function positionBlock(startsAt: string, endsAt: string, refDay: Date = selectedDay) {
     const dayFloor = setMinutes(setHours(refDay, START_HOUR), 0)
-    const dayCeil = setMinutes(setHours(refDay, END_HOUR), 0)
+    const dayCeil = setMinutes(setHours(refDay, effectiveEndHour), 0)
     const start = parseISO(startsAt)
     const end = parseISO(endsAt)
-    const clampedStart = start < dayFloor ? dayFloor : start
+    const clampedStart = start < dayFloor ? dayFloor : start > dayCeil ? dayCeil : start
     const clampedEnd = end > dayCeil ? dayCeil : end
     const top = (differenceInMinutes(clampedStart, dayFloor) / 60) * HOUR_HEIGHT
     const height = Math.max((differenceInMinutes(clampedEnd, clampedStart) / 60) * HOUR_HEIGHT, 20)
@@ -915,7 +934,7 @@ export default function AdminCalendar() {
   function timeToTop(timeStr: string): number {
     const [h, m] = timeStr.split(':').map(Number)
     const raw = (h - START_HOUR) * HOUR_HEIGHT + (m / 60) * HOUR_HEIGHT
-    return Math.max(0, Math.min(raw, HOUR_HEIGHT * (END_HOUR - START_HOUR)))
+    return Math.max(0, Math.min(raw, HOUR_HEIGHT * (effectiveEndHour - START_HOUR)))
   }
 
   function openShiftAdjust(member: Staff) {
@@ -1073,7 +1092,7 @@ export default function AdminCalendar() {
     const y = e.clientY - rect.top
     const totalMinutes = START_HOUR * 60 + (y / HOUR_HEIGHT) * 60
     const snapped = Math.round(totalMinutes / 15) * 15
-    const h = Math.min(Math.floor(snapped / 60), END_HOUR - 1)
+    const h = Math.min(Math.floor(snapped / 60), effectiveEndHour - 1)
     const m = snapped % 60
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
   }
@@ -1122,7 +1141,7 @@ export default function AdminCalendar() {
     const y = e.clientY - rect.top
     const totalMinutes = START_HOUR * 60 + (y / HOUR_HEIGHT) * 60
     const snapped = Math.round(totalMinutes / 15) * 15
-    const maxStart = Math.max(END_HOUR * 60 - durationMinutes, START_HOUR * 60)
+    const maxStart = Math.max(effectiveEndHour * 60 - durationMinutes, START_HOUR * 60)
     const clamped = Math.min(Math.max(snapped, START_HOUR * 60), maxStart)
     const h = Math.floor(clamped / 60), m = clamped % 60
     const newStart = setMinutes(setHours(startOfDay(targetDate), h), m)
@@ -2030,10 +2049,10 @@ export default function AdminCalendar() {
 
   if (loading) return <FullPageSpinner />
 
-  const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR + i)
+  const hours = Array.from({ length: effectiveEndHour - START_HOUR }, (_, i) => START_HOUR + i)
   const todaySelected = isToday(selectedDay)
   const timeLineTop =
-    todaySelected && now.getHours() >= START_HOUR && now.getHours() < END_HOUR
+    todaySelected && now.getHours() >= START_HOUR && now.getHours() < effectiveEndHour
       ? ((now.getHours() - START_HOUR) * 60 + now.getMinutes()) / 60 * HOUR_HEIGHT
       : null
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(selectedDay, { weekStartsOn: 1 }), i))
@@ -2267,7 +2286,7 @@ export default function AdminCalendar() {
         </div>
 
         {/* Time grid */}
-        <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: `${HOUR_HEIGHT * (END_HOUR - START_HOUR)}px` }}>
+        <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: `${HOUR_HEIGHT * (effectiveEndHour - START_HOUR)}px` }}>
           <div className="relative grid" style={{ gridTemplateColumns: `56px repeat(${visibleStaff.length + (resolvedStaffFilterId ? 0 : 1)}, minmax(140px, 1fr))` }}>
             {/* Hour labels */}
             <div className="border-r border-gray-100">
@@ -2286,7 +2305,7 @@ export default function AdminCalendar() {
                 <div
                   key={member.id}
                   className={cn('relative border-r border-gray-100', member.on_holiday ? 'cursor-not-allowed' : 'cursor-crosshair')}
-                  style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
+                  style={{ height: HOUR_HEIGHT * (effectiveEndHour - START_HOUR) }}
                   onClick={e => handleCellClick(e, member.id, selectedDay)}
                   onDragOver={e => !member.on_holiday && handleDragOverCell(e)}
                   onDrop={e => !member.on_holiday && handleDropBooking(e, selectedDay, member.id)}
@@ -2327,7 +2346,7 @@ export default function AdminCalendar() {
                           <p className="text-xs text-gray-400 font-medium">Starts {dayStatus.start}</p>
                         </div>
                       )}
-                      {timeToTop(dayStatus.end) < HOUR_HEIGHT * (END_HOUR - START_HOUR) && (
+                      {timeToTop(dayStatus.end) < HOUR_HEIGHT * (effectiveEndHour - START_HOUR) && (
                         <div
                           className="absolute left-0 right-0 bottom-0 z-[5] flex items-start justify-center pt-1"
                           style={{ top: timeToTop(dayStatus.end), backgroundColor: 'rgba(229,231,235,0.5)', backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 10px, rgba(107,114,128,0.08) 10px, rgba(107,114,128,0.08) 20px)' }}
@@ -2442,7 +2461,7 @@ export default function AdminCalendar() {
             {!resolvedStaffFilterId && (
             <div
               className="relative border-gray-100 bg-gray-50/30 cursor-crosshair"
-              style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
+              style={{ height: HOUR_HEIGHT * (effectiveEndHour - START_HOUR) }}
               onClick={e => handleCellClick(e, null, selectedDay, true)}
               onDragOver={handleDragOverCell}
               onDrop={e => handleDropBooking(e, selectedDay, null)}
@@ -2537,7 +2556,7 @@ export default function AdminCalendar() {
         </div>
 
         {/* Time grid */}
-        <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: `${HOUR_HEIGHT * (END_HOUR - START_HOUR)}px` }}>
+        <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: `${HOUR_HEIGHT * (effectiveEndHour - START_HOUR)}px` }}>
           <div className="relative grid" style={{ gridTemplateColumns: `56px repeat(7, minmax(140px, 1fr))` }}>
             {/* Hour labels */}
             <div className="border-r border-gray-100">
@@ -2558,7 +2577,7 @@ export default function AdminCalendar() {
                 <div
                   key={day.toISOString()}
                   className="relative border-r border-gray-100 cursor-crosshair"
-                  style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
+                  style={{ height: HOUR_HEIGHT * (effectiveEndHour - START_HOUR) }}
                   onClick={e => handleCellClick(e, null, day)}
                   onDragOver={handleDragOverCell}
                   onDrop={e => handleDropBooking(e, day)}

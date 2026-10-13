@@ -26,7 +26,7 @@ import type { Booking, Staff, Service, Customer, Resource, Availability } from '
 const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID as string
 const HOUR_HEIGHT = 60
 const START_HOUR = 7
-const END_HOUR = 21
+const DEFAULT_END_HOUR = 21
 
 const SERVICE_COLORS = [
   '#7C3AED', '#DB2777', '#0891B2', '#059669', '#D97706', '#DC2626',
@@ -189,6 +189,17 @@ export default function AdminContrastCalendar() {
   const [selectedDay, setSelectedDay] = useState(new Date())
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week')
   const [bookings, setBookings] = useState<RichBooking[]>([])
+  // The grid normally only shows DEFAULT_END_HOUR (21:00) — grow it when a real
+  // booking runs later than that, so it doesn't render as a broken sliver.
+  const effectiveEndHour = useMemo(() => {
+    let maxHour = DEFAULT_END_HOUR
+    for (const b of bookings) {
+      const end = parseISO(b.ends_at)
+      const h = end.getHours() + (end.getMinutes() > 0 ? 1 : 0)
+      if (h > maxHour) maxHour = h
+    }
+    return Math.min(maxHour, 24)
+  }, [bookings])
   const [blockedTimes, setBlockedTimes] = useState<BlockedTime[]>([])
   const [sessions, setSessions] = useState<SessionRow[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
@@ -509,7 +520,7 @@ export default function AdminContrastCalendar() {
         const booking = bookings.find(b => b.id === prev.bookingId)
         const startBase = booking ? parseISO(booking.starts_at) : originalEnd
         const minEnd = addMinutes(startBase, 15)
-        const maxEnd = setMinutes(setHours(startBase, END_HOUR), 0)
+        const maxEnd = setMinutes(setHours(startBase, effectiveEndHour), 0)
         let newEnd = addMinutes(originalEnd, deltaMinutes)
         if (newEnd < minEnd) newEnd = minEnd
         if (newEnd > maxEnd) newEnd = maxEnd
@@ -638,10 +649,10 @@ export default function AdminContrastCalendar() {
 
   function positionBlock(startsAt: string, endsAt: string, refDay: Date = selectedDay) {
     const dayFloor = setMinutes(setHours(refDay, START_HOUR), 0)
-    const dayCeil = setMinutes(setHours(refDay, END_HOUR), 0)
+    const dayCeil = setMinutes(setHours(refDay, effectiveEndHour), 0)
     const start = parseISO(startsAt)
     const end = parseISO(endsAt)
-    const clampedStart = start < dayFloor ? dayFloor : start
+    const clampedStart = start < dayFloor ? dayFloor : start > dayCeil ? dayCeil : start
     const clampedEnd = end > dayCeil ? dayCeil : end
     const top = (differenceInMinutes(clampedStart, dayFloor) / 60) * HOUR_HEIGHT
     const height = Math.max((differenceInMinutes(clampedEnd, clampedStart) / 60) * HOUR_HEIGHT, 20)
@@ -1026,7 +1037,7 @@ export default function AdminContrastCalendar() {
     const y = e.clientY - rect.top
     const totalMinutes = START_HOUR * 60 + (y / HOUR_HEIGHT) * 60
     const snapped = Math.round(totalMinutes / 15) * 15
-    const h = Math.min(Math.floor(snapped / 60), END_HOUR - 1)
+    const h = Math.min(Math.floor(snapped / 60), effectiveEndHour - 1)
     const m = snapped % 60
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
   }
@@ -1075,7 +1086,7 @@ export default function AdminContrastCalendar() {
     const y = e.clientY - rect.top
     const totalMinutes = START_HOUR * 60 + (y / HOUR_HEIGHT) * 60
     const snapped = Math.round(totalMinutes / 15) * 15
-    const maxStart = Math.max(END_HOUR * 60 - durationMinutes, START_HOUR * 60)
+    const maxStart = Math.max(effectiveEndHour * 60 - durationMinutes, START_HOUR * 60)
     const clamped = Math.min(Math.max(snapped, START_HOUR * 60), maxStart)
     const h = Math.floor(clamped / 60), m = clamped % 60
     const newStart = setMinutes(setHours(startOfDay(targetDate), h), m)
@@ -2049,7 +2060,7 @@ export default function AdminContrastCalendar() {
     )
   }
 
-  const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR + i)
+  const hours = Array.from({ length: effectiveEndHour - START_HOUR }, (_, i) => START_HOUR + i)
   const todaySelected = isToday(selectedDay)
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(selectedDay, { weekStartsOn: 1 }), i))
 
@@ -2159,7 +2170,7 @@ export default function AdminContrastCalendar() {
         </div>
 
         {/* Time grid */}
-        <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: `${HOUR_HEIGHT * (END_HOUR - START_HOUR)}px` }}>
+        <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: `${HOUR_HEIGHT * (effectiveEndHour - START_HOUR)}px` }}>
           <div className="relative grid" style={{ gridTemplateColumns: `56px repeat(7, minmax(140px, 1fr))` }}>
             {/* Hour labels */}
             <div className="border-r border-gray-100">
@@ -2188,7 +2199,7 @@ export default function AdminContrastCalendar() {
                 <div
                   key={day.toISOString()}
                   className="relative border-r border-gray-100 cursor-crosshair"
-                  style={{ height: HOUR_HEIGHT * (END_HOUR - START_HOUR) }}
+                  style={{ height: HOUR_HEIGHT * (effectiveEndHour - START_HOUR) }}
                   onClick={e => handleCellClick(e, null, day)}
                   onDragOver={handleDragOverCell}
                   onDrop={e => handleDropBooking(e, day)}
